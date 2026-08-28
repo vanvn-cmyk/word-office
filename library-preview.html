@@ -1,0 +1,2086 @@
+<title>Tủ hồ sơ preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Inter+Tight:wght@600;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --page-bg: #F5F6F8;
+  --page-bg-wash: radial-gradient(ellipse 1000px 500px at 15% -5%, rgba(50, 103, 227, 0.06), transparent 60%),
+                  radial-gradient(ellipse 800px 400px at 90% 20%, rgba(214, 60, 53, 0.03), transparent 60%);
+  --page-fg: #0E1013;
+  --page-muted: #5D636D;
+  --page-accent: #3267E3;
+  --page-border: #DEE1E7;
+  --page-card: #FFFFFF;
+  --page-eyebrow: #6D7480;
+  --bezel: #17191D;
+  --bezel-highlight: #2C3038;
+
+  /* LIGHT tokens */
+  --l-brand: #3267E3;
+  --l-brand-pressed: #2858C9;
+  --l-brand-subtle: #F2F6FF;
+  --l-brand-border: #C7D7FF;
+  --l-brand-text: #2858C9;
+  --l-bg-primary: #FFFFFF;
+  --l-bg-secondary: #F5F7FA;
+  --l-bg-tertiary: #EEF1F5;
+  --l-surface: #FFFFFF;
+  --l-surface-secondary: #F5F7FA;
+  --l-text-primary: #0E1013;
+  --l-text-secondary: #5D636D;
+  --l-text-tertiary: #8A909A;
+  --l-text-on-brand: #FFFFFF;
+  --l-border-subtle: #ECEEF1;
+  --l-border-hairline: rgba(14, 16, 19, 0.06);
+  --l-status-warn: #A75D00;
+  --l-status-warn-bg: #FFF6E8;
+  --l-status-warn-border: #F2D09B;
+  --l-status-warn-strong: #C67200;
+  --l-status-success: #218739;
+  --l-status-success-bg: #EDF8EF;
+  --l-doc-word: #2F64D6;
+  --l-doc-spreadsheet: #18864B;
+  --l-doc-presentation: #D86724;
+  --l-doc-pdf: #D63C35;
+  --l-doc-generic: #68707C;
+
+  /* DARK tokens */
+  --d-brand: #5B8CFF;
+  --d-brand-subtle: #172544;
+  --d-brand-border: #35528C;
+  --d-brand-text: #A2BEFF;
+  --d-bg-primary: #0D0F12;
+  --d-bg-secondary: #16191E;
+  --d-bg-tertiary: #1D2127;
+  --d-surface: #16191E;
+  --d-surface-secondary: #1E2229;
+  --d-text-primary: #F5F6F7;
+  --d-text-secondary: #B8BDC5;
+  --d-text-tertiary: #7A808A;
+  --d-text-on-brand: #081226;
+  --d-border-subtle: #262A31;
+  --d-border-hairline: rgba(255, 255, 255, 0.06);
+  --d-status-warn: #FFB44A;
+  --d-status-warn-bg: rgba(255, 180, 74, 0.14);
+  --d-status-warn-border: #75501C;
+  --d-status-warn-strong: #FFC670;
+  --d-doc-word: #6392FF;
+  --d-doc-spreadsheet: #4BC67A;
+  --d-doc-pdf: #FF706A;
+  --d-doc-generic: #9CA2AC;
+
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  --font-display: "Inter Tight", "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page-bg: #08090B;
+    --page-bg-wash: radial-gradient(ellipse 1000px 500px at 15% -5%, rgba(91, 140, 255, 0.08), transparent 60%),
+                    radial-gradient(ellipse 800px 400px at 90% 20%, rgba(255, 112, 106, 0.04), transparent 60%);
+    --page-fg: #F5F6F7;
+    --page-muted: #B8BDC5;
+    --page-accent: #5B8CFF;
+    --page-border: #262A31;
+    --page-card: #14171C;
+    --page-eyebrow: #7A808A;
+    --bezel: #000;
+    --bezel-highlight: #2A2E36;
+  }
+}
+:root[data-theme="dark"] {
+  --page-bg: #08090B;
+  --page-bg-wash: radial-gradient(ellipse 1000px 500px at 15% -5%, rgba(91, 140, 255, 0.08), transparent 60%),
+                  radial-gradient(ellipse 800px 400px at 90% 20%, rgba(255, 112, 106, 0.04), transparent 60%);
+  --page-fg: #F5F6F7;
+  --page-muted: #B8BDC5;
+  --page-accent: #5B8CFF;
+  --page-border: #262A31;
+  --page-card: #14171C;
+  --page-eyebrow: #7A808A;
+  --bezel: #000;
+  --bezel-highlight: #2A2E36;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: var(--page-bg);
+  background-image: var(--page-bg-wash);
+  background-attachment: fixed;
+  color: var(--page-fg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.5;
+  font-feature-settings: "ss01", "cv11";
+}
+
+.page {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: clamp(32px, 5vw, 72px) clamp(20px, 4vw, 48px) 120px;
+}
+
+.page-head {
+  padding-bottom: 40px;
+  margin-bottom: 56px;
+  border-bottom: 1px solid var(--page-border);
+}
+
+.eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--page-accent);
+  margin: 0 0 20px;
+}
+
+.page-head h1 {
+  font-family: var(--font-display);
+  font-size: clamp(40px, 5.5vw, 60px);
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 1.02;
+  margin: 0 0 20px;
+  text-wrap: balance;
+  background: linear-gradient(180deg, var(--page-fg) 60%, color-mix(in oklab, var(--page-fg) 60%, transparent) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.page-head p {
+  font-size: 17px;
+  color: var(--page-muted);
+  max-width: 68ch;
+  margin: 0;
+  line-height: 1.55;
+}
+
+.meta-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 32px;
+}
+
+.meta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--page-card);
+  border: 1px solid var(--page-border);
+  font-size: 13px;
+  color: var(--page-fg);
+  font-weight: 500;
+}
+
+.meta-chip strong {
+  color: var(--page-accent);
+  font-weight: 600;
+}
+
+.meta-chip .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--page-accent);
+}
+
+.section { margin-bottom: 88px; }
+
+.section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 20px;
+  margin-bottom: 36px;
+  flex-wrap: wrap;
+}
+
+.section-head .section-num {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--page-accent);
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--page-accent) 12%, transparent);
+}
+
+.section-head h2 {
+  font-family: var(--font-display);
+  font-size: clamp(24px, 2.6vw, 30px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0;
+  line-height: 1.1;
+}
+
+.section-head .lede {
+  flex-basis: 100%;
+  font-size: 15px;
+  color: var(--page-muted);
+  margin: 0;
+  max-width: 68ch;
+  line-height: 1.55;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 48px 40px;
+  justify-items: center;
+}
+
+.frame-caption {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.frame-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--page-fg);
+  text-align: center;
+  letter-spacing: -0.01em;
+}
+
+.frame-note {
+  font-size: 12.5px;
+  color: var(--page-muted);
+  text-align: center;
+  max-width: 340px;
+  line-height: 1.5;
+}
+
+.frame-note code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--page-fg) 6%, transparent);
+  color: var(--page-fg);
+}
+
+/* iPhone frame */
+.phone {
+  width: 360px;
+  height: 748px;
+  background: var(--bezel);
+  border-radius: 52px;
+  padding: 11px;
+  position: relative;
+  box-shadow:
+    0 0 0 1.5px var(--bezel-highlight),
+    inset 0 0 0 1px rgba(255,255,255,0.04),
+    0 40px 70px -30px rgba(15, 20, 30, 0.4),
+    0 12px 30px -12px rgba(15, 20, 30, 0.25);
+}
+
+.phone-screen {
+  width: 100%;
+  height: 100%;
+  border-radius: 42px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  font-size: 14px;
+}
+
+.phone[data-theme="light"] .phone-screen { background: var(--l-bg-primary); color: var(--l-text-primary); }
+.phone[data-theme="dark"] .phone-screen { background: var(--d-bg-primary); color: var(--d-text-primary); }
+
+.status-bar {
+  height: 50px;
+  padding: 18px 30px 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-bar-right { display: flex; gap: 6px; align-items: center; }
+.status-bar svg { display: block; }
+.phone[data-theme="light"] .status-bar { color: var(--l-text-primary); }
+.phone[data-theme="dark"] .status-bar { color: var(--d-text-primary); }
+
+.island {
+  position: absolute;
+  top: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 118px;
+  height: 34px;
+  background: #000;
+  border-radius: 17px;
+  z-index: 10;
+}
+
+.home-bar {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 124px;
+  height: 5px;
+  border-radius: 3px;
+  z-index: 10;
+}
+
+.phone[data-theme="light"] .home-bar { background: rgba(14, 16, 19, 0.85); }
+.phone[data-theme="dark"] .home-bar { background: rgba(245, 246, 247, 0.6); }
+
+.content {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* -------------------- ONBOARDING -------------------- */
+.onboarding {
+  padding: 32px 28px 40px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 18px;
+}
+
+.onboard-hero-wrap {
+  align-self: center;
+  position: relative;
+  margin: 24px 0 8px;
+}
+
+.onboard-hero {
+  width: 112px;
+  height: 112px;
+  border-radius: 32px;
+  display: grid;
+  place-items: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.phone[data-theme="light"] .onboard-hero {
+  background: linear-gradient(135deg, #4B7EEF 0%, #2858C9 100%);
+  box-shadow: 0 20px 40px -12px rgba(50, 103, 227, 0.4);
+  color: white;
+}
+.phone[data-theme="dark"] .onboard-hero {
+  background: linear-gradient(135deg, #5B8CFF 0%, #2858C9 100%);
+  box-shadow: 0 20px 40px -12px rgba(91, 140, 255, 0.45);
+  color: white;
+}
+
+.onboard-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 30% 20%, rgba(255,255,255,0.25), transparent 55%);
+}
+
+.onboard-glow {
+  position: absolute;
+  inset: -30px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(50, 103, 227, 0.15), transparent 60%);
+  z-index: -1;
+  filter: blur(20px);
+}
+
+.phone[data-theme="dark"] .onboard-glow {
+  background: radial-gradient(circle, rgba(91, 140, 255, 0.25), transparent 60%);
+}
+
+.onboard-title {
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  text-align: center;
+  margin: 8px 0 4px;
+  text-wrap: balance;
+  line-height: 1.1;
+}
+
+.onboard-lede {
+  font-size: 15.5px;
+  text-align: center;
+  margin: 0;
+  line-height: 1.5;
+  max-width: 260px;
+  align-self: center;
+}
+
+.phone[data-theme="light"] .onboard-lede { color: var(--l-text-secondary); }
+.phone[data-theme="dark"] .onboard-lede { color: var(--d-text-secondary); }
+
+.feature-list {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.feature-item {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  font-size: 14.5px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  line-height: 1.35;
+}
+
+.phone[data-theme="light"] .feature-item {
+  background: var(--l-bg-secondary);
+  color: var(--l-text-primary);
+}
+.phone[data-theme="dark"] .feature-item {
+  background: var(--d-bg-secondary);
+  color: var(--d-text-primary);
+}
+
+.feature-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.phone[data-theme="light"] .feature-icon {
+  background: var(--l-brand-subtle);
+  color: var(--l-brand);
+}
+.phone[data-theme="dark"] .feature-icon {
+  background: var(--d-brand-subtle);
+  color: var(--d-brand);
+}
+
+.primary-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 56px;
+  border: none;
+  border-radius: 16px;
+  font-family: inherit;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+
+.primary-btn:hover { transform: translateY(-1px); }
+
+.phone[data-theme="light"] .primary-btn {
+  background: linear-gradient(180deg, #3E75E8, var(--l-brand));
+  color: var(--l-text-on-brand);
+  box-shadow: 0 10px 24px -8px rgba(50, 103, 227, 0.5), inset 0 1px 0 rgba(255,255,255,0.2);
+}
+.phone[data-theme="dark"] .primary-btn {
+  background: linear-gradient(180deg, #6A98FF, var(--d-brand));
+  color: var(--d-text-on-brand);
+  box-shadow: 0 10px 24px -8px rgba(91, 140, 255, 0.5), inset 0 1px 0 rgba(255,255,255,0.2);
+}
+
+.secondary-btn {
+  display: block;
+  width: 100%;
+  height: 50px;
+  border-radius: 14px;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  background: transparent;
+  cursor: pointer;
+}
+
+.phone[data-theme="light"] .secondary-btn {
+  color: var(--l-brand-text);
+  background: var(--l-brand-subtle);
+  border: none;
+}
+.phone[data-theme="dark"] .secondary-btn {
+  color: var(--d-brand-text);
+  background: var(--d-brand-subtle);
+  border: none;
+}
+
+/* -------------------- LIBRARY VIEW -------------------- */
+.libraryview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.nav-bar {
+  padding: 8px 22px 4px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.nav-title-block .date-eyebrow {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  margin: 0 0 2px;
+  text-transform: none;
+}
+
+.phone[data-theme="light"] .date-eyebrow { color: var(--l-text-tertiary); }
+.phone[data-theme="dark"] .date-eyebrow { color: var(--d-text-tertiary); }
+
+.nav-title {
+  font-family: var(--font-display);
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  margin: 0;
+  line-height: 1.05;
+}
+
+.icon-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 22px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  margin: -4px;
+}
+
+.phone[data-theme="light"] .icon-btn { color: var(--l-brand); background: var(--l-bg-secondary); }
+.phone[data-theme="dark"] .icon-btn { color: var(--d-brand); background: var(--d-bg-secondary); }
+
+/* Draft hero — modernized with gradient + big number */
+.draft-hero {
+  margin: 20px 20px 24px;
+  padding: 20px;
+  border-radius: 20px;
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 18px;
+  align-items: center;
+}
+
+.phone[data-theme="light"] .draft-hero {
+  background: linear-gradient(135deg, #E8EFFF 0%, #F5F7FA 100%);
+}
+.phone[data-theme="dark"] .draft-hero {
+  background: linear-gradient(135deg, #1B2B4E 0%, #16191E 100%);
+}
+
+.draft-hero::before {
+  content: "";
+  position: absolute;
+  top: -30px;
+  right: -30px;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(50, 103, 227, 0.15), transparent 70%);
+}
+
+.phone[data-theme="dark"] .draft-hero::before {
+  background: radial-gradient(circle, rgba(91, 140, 255, 0.25), transparent 70%);
+}
+
+.draft-count {
+  font-family: var(--font-display);
+  font-size: 72px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.05em;
+  line-height: 0.9;
+  position: relative;
+  z-index: 1;
+}
+
+.phone[data-theme="light"] .draft-count { color: var(--l-brand); }
+.phone[data-theme="dark"] .draft-count { color: var(--d-brand); }
+
+.draft-label {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.draft-label b {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: -0.015em;
+}
+.phone[data-theme="light"] .draft-label b { color: var(--l-text-primary); }
+.phone[data-theme="dark"] .draft-label b { color: var(--d-text-primary); }
+
+.draft-label span {
+  font-size: 12.5px;
+  line-height: 1.35;
+}
+.phone[data-theme="light"] .draft-label span { color: var(--l-text-secondary); }
+.phone[data-theme="dark"] .draft-label span { color: var(--d-text-secondary); }
+
+/* Section headers — mixed case with icon, not uppercase */
+.section-title {
+  padding: 4px 22px 10px;
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-transform: none;
+}
+
+.section-title .count {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.6;
+  letter-spacing: -0.01em;
+}
+
+.phone[data-theme="light"] .section-title { color: var(--l-text-primary); }
+.phone[data-theme="dark"] .section-title { color: var(--d-text-primary); }
+
+.section-title.warn-title { }
+.phone[data-theme="light"] .section-title.warn-title { color: var(--l-status-warn-strong); }
+.phone[data-theme="dark"] .section-title.warn-title { color: var(--d-status-warn-strong); }
+
+/* Document list — grouped inset cards */
+.doc-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.doc-group {
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+.phone[data-theme="light"] .doc-group { background: var(--l-bg-secondary); }
+.phone[data-theme="dark"] .doc-group { background: var(--d-bg-secondary); }
+
+.doc-row {
+  padding: 14px 16px;
+  display: grid;
+  grid-template-columns: 44px 1fr auto;
+  align-items: center;
+  gap: 14px;
+  cursor: pointer;
+  position: relative;
+}
+
+.doc-row + .doc-row::before {
+  content: "";
+  position: absolute;
+  left: 74px;
+  right: 16px;
+  top: 0;
+  height: 1px;
+}
+
+.phone[data-theme="light"] .doc-row + .doc-row::before { background: var(--l-border-hairline); }
+.phone[data-theme="dark"] .doc-row + .doc-row::before { background: var(--d-border-hairline); }
+
+.doc-row.due {
+  position: relative;
+}
+
+.phone[data-theme="light"] .doc-row.due { background: linear-gradient(90deg, #FFF6E8 0%, transparent 80%); }
+.phone[data-theme="dark"] .doc-row.due { background: linear-gradient(90deg, rgba(255, 180, 74, 0.10) 0%, transparent 80%); }
+
+.due-dot {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.phone[data-theme="light"] .due-dot { background: var(--l-status-warn-strong); box-shadow: 0 0 0 4px rgba(198, 114, 0, 0.15); }
+.phone[data-theme="dark"] .due-dot { background: var(--d-status-warn); box-shadow: 0 0 0 4px rgba(255, 180, 74, 0.15); }
+
+.doc-row.due .doc-icon-wrap { margin-left: 4px; }
+
+.doc-icon-wrap {
+  position: relative;
+  width: 44px;
+  height: 44px;
+}
+
+.doc-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  font-family: var(--font-mono);
+  position: relative;
+  overflow: hidden;
+}
+
+.doc-icon::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,0.15) 0%, transparent 60%);
+}
+
+.doc-icon.word { background: var(--l-doc-word); }
+.doc-icon.xlsx { background: var(--l-doc-spreadsheet); }
+.doc-icon.pdf { background: var(--l-doc-pdf); }
+.doc-icon.ppt { background: var(--l-doc-presentation); }
+.doc-icon.gen { background: var(--l-doc-generic); }
+
+.phone[data-theme="dark"] .doc-icon.word { background: var(--d-doc-word); color: #0B1220; }
+.phone[data-theme="dark"] .doc-icon.xlsx { background: var(--d-doc-spreadsheet); color: #0E2216; }
+.phone[data-theme="dark"] .doc-icon.pdf { background: var(--d-doc-pdf); color: #2A0B0B; }
+.phone[data-theme="dark"] .doc-icon.gen { background: var(--d-doc-generic); color: #14171C; }
+
+.doc-main {
+  min-width: 0;
+}
+
+.doc-name {
+  font-family: var(--font-display);
+  font-size: 15.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+}
+
+.doc-sub {
+  margin-top: 5px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+
+.phone[data-theme="light"] .doc-sub { color: var(--l-text-tertiary); }
+.phone[data-theme="dark"] .doc-sub { color: var(--d-text-tertiary); }
+
+.doc-sub .dot { opacity: 0.5; }
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  line-height: 1.3;
+}
+
+.phone[data-theme="light"] .badge.draft {
+  color: var(--l-brand-text);
+  background: var(--l-brand-subtle);
+}
+.phone[data-theme="dark"] .badge.draft {
+  color: var(--d-brand-text);
+  background: var(--d-brand-subtle);
+}
+
+.badge.reviewed {
+  color: var(--l-status-success);
+  background: var(--l-status-success-bg);
+}
+.phone[data-theme="dark"] .badge.reviewed {
+  color: #6ED989;
+  background: rgba(75, 209, 102, 0.15);
+}
+
+.badge.signed {
+  color: #7654C6;
+  background: rgba(118, 84, 198, 0.12);
+}
+.phone[data-theme="dark"] .badge.signed {
+  color: #B399FF;
+  background: rgba(168, 139, 255, 0.16);
+}
+
+.badge.reminder {
+  color: var(--l-status-warn-strong);
+  background: var(--l-status-warn-bg);
+}
+.phone[data-theme="dark"] .badge.reminder {
+  color: var(--d-status-warn);
+  background: var(--d-status-warn-bg);
+}
+
+.chev {
+  opacity: 0.3;
+}
+
+.icloud-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.phone[data-theme="light"] .icloud-chip {
+  color: var(--l-brand-text);
+  background: var(--l-brand-subtle);
+}
+.phone[data-theme="dark"] .icloud-chip {
+  color: var(--d-brand-text);
+  background: var(--d-brand-subtle);
+}
+
+.spin { animation: spin 1.4s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+
+/* Empty state — expressive illustration */
+.empty {
+  padding: 40px 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  text-align: center;
+  margin-top: 24px;
+}
+
+.empty-illust {
+  width: 140px;
+  height: 140px;
+  border-radius: 40px;
+  display: grid;
+  place-items: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.phone[data-theme="light"] .empty-illust {
+  background: linear-gradient(135deg, #F2F6FF 0%, #E8EFFF 100%);
+  color: var(--l-brand);
+}
+.phone[data-theme="dark"] .empty-illust {
+  background: linear-gradient(135deg, #172544 0%, #16191E 100%);
+  color: var(--d-brand);
+}
+
+.empty-illust::after {
+  content: "";
+  position: absolute;
+  inset: 20px;
+  border-radius: 24px;
+  border: 2px dashed currentColor;
+  opacity: 0.3;
+}
+
+.empty-title {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  margin: 8px 0 0;
+  line-height: 1.15;
+}
+
+.empty-body {
+  font-size: 14.5px;
+  line-height: 1.55;
+  margin: 0;
+  max-width: 260px;
+}
+
+.phone[data-theme="light"] .empty-body { color: var(--l-text-secondary); }
+.phone[data-theme="dark"] .empty-body { color: var(--d-text-secondary); }
+
+.empty-link {
+  margin-top: 4px;
+  font-size: 15px;
+  font-weight: 600;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 12px 20px;
+  border-radius: 14px;
+  font-family: inherit;
+  letter-spacing: -0.01em;
+}
+
+.phone[data-theme="light"] .empty-link {
+  color: var(--l-brand-text);
+  background: var(--l-brand-subtle);
+}
+.phone[data-theme="dark"] .empty-link {
+  color: var(--d-brand-text);
+  background: var(--d-brand-subtle);
+}
+
+/* Loading skeleton */
+.skeleton-hero {
+  margin: 20px 20px 24px;
+  height: 108px;
+  border-radius: 20px;
+}
+
+.skeleton-list {
+  padding: 0 20px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.skel-group {
+  border-radius: 18px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+}
+
+.phone[data-theme="light"] .skel-group { background: var(--l-bg-secondary); }
+.phone[data-theme="dark"] .skel-group { background: var(--d-bg-secondary); }
+
+.skel-row {
+  padding: 10px 8px;
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  gap: 14px;
+  align-items: center;
+}
+
+.skel {
+  border-radius: 6px;
+  animation: skelPulse 1.6s ease-in-out infinite;
+}
+
+.skel.icon-skel {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+}
+
+.skel.line { height: 12px; }
+.skel.line.long { width: 78%; }
+.skel.line.short { width: 44%; margin-top: 8px; height: 10px; }
+
+.phone[data-theme="light"] .skel {
+  background: linear-gradient(90deg, #E8EBF0 0%, #F4F6F9 50%, #E8EBF0 100%);
+  background-size: 200% 100%;
+}
+.phone[data-theme="dark"] .skel {
+  background: linear-gradient(90deg, #22262C 0%, #2C3037 50%, #22262C 100%);
+  background-size: 200% 100%;
+}
+
+@keyframes skelPulse {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+@media (prefers-reduced-motion: reduce) { .skel { animation: none; } }
+
+.loading-status {
+  padding: 16px 20px;
+  text-align: center;
+  font-size: 13px;
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.phone[data-theme="light"] .loading-status { color: var(--l-text-secondary); }
+.phone[data-theme="dark"] .loading-status { color: var(--d-text-secondary); }
+
+/* Reauthorize CTA */
+.reauth {
+  padding: 32px 28px 40px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 18px;
+  align-items: center;
+  text-align: center;
+}
+
+.warn-hero {
+  margin: 24px 0 8px;
+  width: 112px;
+  height: 112px;
+  border-radius: 32px;
+  display: grid;
+  place-items: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.phone[data-theme="light"] .warn-hero {
+  background: linear-gradient(135deg, #FFB565 0%, #C67200 100%);
+  box-shadow: 0 20px 40px -12px rgba(198, 114, 0, 0.35);
+  color: white;
+}
+.phone[data-theme="dark"] .warn-hero {
+  background: linear-gradient(135deg, #FFC670 0%, #A75D00 100%);
+  box-shadow: 0 20px 40px -12px rgba(255, 180, 74, 0.4);
+  color: #2A1808;
+}
+
+.warn-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 30% 20%, rgba(255,255,255,0.25), transparent 55%);
+}
+
+.reauth-title {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  margin: 8px 0 0;
+  text-wrap: balance;
+  line-height: 1.1;
+}
+
+.reauth-body {
+  font-size: 15px;
+  line-height: 1.55;
+  margin: 0;
+  max-width: 280px;
+}
+.phone[data-theme="light"] .reauth-body { color: var(--l-text-secondary); }
+.phone[data-theme="dark"] .reauth-body { color: var(--d-text-secondary); }
+
+.reauth-buttons {
+  margin-top: auto;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Sheet */
+.sheet-backdrop {
+  flex: 1;
+  background: rgba(15, 20, 30, 0.4);
+  display: flex;
+  align-items: flex-end;
+  position: relative;
+  backdrop-filter: blur(4px);
+}
+
+.phone[data-theme="dark"] .sheet-backdrop { background: rgba(0, 0, 0, 0.6); }
+
+.sheet {
+  position: relative;
+  width: 100%;
+  border-top-left-radius: 28px;
+  border-top-right-radius: 28px;
+  padding: 12px 22px 36px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  box-shadow: 0 -20px 60px -20px rgba(0,0,0,0.3);
+}
+
+.phone[data-theme="light"] .sheet { background: var(--l-surface); color: var(--l-text-primary); }
+.phone[data-theme="dark"] .sheet { background: #21252C; color: var(--d-text-primary); }
+
+.sheet-handle {
+  width: 40px;
+  height: 5px;
+  border-radius: 3px;
+  align-self: center;
+}
+
+.phone[data-theme="light"] .sheet-handle { background: #D3D6DB; }
+.phone[data-theme="dark"] .sheet-handle { background: #3A3F48; }
+
+.sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sheet-title-block { min-width: 0; }
+.sheet-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin: 0 0 3px;
+  opacity: 0.6;
+}
+.sheet-title {
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sheet-close {
+  width: 32px;
+  height: 32px;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.phone[data-theme="light"] .sheet-close { color: var(--l-text-secondary); background: var(--l-bg-secondary); }
+.phone[data-theme="dark"] .sheet-close { color: var(--d-text-secondary); background: rgba(255,255,255,0.08); }
+
+.picker-mock {
+  padding: 20px;
+  border-radius: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.phone[data-theme="light"] .picker-mock { background: var(--l-bg-secondary); }
+.phone[data-theme="dark"] .picker-mock { background: rgba(255,255,255,0.05); }
+
+.date-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid;
+}
+.phone[data-theme="light"] .date-hero { border-bottom-color: var(--l-border-hairline); }
+.phone[data-theme="dark"] .date-hero { border-bottom-color: var(--d-border-hairline); }
+
+.date-hero-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.5;
+}
+
+.date-hero-value {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.phone[data-theme="light"] .date-hero-value { color: var(--l-brand); }
+.phone[data-theme="dark"] .date-hero-value { color: var(--d-brand); }
+
+.calendar-mock {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px 2px;
+  font-size: 13px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+.calendar-mock .day-name {
+  font-size: 11px;
+  opacity: 0.5;
+  padding: 4px 0;
+  font-weight: 600;
+}
+
+.calendar-mock span:not(.day-name) {
+  padding: 7px 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.phone[data-theme="light"] .calendar-mock span.dim { color: var(--l-text-tertiary); opacity: 0.5; }
+.phone[data-theme="dark"] .calendar-mock span.dim { color: var(--d-text-tertiary); opacity: 0.5; }
+
+.phone[data-theme="light"] .calendar-mock span.selected {
+  background: var(--l-brand);
+  color: var(--l-text-on-brand);
+  font-weight: 700;
+  box-shadow: 0 4px 12px -4px rgba(50, 103, 227, 0.5);
+}
+.phone[data-theme="dark"] .calendar-mock span.selected {
+  background: var(--d-brand);
+  color: var(--d-text-on-brand);
+  font-weight: 700;
+  box-shadow: 0 4px 12px -4px rgba(91, 140, 255, 0.5);
+}
+
+.time-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 4px;
+  font-size: 15px;
+}
+
+.time-value {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 22px;
+  padding: 4px 12px;
+  border-radius: 10px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.phone[data-theme="light"] .time-value { background: var(--l-brand); color: var(--l-text-on-brand); }
+.phone[data-theme="dark"] .time-value { background: var(--d-brand); color: var(--d-text-on-brand); }
+
+.sheet-note {
+  font-size: 12.5px;
+  line-height: 1.5;
+  padding: 12px 14px;
+  border-radius: 12px;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.phone[data-theme="light"] .sheet-note { background: var(--l-brand-subtle); color: var(--l-brand-text); }
+.phone[data-theme="dark"] .sheet-note { background: var(--d-brand-subtle); color: var(--d-brand-text); }
+
+.sheet-note svg { flex-shrink: 0; margin-top: 1px; }
+
+.sheet-actions {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 10px;
+}
+
+.destructive-btn {
+  height: 52px;
+  border-radius: 14px;
+  border: none;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.phone[data-theme="light"] .destructive-btn {
+  background: var(--l-bg-secondary);
+  color: var(--l-status-warn-strong);
+}
+.phone[data-theme="dark"] .destructive-btn {
+  background: rgba(255,255,255,0.05);
+  color: var(--d-status-warn);
+}
+
+.primary-btn.sheet-primary {
+  height: 52px;
+  font-size: 16px;
+  border-radius: 14px;
+}
+
+/* Context menu */
+.menu-overlay {
+  flex: 1;
+  background: rgba(15, 20, 30, 0.35);
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding: 64px 18px 0;
+  position: relative;
+  backdrop-filter: blur(3px);
+}
+
+.phone[data-theme="dark"] .menu-overlay { background: rgba(0, 0, 0, 0.5); }
+
+.menu {
+  width: 250px;
+  border-radius: 16px;
+  padding: 6px;
+  backdrop-filter: blur(24px) saturate(180%);
+  box-shadow: 0 24px 48px -16px rgba(0,0,0,0.35);
+}
+
+.phone[data-theme="light"] .menu {
+  background: rgba(255, 255, 255, 0.85);
+  border: 0.5px solid rgba(0, 0, 0, 0.08);
+}
+.phone[data-theme="dark"] .menu {
+  background: rgba(48, 52, 61, 0.85);
+  border: 0.5px solid rgba(255, 255, 255, 0.1);
+}
+
+.menu-item {
+  display: grid;
+  grid-template-columns: 1fr 20px;
+  align-items: center;
+  padding: 12px 14px;
+  font-size: 15.5px;
+  border-radius: 10px;
+  gap: 8px;
+  font-weight: 500;
+}
+
+.menu-item.section-hd {
+  padding: 10px 14px 4px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 700;
+  opacity: 0.5;
+}
+
+.menu-item.selected {
+  font-weight: 600;
+}
+.phone[data-theme="light"] .menu-item.selected { color: var(--l-brand); background: var(--l-brand-subtle); }
+.phone[data-theme="dark"] .menu-item.selected { color: var(--d-brand); background: var(--d-brand-subtle); }
+
+.menu-divider {
+  height: 0.5px;
+  margin: 4px 8px;
+}
+
+.phone[data-theme="light"] .menu-divider { background: rgba(0,0,0,0.08); }
+.phone[data-theme="dark"] .menu-divider { background: rgba(255,255,255,0.1); }
+
+/* Legend */
+.legend {
+  margin-top: 40px;
+  padding: 32px 36px;
+  border-radius: 24px;
+  background: var(--page-card);
+  border: 1px solid var(--page-border);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 20px 40px;
+  font-size: 13px;
+  box-shadow: 0 12px 32px -20px rgba(15, 20, 30, 0.15);
+}
+
+.legend h3 {
+  margin: 0 0 12px;
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.005em;
+  color: var(--page-fg);
+  text-transform: none;
+}
+
+.legend ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.legend li {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  color: var(--page-muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.legend li code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--page-fg) 6%, transparent);
+  color: var(--page-fg);
+}
+
+.swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  flex-shrink: 0;
+  border: 1px solid rgba(0,0,0,0.06);
+}
+
+.footer {
+  margin-top: 48px;
+  padding-top: 24px;
+  border-top: 1px solid var(--page-border);
+  font-size: 12.5px;
+  color: var(--page-muted);
+  line-height: 1.6;
+}
+
+.footer code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--page-fg) 6%, transparent);
+}
+</style>
+
+<div class="page">
+  <header class="page-head">
+    <p class="eyebrow">Sprint 0.2 · Nhóm A · A7</p>
+    <h1>Tủ hồ sơ.<br>Các case UI.</h1>
+    <p>7 màn hình chính của core loop MVP (§10 v2) trước khi implement Swift. Palette và spacing lấy đúng từ <strong>Native Professional Workspace Design System</strong> — chỉ đẩy typography, hierarchy, và cards theo hướng iOS 18 modern.</p>
+    <div class="meta-strip">
+      <span class="meta-chip"><span class="dot"></span>iPhone 15/16 · 390pt</span>
+      <span class="meta-chip"><strong>Cobalt</strong>#3267E3 · #5B8CFF</span>
+      <span class="meta-chip">Inter Tight · Inter · JetBrains Mono</span>
+      <span class="meta-chip">Light + Dark side-by-side</span>
+    </div>
+  </header>
+
+  <!-- SECTION 1 -->
+  <section class="section">
+    <div class="section-head">
+      <span class="section-num">01</span>
+      <h2>Chưa cấp quyền</h2>
+      <p class="lede">RootView switch theo <code>LibraryStore.folderPermissionState</code>. Onboarding = first-run · Reauthorize = bookmark bị OS thu hồi.</p>
+    </div>
+
+    <div class="grid">
+      <!-- Onboarding -->
+      <div class="frame-caption">
+        <div class="phone" data-theme="light">
+          <div class="island"></div>
+          <div class="phone-screen">
+            <div class="status-bar">
+              <span>9:41</span>
+              <div class="status-bar-right">
+                <svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="0.5"/><rect x="4.5" y="5" width="3" height="6" rx="0.5"/><rect x="9" y="3" width="3" height="8" rx="0.5"/><rect x="13.5" y="0" width="3" height="11" rx="0.5"/></svg>
+                <svg width="15" height="11" viewBox="0 0 15 11" fill="currentColor"><path d="M7.5 0C4.65 0 2.03 0.98 0 2.62l1.53 1.87A9.5 9.5 0 0 1 7.5 2.5c2.24 0 4.3 0.75 5.97 2l1.53-1.87C12.97 0.98 10.35 0 7.5 0zm0 3.75c-1.83 0-3.5 0.65-4.83 1.72L4.2 7.35a5.5 5.5 0 0 1 6.6 0l1.53-1.88a7.7 7.7 0 0 0-4.83-1.72zm0 3.75c-0.94 0-1.79 0.34-2.46 0.9L7.5 11l2.46-2.6a3.7 3.7 0 0 0-2.46-0.9z"/></svg>
+                <svg width="27" height="12" viewBox="0 0 27 12" fill="none"><rect x="1" y="1" width="22" height="10" rx="2.5" stroke="currentColor" stroke-opacity="0.4"/><rect x="3" y="3" width="18" height="6" rx="1" fill="currentColor"/><rect x="24" y="4" width="1.5" height="4" rx="0.5" fill="currentColor" fill-opacity="0.4"/></svg>
+              </div>
+            </div>
+            <div class="content onboarding">
+              <div class="onboard-hero-wrap">
+                <div class="onboard-glow"></div>
+                <div class="onboard-hero">
+                  <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                </div>
+              </div>
+              <h1 class="onboard-title">Tủ hồ sơ<br>của bạn</h1>
+              <p class="onboard-lede">Chọn 1 thư mục chứa tài liệu — app tự quét và theo dõi trạng thái.</p>
+              <ul class="feature-list">
+                <li class="feature-item">
+                  <div class="feature-icon">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M9 12l2 2 4-4"/></svg>
+                  </div>
+                  <span>File gốc ở nguyên chỗ, không copy</span>
+                </li>
+                <li class="feature-item">
+                  <div class="feature-icon">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                  </div>
+                  <span>Metadata lưu riêng trong app</span>
+                </li>
+                <li class="feature-item">
+                  <div class="feature-icon">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                  </div>
+                  <span>Đổi thư mục bất kỳ lúc nào</span>
+                </li>
+              </ul>
+              <button class="primary-btn">
+                <span>Chọn thư mục</span>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
+              </button>
+            </div>
+            <div class="home-bar"></div>
+          </div>
+        </div>
+        <span class="frame-label">Onboarding — Light</span>
+        <span class="frame-note"><code>FolderPermissionOnboarding.swift</code> · State <code>.notGranted</code> · tap CTA → <code>requestPermission()</code></span>
+      </div>
+
+      <!-- Reauthorize CTA -->
+      <div class="frame-caption">
+        <div class="phone" data-theme="light">
+          <div class="island"></div>
+          <div class="phone-screen">
+            <div class="status-bar">
+              <span>9:41</span>
+              <div class="status-bar-right">
+                <svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="0.5"/><rect x="4.5" y="5" width="3" height="6" rx="0.5"/><rect x="9" y="3" width="3" height="8" rx="0.5"/><rect x="13.5" y="0" width="3" height="11" rx="0.5"/></svg>
+                <svg width="15" height="11" viewBox="0 0 15 11" fill="currentColor"><path d="M7.5 0C4.65 0 2.03 0.98 0 2.62l1.53 1.87A9.5 9.5 0 0 1 7.5 2.5c2.24 0 4.3 0.75 5.97 2l1.53-1.87C12.97 0.98 10.35 0 7.5 0zm0 3.75c-1.83 0-3.5 0.65-4.83 1.72L4.2 7.35a5.5 5.5 0 0 1 6.6 0l1.53-1.88a7.7 7.7 0 0 0-4.83-1.72zm0 3.75c-0.94 0-1.79 0.34-2.46 0.9L7.5 11l2.46-2.6a3.7 3.7 0 0 0-2.46-0.9z"/></svg>
+                <svg width="27" height="12" viewBox="0 0 27 12" fill="none"><rect x="1" y="1" width="22" height="10" rx="2.5" stroke="currentColor" stroke-opacity="0.4"/><rect x="3" y="3" width="18" height="6" rx="1" fill="currentColor"/><rect x="24" y="4" width="1.5" height="4" rx="0.5" fill="currentColor" fill-opacity="0.4"/></svg>
+              </div>
+            </div>
+            <div class="content reauth">
+              <div class="warn-hero">
+                <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              </div>
+              <h1 class="reauth-title">Mất quyền<br>truy cập thư mục</h1>
+              <p class="reauth-body">Bạn hoặc iOS đã thu hồi quyền truy cập. Cấp lại để tiếp tục theo dõi các tài liệu đã đánh dấu trạng thái.</p>
+              <div class="reauth-buttons">
+                <button class="primary-btn">Cấp lại quyền cho thư mục cũ</button>
+                <button class="secondary-btn">Chọn thư mục khác</button>
+              </div>
+            </div>
+            <div class="home-bar"></div>
+          </div>
+        </div>
+        <span class="frame-label">Reauthorize CTA — Light</span>
+        <span class="frame-note"><code>ReauthorizePermissionCTA.swift</code> · State <code>.revoked</code> · giữ context tủ, không đá về onboarding (bẫy #4)</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- SECTION 2 -->
+  <section class="section">
+    <div class="section-head">
+      <span class="section-num">02</span>
+      <h2>Đã cấp quyền</h2>
+      <p class="lede">First-scan familiarity (UC16): hero copy adaptive theo state · sort + group by 5 date bucket (Hôm nay/Hôm qua/Trong tuần/Trong tháng/Cũ hơn) · due reminder section top khi có · empty + loading state riêng.</p>
+    </div>
+
+    <div class="grid">
+      <!-- First-scan state — LIGHT -->
+      <div class="frame-caption">
+        <div class="phone" data-theme="light">
+          <div class="island"></div>
+          <div class="phone-screen">
+            <div class="status-bar">
+              <span>9:41</span>
+              <div class="status-bar-right">
+                <svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="0.5"/><rect x="4.5" y="5" width="3" height="6" rx="0.5"/><rect x="9" y="3" width="3" height="8" rx="0.5"/><rect x="13.5" y="0" width="3" height="11" rx="0.5"/></svg>
+                <svg width="15" height="11" viewBox="0 0 15 11" fill="currentColor"><path d="M7.5 0C4.65 0 2.03 0.98 0 2.62l1.53 1.87A9.5 9.5 0 0 1 7.5 2.5c2.24 0 4.3 0.75 5.97 2l1.53-1.87C12.97 0.98 10.35 0 7.5 0zm0 3.75c-1.83 0-3.5 0.65-4.83 1.72L4.2 7.35a5.5 5.5 0 0 1 6.6 0l1.53-1.88a7.7 7.7 0 0 0-4.83-1.72zm0 3.75c-0.94 0-1.79 0.34-2.46 0.9L7.5 11l2.46-2.6a3.7 3.7 0 0 0-2.46-0.9z"/></svg>
+                <svg width="27" height="12" viewBox="0 0 27 12" fill="none"><rect x="1" y="1" width="22" height="10" rx="2.5" stroke="currentColor" stroke-opacity="0.4"/><rect x="3" y="3" width="18" height="6" rx="1" fill="currentColor"/><rect x="24" y="4" width="1.5" height="4" rx="0.5" fill="currentColor" fill-opacity="0.4"/></svg>
+              </div>
+            </div>
+            <div class="content libraryview">
+              <div class="nav-bar">
+                <div class="nav-title-block">
+                  <p class="date-eyebrow">Thứ 5, 28 tháng 8</p>
+                  <h1 class="nav-title">Tủ hồ sơ</h1>
+                </div>
+                <button class="icon-btn">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+                </button>
+              </div>
+              <div class="draft-hero welcoming">
+                <div class="draft-count">12</div>
+                <div class="draft-label">
+                  <b>Tài liệu đang theo dõi</b>
+                  <span>Cấp quyền lần đầu · vừa scan xong</span>
+                </div>
+              </div>
+              <div class="section-title" style="padding-top:0">
+                Hôm nay
+                <span class="count">2</span>
+              </div>
+              <div class="doc-list">
+                <div class="doc-group">
+                  <div class="doc-row">
+                    <div class="doc-icon-wrap"><div class="doc-icon word">DOCX</div></div>
+                    <div class="doc-main">
+                      <div class="doc-name">hopdong-abc-2026.docx</div>
+                      <div class="doc-sub">
+                        <span>2 giờ trước</span>
+                        <span class="dot">·</span>
+                        <span class="badge draft">Nháp</span>
+                      </div>
+                    </div>
+                    <svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 6 15 12 9 18"/></svg>
+                  </div>
+                  <div class="doc-row">
+                    <div class="doc-icon-wrap"><div class="doc-icon xlsx">XLSX</div></div>
+                    <div class="doc-main">
+                      <div class="doc-name">bao-cao-thang-8.xlsx</div>
+                      <div class="doc-sub">
+                        <span>Sáng nay</span>
+                        <span class="dot">·</span>
+                        <span class="badge draft">Nháp</span>
+                      </div>
+                    </div>
+                    <svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 6 15 12 9 18"/></svg>
+                  </div>
+                </div>
+                <div class="section-title" style="padding-left:8px;padding-top:4px">
+                  Hôm qua
+                  <span class="count">1</span>
+                </div>
+                <div class="doc-group">
+                  <div class="doc-row">
+                    <div class="doc-icon-wrap"><div class="doc-icon pdf">PDF</div></div>
+                    <div class="doc-main">
+                      <div class="doc-name">bao-gia-Q3.pdf</div>
+                      <div class="doc-sub">
+                        <span>Hôm qua · 14:30</span>
+                        <span class="dot">·</span>
+                        <span class="badge draft">Nháp</span>
+                      </div>
+                    </div>
+                    <svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 6 15 12 9 18"/></svg>
+                  </div>
+                </div>
+                <div class="section-title" style="padding-left:8px;padding-top:4px">
+                  Trong tuần
+                  <span class="count">2</span>
+                </div>
+                <div class="doc-group">
+                  <div class="doc-row">
+                    <div class="doc-icon-wrap"><div class="doc-icon word">DOCX</div></div>
+                    <div class="doc-main">
+                      <div class="doc-name">quy-che-noi-bo-v3.docx</div>
+                      <div class="doc-sub">
+                        <span>3 ngày trước</span>
+                        <span class="dot">·</span>
+                        <span class="badge draft">Nháp</span>
+                      </div>
+                    </div>
+                    <svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 6 15 12 9 18"/></svg>
+                  </div>
+                  <div class="doc-row">
+                    <div class="doc-icon-wrap"><div class="doc-icon ppt">PPTX</div></div>
+                    <div class="doc-main">
+                      <div class="doc-name">de-xuat-du-an.pptx</div>
+                      <div class="doc-sub">
+                        <span>5 ngày trước</span>
+                        <span class="dot">·</span>
+                        <span class="badge draft">Nháp</span>
+                      </div>
+                    </div>
+                    <svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 6 15 12 9 18"/></svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="home-bar"></div>
+          </div>
+        </div>
+        <span class="frame-label">First-scan — Light</span>
+        <span class="frame-note">Hero copy welcoming khi <code>draftCount == totalCount</code> · group by date bucket · all badge Nháp default (UC16)</span>
+      </div>
+
+      <!-- Steady state — DARK (mixed status, due reminders, date groups) -->
+      <div class="frame-caption">
+        <div class="phone" data-theme="dark">
+          <div class="island"></div>
+          <div class="phone-screen">
+            <div class="status-bar">
+              <span>9:41</span>
+              <div class="status-bar-right">
+                <svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="0.5"/><rect x="4.5" y="5" width="3" height="6" rx="0.5"/><rect x="9" y="3" width="3" height="8" rx="0.5"/><rect x="13.5" y="0" width="3" height="11" rx="0.5"/></svg>
+                <svg width="15" height="11" viewBox="0 0 15 11" fill="currentColor"><path d="M7.5 0C4.65 0 2.03 0.98 0 2.62l1.53 1.87A9.5 9.5 0 0 1 7.5 2.5c2.24 0 4.3 0.75 5.97 2l1.53-1.87C12.97 0.98 10.35 0 7.5 0zm0 3.75c-1.83 0-3.5 0.65-4.83 1.72L4.2 7.35a5.5 5.5 0 0 1 6.6 0l1.53-1.88a7.7 7.7 0 0 0-4.83-1.72zm0 3.75c-0.94 0-1.79 0.34-2.46 0.9L7.5 11l2.46-2.6a3.7 3.7 0 0 0-2.46-0.9z"/></svg>
+                <svg width="27" height="12" viewBox="0 0 27 12" fill="none"><rect x="1" y="1" width="22" height="10" rx="2.5" stroke="currentColor" stroke-opacity="0.4"/><rect x="3" y="3" width="18" height="6" rx="1" fill="currentColor"/><rect x="24" y="4" width="1.5" height="4" rx="0.5" fill="currentColor" fill-opacity="0.4"/></svg>
+              </div>
+            </div>
+            <div class="content libraryview">
+              <div class="nav-bar">
+                <div class="nav-title-block">
+                  <p class="date-eyebrow">Thứ 5, 28 tháng 8</p>
+                  <h1 class="nav-title">Tủ hồ sơ</h1>
+                </div>
+                <button class="icon-btn">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+                </button>
+              </div>
+              <div class="draft-hero">
+                <div class="draft-count">3</div>
+                <div class="draft-label">
+                  <b>Bản nháp còn dở</b>
+                  <span>Trong 12 tài liệu · Zeigarnik signal</span>
+                </div>
+              </div>
+              <div class="section-title warn-title">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                Cần xử lý hôm nay
+                <span class="count">1</span>
+              </div>
+              <div class="doc-list">
+                <div class="doc-group">
+                  <div class="doc-row due">
+                    <div class="due-dot"></div>
+                    <div class="doc-icon-wrap"><div class="doc-icon word">DOCX</div></div>
+                    <div class="doc-main">
+                      <div class="doc-name">hopdong-abc-2026.docx</div>
+                      <div class="doc-sub">
+                        <span>2 giờ trước</span>
+                        <span class="dot">·</span>
+                        <span class="badge draft">Nháp</span>
+                        <span class="badge reminder">
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                          09:00
+                        </span>
+                      </div>
+                    </div>
+                    <svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 6 15 12 9 18"/></svg>
+                  </div>
+                </div>
+                <div class="section-title" style="padding-left:8px;padding-top:4px">
+                  Hôm nay
+                  <span class="count">1</span>
+                </div>
+                <div class="doc-group">
+                  <div class="doc-row">
+                    <div class="doc-icon-wrap"><div class="doc-icon xlsx">XLSX</div></div>
+                    <div class="doc-main">
+                      <div class="doc-name">bao-cao-thang-8.xlsx</div>
+                      <div class="doc-sub">
+                        <span>Sáng nay</span>
+                        <span class="dot">·</span>
+                        <span class="badge reviewed">Đã xem</span>
+                      </div>
+                    </div>
+                    <svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 6 15 12 9 18"/></svg>
+                  </div>
+                </div>
+                <div class="section-title" style="padding-left:8px;padding-top:4px">
+                  Trong tuần
+                  <span class="count">2</span>
+                </div>
+                <div class="doc-group">
+                  <div class="doc-row">
+                    <div class="doc-icon-wrap"><div class="doc-icon word">DOCX</div></div>
+                    <div class="doc-main">
+                      <div class="doc-name">quy-che-noi-bo-v3.docx</div>
+                      <div class="doc-sub">
+                        <span>3 ngày trước</span>
+                        <span class="dot">·</span>
+                        <span class="badge signed">Đã ký</span>
+                      </div>
+                    </div>
+                    <svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 6 15 12 9 18"/></svg>
+                  </div>
+                  <div class="doc-row">
+                    <div class="doc-icon-wrap"><div class="doc-icon pdf">PDF</div></div>
+                    <div class="doc-main">
+                      <div class="doc-name">phu-luc-hopdong.pdf</div>
+                      <div class="doc-sub">
+                        <span class="icloud-chip">
+                          <svg class="spin" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8"><path d="M18 10h-1.26A8 8 0 1 0 9 20"/><polyline points="18 12 18 18 21 18"/></svg>
+                          iCloud 62%
+                        </span>
+                      </div>
+                    </div>
+                    <svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 6 15 12 9 18"/></svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="home-bar"></div>
+          </div>
+        </div>
+        <span class="frame-label">Steady state — Dark</span>
+        <span class="frame-note">Hero Zeigarnik khi <code>draftCount &lt; totalCount</code> · due reminder section trên top · mixed status trong date bucket</span>
+      </div>
+
+      <!-- Empty state -->
+      <div class="frame-caption">
+        <div class="phone" data-theme="light">
+          <div class="island"></div>
+          <div class="phone-screen">
+            <div class="status-bar">
+              <span>9:41</span>
+              <div class="status-bar-right">
+                <svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="0.5"/><rect x="4.5" y="5" width="3" height="6" rx="0.5"/><rect x="9" y="3" width="3" height="8" rx="0.5"/><rect x="13.5" y="0" width="3" height="11" rx="0.5"/></svg>
+                <svg width="15" height="11" viewBox="0 0 15 11" fill="currentColor"><path d="M7.5 0C4.65 0 2.03 0.98 0 2.62l1.53 1.87A9.5 9.5 0 0 1 7.5 2.5c2.24 0 4.3 0.75 5.97 2l1.53-1.87C12.97 0.98 10.35 0 7.5 0zm0 3.75c-1.83 0-3.5 0.65-4.83 1.72L4.2 7.35a5.5 5.5 0 0 1 6.6 0l1.53-1.88a7.7 7.7 0 0 0-4.83-1.72zm0 3.75c-0.94 0-1.79 0.34-2.46 0.9L7.5 11l2.46-2.6a3.7 3.7 0 0 0-2.46-0.9z"/></svg>
+                <svg width="27" height="12" viewBox="0 0 27 12" fill="none"><rect x="1" y="1" width="22" height="10" rx="2.5" stroke="currentColor" stroke-opacity="0.4"/><rect x="3" y="3" width="18" height="6" rx="1" fill="currentColor"/><rect x="24" y="4" width="1.5" height="4" rx="0.5" fill="currentColor" fill-opacity="0.4"/></svg>
+              </div>
+            </div>
+            <div class="content libraryview">
+              <div class="nav-bar">
+                <div class="nav-title-block">
+                  <p class="date-eyebrow">Thứ 5, 28 tháng 8</p>
+                  <h1 class="nav-title">Tủ hồ sơ</h1>
+                </div>
+                <button class="icon-btn">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+                </button>
+              </div>
+              <div class="empty">
+                <div class="empty-illust">
+                  <svg width="50" height="50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                </div>
+                <h2 class="empty-title">Chưa có tài liệu</h2>
+                <p class="empty-body">Thư mục bạn cấp quyền chưa có file <code>.docx</code>, <code>.xlsx</code>, <code>.pptx</code> hoặc <code>.pdf</code> nào — hoặc đang đồng bộ từ iCloud.</p>
+                <button class="empty-link">Đổi thư mục khác</button>
+              </div>
+            </div>
+            <div class="home-bar"></div>
+          </div>
+        </div>
+        <span class="frame-label">Empty state</span>
+        <span class="frame-note">Sau scan xong nhưng <code>entries.isEmpty</code> · Swift dùng <code>ContentUnavailableView</code> iOS 17+</span>
+      </div>
+
+      <!-- Loading skeleton -->
+      <div class="frame-caption">
+        <div class="phone" data-theme="light">
+          <div class="island"></div>
+          <div class="phone-screen">
+            <div class="status-bar">
+              <span>9:41</span>
+              <div class="status-bar-right">
+                <svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="0.5"/><rect x="4.5" y="5" width="3" height="6" rx="0.5"/><rect x="9" y="3" width="3" height="8" rx="0.5"/><rect x="13.5" y="0" width="3" height="11" rx="0.5"/></svg>
+                <svg width="15" height="11" viewBox="0 0 15 11" fill="currentColor"><path d="M7.5 0C4.65 0 2.03 0.98 0 2.62l1.53 1.87A9.5 9.5 0 0 1 7.5 2.5c2.24 0 4.3 0.75 5.97 2l1.53-1.87C12.97 0.98 10.35 0 7.5 0zm0 3.75c-1.83 0-3.5 0.65-4.83 1.72L4.2 7.35a5.5 5.5 0 0 1 6.6 0l1.53-1.88a7.7 7.7 0 0 0-4.83-1.72zm0 3.75c-0.94 0-1.79 0.34-2.46 0.9L7.5 11l2.46-2.6a3.7 3.7 0 0 0-2.46-0.9z"/></svg>
+                <svg width="27" height="12" viewBox="0 0 27 12" fill="none"><rect x="1" y="1" width="22" height="10" rx="2.5" stroke="currentColor" stroke-opacity="0.4"/><rect x="3" y="3" width="18" height="6" rx="1" fill="currentColor"/><rect x="24" y="4" width="1.5" height="4" rx="0.5" fill="currentColor" fill-opacity="0.4"/></svg>
+              </div>
+            </div>
+            <div class="content libraryview">
+              <div class="nav-bar">
+                <div class="nav-title-block">
+                  <p class="date-eyebrow">Thứ 5, 28 tháng 8</p>
+                  <h1 class="nav-title">Tủ hồ sơ</h1>
+                </div>
+                <button class="icon-btn">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+                </button>
+              </div>
+              <div class="skel skeleton-hero"></div>
+              <div class="skeleton-list">
+                <div class="skel-group">
+                  <div class="skel-row"><div class="skel icon-skel"></div><div><div class="skel line long"></div><div class="skel line short"></div></div></div>
+                  <div class="skel-row"><div class="skel icon-skel"></div><div><div class="skel line long"></div><div class="skel line short"></div></div></div>
+                  <div class="skel-row"><div class="skel icon-skel"></div><div><div class="skel line long"></div><div class="skel line short"></div></div></div>
+                  <div class="skel-row"><div class="skel icon-skel"></div><div><div class="skel line long"></div><div class="skel line short"></div></div></div>
+                </div>
+              </div>
+              <div class="loading-status">
+                <svg class="spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 10h-1.26A8 8 0 1 0 9 20"/><polyline points="18 12 18 18 21 18"/></svg>
+                Đang quét thư mục…
+              </div>
+            </div>
+            <div class="home-bar"></div>
+          </div>
+        </div>
+        <span class="frame-label">Loading skeleton</span>
+        <span class="frame-note">Chỉ hiện ở first scan (<code>isLoading == true</code> + <code>entries.isEmpty</code>) · pull-to-refresh không đè skeleton</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- SECTION 3 -->
+  <section class="section">
+    <div class="section-head">
+      <span class="section-num">03</span>
+      <h2>Sheet &amp; menu contextual</h2>
+      <p class="lede">Component tái dùng — trigger từ swipe action, context menu, hoặc row tap.</p>
+    </div>
+
+    <div class="grid">
+      <!-- RemindAt sheet -->
+      <div class="frame-caption">
+        <div class="phone" data-theme="light">
+          <div class="island"></div>
+          <div class="phone-screen">
+            <div class="status-bar">
+              <span>9:41</span>
+              <div class="status-bar-right">
+                <svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="0.5"/><rect x="4.5" y="5" width="3" height="6" rx="0.5"/><rect x="9" y="3" width="3" height="8" rx="0.5"/><rect x="13.5" y="0" width="3" height="11" rx="0.5"/></svg>
+                <svg width="15" height="11" viewBox="0 0 15 11" fill="currentColor"><path d="M7.5 0C4.65 0 2.03 0.98 0 2.62l1.53 1.87A9.5 9.5 0 0 1 7.5 2.5c2.24 0 4.3 0.75 5.97 2l1.53-1.87C12.97 0.98 10.35 0 7.5 0zm0 3.75c-1.83 0-3.5 0.65-4.83 1.72L4.2 7.35a5.5 5.5 0 0 1 6.6 0l1.53-1.88a7.7 7.7 0 0 0-4.83-1.72zm0 3.75c-0.94 0-1.79 0.34-2.46 0.9L7.5 11l2.46-2.6a3.7 3.7 0 0 0-2.46-0.9z"/></svg>
+                <svg width="27" height="12" viewBox="0 0 27 12" fill="none"><rect x="1" y="1" width="22" height="10" rx="2.5" stroke="currentColor" stroke-opacity="0.4"/><rect x="3" y="3" width="18" height="6" rx="1" fill="currentColor"/><rect x="24" y="4" width="1.5" height="4" rx="0.5" fill="currentColor" fill-opacity="0.4"/></svg>
+              </div>
+            </div>
+            <div class="content">
+              <div class="sheet-backdrop">
+                <div class="sheet">
+                  <div class="sheet-handle"></div>
+                  <div class="sheet-head">
+                    <div class="sheet-title-block">
+                      <p class="sheet-eyebrow">Đặt nhắc</p>
+                      <h2 class="sheet-title">hopdong-abc-2026.docx</h2>
+                    </div>
+                    <button class="sheet-close">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
+                  </div>
+                  <div class="picker-mock">
+                    <div class="date-hero">
+                      <span class="date-hero-eyebrow">Đã chọn</span>
+                      <span class="date-hero-value">Thứ 2, 01/09 · 09:00</span>
+                    </div>
+                    <div class="calendar-mock">
+                      <span class="day-name">CN</span><span class="day-name">T2</span><span class="day-name">T3</span><span class="day-name">T4</span><span class="day-name">T5</span><span class="day-name">T6</span><span class="day-name">T7</span>
+                      <span class="dim">30</span><span class="dim">31</span><span class="selected">1</span><span>2</span><span>3</span><span>4</span><span>5</span>
+                      <span>6</span><span>7</span><span>8</span><span>9</span><span>10</span><span>11</span><span>12</span>
+                    </div>
+                    <div class="time-row">
+                      <span>Giờ</span>
+                      <span class="time-value">09:00</span>
+                    </div>
+                  </div>
+                  <div class="sheet-note">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                    <span>Nhắc chỉ hiển thị khi bạn mở app — không có push notification.</span>
+                  </div>
+                  <div class="sheet-actions">
+                    <button class="destructive-btn">Bỏ nhắc</button>
+                    <button class="primary-btn sheet-primary">Lưu</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="home-bar"></div>
+          </div>
+        </div>
+        <span class="frame-label">RemindAt sheet</span>
+        <span class="frame-note"><code>RemindAtField.swift</code> · <code>.presentationDetents([.medium])</code> · drag indicator + safe area bottom · "Bỏ nhắc" chỉ hiện khi entry đã có <code>remindAt</code></span>
+      </div>
+
+      <!-- Status picker menu -->
+      <div class="frame-caption">
+        <div class="phone" data-theme="light">
+          <div class="island"></div>
+          <div class="phone-screen">
+            <div class="status-bar">
+              <span>9:41</span>
+              <div class="status-bar-right">
+                <svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="0.5"/><rect x="4.5" y="5" width="3" height="6" rx="0.5"/><rect x="9" y="3" width="3" height="8" rx="0.5"/><rect x="13.5" y="0" width="3" height="11" rx="0.5"/></svg>
+                <svg width="15" height="11" viewBox="0 0 15 11" fill="currentColor"><path d="M7.5 0C4.65 0 2.03 0.98 0 2.62l1.53 1.87A9.5 9.5 0 0 1 7.5 2.5c2.24 0 4.3 0.75 5.97 2l1.53-1.87C12.97 0.98 10.35 0 7.5 0zm0 3.75c-1.83 0-3.5 0.65-4.83 1.72L4.2 7.35a5.5 5.5 0 0 1 6.6 0l1.53-1.88a7.7 7.7 0 0 0-4.83-1.72zm0 3.75c-0.94 0-1.79 0.34-2.46 0.9L7.5 11l2.46-2.6a3.7 3.7 0 0 0-2.46-0.9z"/></svg>
+                <svg width="27" height="12" viewBox="0 0 27 12" fill="none"><rect x="1" y="1" width="22" height="10" rx="2.5" stroke="currentColor" stroke-opacity="0.4"/><rect x="3" y="3" width="18" height="6" rx="1" fill="currentColor"/><rect x="24" y="4" width="1.5" height="4" rx="0.5" fill="currentColor" fill-opacity="0.4"/></svg>
+              </div>
+            </div>
+            <div class="content">
+              <div class="menu-overlay">
+                <div class="menu">
+                  <div class="menu-item section-hd">Đổi trạng thái</div>
+                  <div class="menu-item selected">
+                    <span>Nháp</span>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>
+                  </div>
+                  <div class="menu-item">
+                    <span>Đã xem lại</span>
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" opacity="0.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                  </div>
+                  <div class="menu-item">
+                    <span>Đã ký</span>
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" opacity="0.5"><path d="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z"/><line x1="16" y1="8" x2="2" y2="22"/><line x1="17.5" y1="15" x2="9" y2="15"/></svg>
+                  </div>
+                  <div class="menu-item">
+                    <span>Đã gửi</span>
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" opacity="0.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                  </div>
+                  <div class="menu-divider"></div>
+                  <div class="menu-item">
+                    <span>Đặt nhắc…</span>
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" opacity="0.5"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="home-bar"></div>
+          </div>
+        </div>
+        <span class="frame-label">Status picker (context menu)</span>
+        <span class="frame-note"><code>DocumentStatusPicker.swift</code> · SwiftUI <code>Menu</code> — trigger từ long-press card hoặc swipe action</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Legend -->
+  <section class="legend">
+    <div>
+      <h3>Palette dùng</h3>
+      <ul>
+        <li><span class="swatch" style="background:#3267E3"></span>Brand — #3267E3</li>
+        <li><span class="swatch" style="background:#F2F6FF"></span>Brand Subtle — #F2F6FF</li>
+        <li><span class="swatch" style="background:#A75D00"></span>Warning — #A75D00</li>
+        <li><span class="swatch" style="background:#218739"></span>Success — #218739</li>
+        <li><span class="swatch" style="background:#0E1013"></span>Text Primary</li>
+        <li><span class="swatch" style="background:#5D636D"></span>Text Secondary</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Document colors</h3>
+      <ul>
+        <li><span class="swatch" style="background:#2F64D6"></span>Word — #2F64D6</li>
+        <li><span class="swatch" style="background:#18864B"></span>Spreadsheet — #18864B</li>
+        <li><span class="swatch" style="background:#D86724"></span>Presentation — #D86724</li>
+        <li><span class="swatch" style="background:#D63C35"></span>PDF — #D63C35</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Modern moves</h3>
+      <ul>
+        <li>Gradient hero cards (draft + onboarding + reauth)</li>
+        <li>Grouped inset list (iOS 18 Settings.app pattern)</li>
+        <li>Section header mixed-case với count chip</li>
+        <li>Display font Inter Tight, tracking âm</li>
+        <li>Due state = dot + wash, không stripe</li>
+        <li>Sheet: date hero prominent, calendar mock</li>
+      </ul>
+    </div>
+    <div>
+      <h3>UC16 first-scan familiarity</h3>
+      <ul>
+        <li>Sort default: <code>modifiedAt</code> desc</li>
+        <li>5 date buckets: Hôm nay / Hôm qua / Trong tuần / Trong tháng / Cũ hơn</li>
+        <li>Hero adaptive: <code>draftCount==total</code> → "12 tài liệu đang theo dõi"</li>
+        <li>Hero Zeigarnik: <code>draftCount&lt;total</code> → "3 bản nháp còn dở"</li>
+        <li>Hero celebration: <code>draftCount==0</code> → "Tất cả đã xong"</li>
+        <li>Due reminder section: chỉ hiện nếu có, trên top các date bucket</li>
+      </ul>
+    </div>
+    <div>
+      <h3>HIG audit đã pass</h3>
+      <ul>
+        <li>Touch target ≥ 44pt (icon-btn 44, sheet-close 32 + hit padding)</li>
+        <li>Draft hero = informational, không tappable</li>
+        <li>Empty → <code>ContentUnavailableView</code></li>
+        <li>Sheet detent + drag indicator + safe area</li>
+        <li>Prefers-reduced-motion tôn trọng</li>
+      </ul>
+    </div>
+  </section>
+
+  <p class="footer">Palette + spacing kéo từ <code>Native-Professional-Workspace-Design-System.md</code> §6 và <code>DSSpacing.swift</code>. Wireframe khớp API <code>LibraryStore</code> / <code>LibraryViewModel</code> đã có trong backend. Font Inter Tight (display) + Inter (body) dùng như substitute cho SF Pro Display + SF Pro Text; app native sẽ dùng SF Pro thật.</p>
+</div>

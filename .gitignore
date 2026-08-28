@@ -40,3 +40,12 @@ node_modules/
 # Backup files
 *.backup-*
 *.bak
+
+# External skills (installed via npx skills, not project code)
+*.xcodeproj/.agents/
+*.xcodeproj/.claude/
+*.xcodeproj/skills-lock.json
+
+# Test fixtures (regenerate locally as needed)
+TuHoSoTest/
+

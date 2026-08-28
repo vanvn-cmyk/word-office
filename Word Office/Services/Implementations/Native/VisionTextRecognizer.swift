@@ -1,0 +1,4 @@
+// Sprint 0.3 — VNRecognizeTextRequest + confidence
+// TODO: Implement per PHASE_1_ARCHITECTURE.md §6 and Phase0-Implementation-Logic.md.
+
+import Foundation
