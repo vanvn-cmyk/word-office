@@ -1,0 +1,42 @@
+# macOS
+.DS_Store
+._*
+
+# Xcode
+*.xcuserstate
+xcuserdata/
+DerivedData/
+build/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Packages/
+
+# CocoaPods (future-proof)
+Pods/
+
+# fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+
+# Node (for skills)
+node_modules/
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Artifacts
+*.log
+
+# Backup files
+*.backup-*
+*.bak
