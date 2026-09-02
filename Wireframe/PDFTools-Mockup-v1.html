@@ -1,0 +1,543 @@
+<meta charset="utf-8">
+<title>PDF Tools — Mockup v1</title>
+<style>
+  :root {
+    --bg-page: #EEF0F4;
+    --bg-page-grid: #E4E7EE;
+    --ink-page: #171A21;
+    --ink-page-muted: #6A7180;
+    --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+    --sf: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+
+    --BrandPrimary: #3267E3;
+    --BrandPrimaryPressed: #2858C9;
+    --BrandPrimarySubtle: #F2F6FF;
+
+    --BackgroundPrimary: #FFFFFF;
+    --BackgroundSecondary: #F7F8FA;
+    --BackgroundElevated: #FFFFFF;
+
+    --TextPrimary: #17191D;
+    --TextSecondary: #5D636D;
+    --TextTertiary: #777E89;
+    --TextOnBrand: #FFFFFF;
+
+    --BorderSubtle: #ECEEF1;
+    --BorderDefault: #DADDE2;
+
+    --StatusWarning: #A75D00;
+    --StatusWarningBackground: #FFF6E8;
+    --StatusSuccess: #218739;
+    --StatusSuccessBackground: #EDF8EF;
+    --StatusError: #D9342B;
+    --StatusErrorBackground: #FFF0EF;
+
+    --DocWord: #2F64D6;
+    --DocSpreadsheet: #18864B;
+    --DocPresentation: #D86724;
+    --DocPDF: #D63C35;
+
+    --shadow-frame: 0 30px 60px -20px rgba(20, 24, 34, 0.35), 0 4px 12px rgba(20, 24, 34, 0.08);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg-page: #0B0C10; --bg-page-grid: #131620; --ink-page: #F2F3F5; --ink-page-muted: #8B919B;
+      --BrandPrimary: #5B8CFF; --BrandPrimaryPressed: #719DFF; --BrandPrimarySubtle: #172544;
+      --BackgroundPrimary: #111317; --BackgroundSecondary: #181B20; --BackgroundElevated: #262A31;
+      --TextPrimary: #F5F6F7; --TextSecondary: #B8BDC5; --TextTertiary: #8B919B; --TextOnBrand: #081226;
+      --BorderSubtle: #292D33; --BorderDefault: #373B43;
+      --StatusWarning: #FFB44A; --StatusWarningBackground: #3C290C;
+      --StatusSuccess: #4BD166; --StatusSuccessBackground: #14351C;
+      --StatusError: #FF6961; --StatusErrorBackground: #421917;
+      --DocWord: #6392FF; --DocSpreadsheet: #4BC67A; --DocPresentation: #FFA463; --DocPDF: #FF706A;
+      --shadow-frame: 0 30px 60px -20px rgba(0, 0, 0, 0.6), 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg-page: #0B0C10; --bg-page-grid: #131620; --ink-page: #F2F3F5; --ink-page-muted: #8B919B;
+    --BrandPrimary: #5B8CFF; --BrandPrimaryPressed: #719DFF; --BrandPrimarySubtle: #172544;
+    --BackgroundPrimary: #111317; --BackgroundSecondary: #181B20; --BackgroundElevated: #262A31;
+    --TextPrimary: #F5F6F7; --TextSecondary: #B8BDC5; --TextTertiary: #8B919B; --TextOnBrand: #081226;
+    --BorderSubtle: #292D33; --BorderDefault: #373B43;
+    --StatusWarning: #FFB44A; --StatusWarningBackground: #3C290C;
+    --StatusSuccess: #4BD166; --StatusSuccessBackground: #14351C;
+    --StatusError: #FF6961; --StatusErrorBackground: #421917;
+    --DocWord: #6392FF; --DocSpreadsheet: #4BC67A; --DocPresentation: #FFA463; --DocPDF: #FF706A;
+    --shadow-frame: 0 30px 60px -20px rgba(0, 0, 0, 0.6), 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg-page);
+    background-image:
+      linear-gradient(var(--bg-page-grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--bg-page-grid) 1px, transparent 1px);
+    background-size: 32px 32px;
+    color: var(--ink-page);
+    font-family: var(--sf);
+    padding: 40px 24px 80px;
+    min-height: 100vh;
+  }
+
+  .page-head { max-width: 1100px; margin: 0 auto 36px; display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+  .page-head h1 { font: 700 28px/1.15 var(--sf); letter-spacing: -0.01em; margin: 0 0 6px; }
+  .page-head p { font: 400 14px/1.5 var(--sf); color: var(--ink-page-muted); margin: 0; max-width: 70ch; }
+  .eyebrow { font: 600 11px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--BrandPrimary); margin: 0 0 10px; }
+
+  .theme-toggle { display: inline-flex; align-items: center; gap: 6px; background: var(--BackgroundPrimary); border: 1px solid var(--BorderDefault); border-radius: 999px; padding: 4px; font: 600 12px/1 var(--mono); }
+  .theme-toggle button { border: none; background: transparent; color: var(--ink-page-muted); padding: 7px 12px; border-radius: 999px; cursor: pointer; font: inherit; }
+  .theme-toggle button.active { background: var(--BrandPrimary); color: var(--TextOnBrand); }
+
+  .lane { max-width: 1100px; margin: 0 auto 56px; }
+  .lane-label { display: flex; align-items: baseline; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
+  .lane-label .n { font: 600 12px/1 var(--mono); color: var(--BrandPrimary); }
+  .lane-label h2 { font: 600 15px/1 var(--sf); margin: 0; }
+  .lane-label .src { font: 400 11px/1 var(--mono); color: var(--ink-page-muted); }
+
+  .frame-row { display: flex; gap: 28px; overflow-x: auto; padding: 6px 6px 20px; scroll-snap-type: x proximity; }
+  .frame-card { flex: 0 0 auto; scroll-snap-align: start; max-width: 300px; }
+  .frame-caption { font: 500 12px/1.45 var(--sf); color: var(--ink-page-muted); margin: 12px 2px 0; }
+  .frame-caption b { color: var(--ink-page); }
+
+  .callout { max-width: 1100px; margin: 0 auto 20px; display: flex; gap: 10px; background: var(--StatusWarningBackground); border: 1px solid color-mix(in srgb, var(--StatusWarning) 35%, transparent); border-radius: 12px; padding: 12px 14px; }
+  .callout svg { flex: 0 0 auto; color: var(--StatusWarning); margin-top: 1px; }
+  .callout p { margin: 0; font: 400 13px/1.55 var(--sf); color: var(--ink-page); max-width: 760px; }
+  .callout code { font-family: var(--mono); font-size: 12px; background: color-mix(in srgb, var(--StatusWarning) 16%, transparent); padding: 1px 4px; border-radius: 4px; }
+
+  /* ---------------- Phone shell ---------------- */
+  .phone { width: 300px; height: 649px; border-radius: 46px; padding: 12px; background: linear-gradient(160deg, #3a3d45, #1c1e23); box-shadow: var(--shadow-frame); }
+  .phone-screen { width: 100%; height: 100%; border-radius: 36px; background: var(--BackgroundSecondary); overflow: hidden; position: relative; display: flex; flex-direction: column; }
+  .status-bar { height: 46px; flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 0 22px; font: 600 13px/1 var(--sf); color: var(--TextPrimary); }
+  .island { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); width: 90px; height: 24px; border-radius: 14px; background: #000; z-index: 2; }
+  .home-indicator { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: 120px; height: 4px; border-radius: 3px; background: var(--TextPrimary); opacity: 0.35; z-index: 6; }
+  .screen-body { flex: 1 1 auto; overflow: hidden; position: relative; }
+
+  .nav { padding: 6px 20px 10px; flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; }
+  .nav .title { font: 700 30px/1.1 var(--sf); letter-spacing: -0.02em; color: var(--TextPrimary); }
+  .nav.inline { padding: 10px 8px; }
+  .nav.inline .title { font: 600 17px/1 var(--sf); }
+  .nav-btn { font: 400 17px/1 var(--sf); color: var(--BrandPrimary); padding: 4px 8px; }
+  .nav-btn.bold { font-weight: 600; }
+  .nav-btn.disabled { color: var(--TextTertiary); opacity: .5; }
+
+  svg.ic { display: block; }
+
+  /* Grouped list (Settings/Tools home style) */
+  .settings-section-label { padding: 16px 20px 6px; font: 600 12px/1 var(--sf); text-transform: uppercase; letter-spacing: 0.04em; color: var(--TextTertiary); }
+  .settings-group { margin: 0 16px; background: var(--BackgroundElevated); border-radius: 12px; border: 1px solid var(--BorderSubtle); overflow: hidden; }
+  .tool-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; }
+  .tool-row + .tool-row { border-top: 1px solid var(--BorderSubtle); }
+  .tool-icon { width: 34px; height: 34px; border-radius: 9px; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+  .tool-meta { min-width: 0; flex: 1 1 auto; }
+  .tool-title { font: 600 15px/1.25 var(--sf); color: var(--TextPrimary); }
+  .tool-sub { font: 400 12.5px/1.35 var(--sf); color: var(--TextTertiary); margin-top: 2px; }
+  .chev { color: var(--TextTertiary); flex: 0 0 auto; }
+
+  /* Body content */
+  .body-pad { padding: 16px 20px; overflow-y: auto; height: 100%; }
+  .section-label { font: 700 12px/1 var(--sf); text-transform: uppercase; letter-spacing: .05em; color: var(--TextTertiary); margin: 0 0 10px; }
+
+  .empty-picker { border: 1.5px dashed var(--BorderDefault); border-radius: 16px; padding: 28px 20px; text-align: center; }
+  .empty-picker svg { color: var(--TextTertiary); margin-bottom: 10px; }
+  .empty-picker .t { font: 600 15px/1.3 var(--sf); color: var(--TextPrimary); margin-bottom: 4px; }
+  .empty-picker .s { font: 400 13px/1.45 var(--sf); color: var(--TextSecondary); }
+
+  .file-group { background: var(--BackgroundElevated); border-radius: 14px; border: 1px solid var(--BorderSubtle); overflow: hidden; margin-bottom: 14px; }
+  .file-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; }
+  .file-row + .file-row { border-top: 1px solid var(--BorderSubtle); }
+  .file-badge { width: 34px; height: 34px; border-radius: 8px; background: color-mix(in srgb, var(--DocPDF) 12%, transparent); display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+  .file-meta { min-width: 0; flex: 1 1 auto; }
+  .file-name { font: 600 14px/1.3 var(--sf); color: var(--TextPrimary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .file-sub { font: 400 11.5px/1.3 var(--sf); color: var(--TextTertiary); margin-top: 1px; }
+  .drag-handle { color: var(--TextTertiary); flex: 0 0 auto; }
+  .remove-btn { color: var(--StatusError); flex: 0 0 auto; }
+
+  .add-more-row { display: flex; align-items: center; gap: 8px; padding: 12px; color: var(--BrandPrimary); font: 600 14px/1 var(--sf); }
+
+  .cta-primary { height: 50px; border-radius: 14px; display: flex; align-items: center; justify-content: center; gap: 8px; background: linear-gradient(180deg, var(--BrandPrimary), var(--BrandPrimaryPressed)); color: var(--TextOnBrand); font: 600 16px/1 var(--sf); box-shadow: 0 10px 20px -8px color-mix(in srgb, var(--BrandPrimary) 50%, transparent); }
+  .cta-primary.disabled { background: var(--BorderDefault); color: var(--TextTertiary); box-shadow: none; }
+  .cta-secondary { height: 46px; border-radius: 13px; display: flex; align-items: center; justify-content: center; gap: 6px; background: var(--BrandPrimarySubtle); color: var(--BrandPrimary); font: 600 14.5px/1 var(--sf); }
+
+  .progress-card { text-align: center; padding: 30px 20px; }
+  .spinner-ring { width: 56px; height: 56px; margin: 0 auto 16px; border-radius: 50%; border: 4px solid var(--BorderSubtle); border-top-color: var(--BrandPrimary); animation: spin 0.9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spinner-ring { animation: none; } }
+  .progress-title { font: 600 15px/1.3 var(--sf); color: var(--TextPrimary); margin-bottom: 4px; }
+  .progress-sub { font: 400 13px/1.4 var(--sf); color: var(--TextSecondary); }
+  .progress-track { height: 6px; border-radius: 3px; background: var(--BorderSubtle); margin: 16px 0 4px; overflow: hidden; }
+  .progress-fill { height: 100%; background: var(--BrandPrimary); border-radius: 3px; }
+
+  .success-card { text-align: center; padding: 24px 20px 8px; }
+  .success-icon { width: 64px; height: 64px; margin: 0 auto 14px; border-radius: 50%; background: var(--StatusSuccessBackground); display: flex; align-items: center; justify-content: center; color: var(--StatusSuccess); }
+  .success-title { font: 700 18px/1.25 var(--sf); color: var(--TextPrimary); margin-bottom: 4px; }
+  .success-sub { font: 400 13px/1.45 var(--sf); color: var(--TextSecondary); margin-bottom: 20px; }
+  .result-file { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--BackgroundElevated); border: 1px solid var(--BorderSubtle); border-radius: 12px; margin-bottom: 16px; text-align: left; }
+
+  .range-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px 6px 12px; border-radius: 999px; background: var(--BrandPrimarySubtle); color: var(--BrandPrimary); font: 600 13px/1 var(--sf); margin: 0 8px 8px 0; }
+  .stepper-row { display: flex; align-items: center; justify-content: space-between; background: var(--BackgroundElevated); border: 1px solid var(--BorderSubtle); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; }
+  .stepper-row .label { font: 500 14.5px/1 var(--sf); color: var(--TextPrimary); }
+  .stepper-row .value { font: 600 14.5px/1 var(--sf); color: var(--TextPrimary); font-variant-numeric: tabular-nums; }
+
+  .privacy-badge { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px; background: var(--StatusSuccessBackground); color: var(--StatusSuccess); font: 600 11.5px/1 var(--sf); margin-bottom: 14px; }
+
+  .lang-row { display: flex; align-items: center; justify-content: space-between; background: var(--BackgroundElevated); border: 1px solid var(--BorderSubtle); border-radius: 12px; padding: 12px 14px; margin-bottom: 20px; }
+  .lang-row .label { font: 500 14.5px/1.3 var(--sf); color: var(--TextPrimary); }
+  .lang-row .value { font: 400 13.5px/1 var(--sf); color: var(--TextTertiary); }
+
+  .page-tabs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 12px; }
+  .page-tab { flex: 0 0 auto; padding: 6px 12px; border-radius: 999px; font: 600 12.5px/1 var(--sf); background: var(--BackgroundElevated); color: var(--TextSecondary); border: 1px solid var(--BorderSubtle); }
+  .page-tab.active { background: var(--BrandPrimarySubtle); color: var(--BrandPrimary); border-color: transparent; }
+  .page-tab .warn-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--StatusWarning); margin-left: 5px; }
+
+  .ocr-text { background: var(--BackgroundElevated); border: 1px solid var(--BorderSubtle); border-radius: 14px; padding: 14px; font: 400 14px/1.6 var(--sf); color: var(--TextPrimary); }
+  .low-conf { background: color-mix(in srgb, var(--StatusWarning) 20%, transparent); border-radius: 3px; padding: 0 1px; }
+
+  .confidence-note { display: flex; align-items: flex-start; gap: 8px; margin-top: 12px; padding: 10px 12px; background: var(--StatusWarningBackground); border-radius: 10px; font: 400 12.5px/1.5 var(--sf); color: var(--TextPrimary); }
+  .confidence-note svg { flex: 0 0 auto; color: var(--StatusWarning); margin-top: 1px; }
+
+  footer.credits { max-width: 1100px; margin: 40px auto 0; font: 400 12px/1.6 var(--mono); color: var(--ink-page-muted); border-top: 1px solid var(--bg-page-grid); padding-top: 18px; }
+</style>
+
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Word Office — Sprint 0.3</p>
+    <h1>PDF Tools — Mockup v1</h1>
+    <p>Bản mockup mới thay cho bản cũ đã mất (theo GUIDELINE.md ghi lại là "đã duyệt bố cục" nhưng file không còn trong repo). Dựng đúng theo <code>Phase0-Implementation-Logic-v2.md</code> §6 (OCR) + §7 (Merge/Split) và đúng phạm vi <code>PDFToolsViewModel</code>/<code>OCRViewModel</code> đã wire sẵn — chỉ PDF (không DOCX/PPTX, engine đó chưa nối vào ViewModel). Dùng đúng token màu thật từ Assets.xcassets, không đoán hex.</p>
+  </div>
+  <div class="theme-toggle" role="group" aria-label="Giao diện">
+    <button type="button" data-theme-btn="light">Sáng</button>
+    <button type="button" data-theme-btn="dark">Tối</button>
+  </div>
+</div>
+
+<div class="lane">
+  <div class="lane-label">
+    <span class="n">01</span>
+    <h2>Tools home</h2>
+    <span class="src">ToolsTabView.swift</span>
+  </div>
+  <div class="frame-row">
+    <div class="frame-card">
+      <div class="phone"><div class="phone-screen">
+        <div class="island"></div>
+        <div class="status-bar"><span>9:41</span><span>●●●</span></div>
+        <div class="nav"><div class="title">Tools</div></div>
+        <div class="screen-body" style="overflow-y:auto">
+          <div class="settings-section-label">PDF</div>
+          <div class="settings-group">
+            <div class="tool-row">
+              <div class="tool-icon" style="background:color-mix(in srgb, var(--DocPDF) 12%, transparent)"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--DocPDF)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="12" height="15" rx="1.5"/><rect x="9" y="3" width="12" height="15" rx="1.5" fill="var(--BackgroundElevated)"/></svg></div>
+              <div class="tool-meta"><div class="tool-title">Merge PDFs</div><div class="tool-sub">Combine 2 or more files into one</div></div>
+              <svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+            </div>
+            <div class="tool-row">
+              <div class="tool-icon" style="background:color-mix(in srgb, var(--DocPDF) 12%, transparent)"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--DocPDF)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="1.5"/><path d="M4 12h16" stroke-dasharray="2.5 2.5"/></svg></div>
+              <div class="tool-meta"><div class="tool-title">Split PDF</div><div class="tool-sub">Break one file into page ranges</div></div>
+              <svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+            </div>
+          </div>
+
+          <div class="settings-section-label">Scan</div>
+          <div class="settings-group">
+            <div class="tool-row">
+              <div class="tool-icon" style="background:var(--BrandPrimarySubtle)"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--BrandPrimary)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V6a2 2 0 0 1 2-2h2M20 8V6a2 2 0 0 1-2-2h-2M4 16v2a2 2 0 0 0 2 2h2M20 16v2a2 2 0 0 1-2 2h-2"/><rect x="8" y="9" width="8" height="6" rx="1"/></svg></div>
+              <div class="tool-meta"><div class="tool-title">Scan &amp; OCR</div><div class="tool-sub">Turn paper into searchable text</div></div>
+              <svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+            </div>
+          </div>
+        </div>
+        <div class="home-indicator"></div>
+      </div></div>
+      <p class="frame-caption">Danh sách gộp nhóm kiểu Settings — chỉ 3 công cụ thật sự đã có engine (PDF merge/split qua PDFKit, OCR qua Vision). Không hiện Compress (đã dời Phase 1) hay merge DOCX/PPTX (engine có sẵn ở tầng Service nhưng chưa nối vào ViewModel).</p>
+    </div>
+  </div>
+</div>
+
+<div class="lane">
+  <div class="lane-label">
+    <span class="n">02</span>
+    <h2>Merge PDFs</h2>
+    <span class="src">MergeSplitCompressView.swift + PDFToolsViewModel.merge()</span>
+  </div>
+  <div class="frame-row">
+
+    <div class="frame-card">
+      <div class="phone"><div class="phone-screen">
+        <div class="island"></div>
+        <div class="status-bar"><span>9:41</span><span>●●●</span></div>
+        <div class="nav inline"><div class="nav-btn">Cancel</div><div class="title">Merge PDFs</div><div class="nav-btn disabled bold">Merge</div></div>
+        <div class="screen-body">
+          <div class="body-pad">
+            <div class="empty-picker">
+              <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+              <div class="t">Add PDF files</div>
+              <div class="s">Pick 2 or more files to combine, in the order you want them merged.</div>
+            </div>
+          </div>
+        </div>
+        <div class="home-indicator"></div>
+      </div></div>
+      <p class="frame-caption">Trạng thái rỗng — chưa chọn file nào, nút "Merge" ở navbar mờ đi (disabled) vì chưa đủ 2 file.</p>
+    </div>
+
+    <div class="frame-card">
+      <div class="phone"><div class="phone-screen">
+        <div class="island"></div>
+        <div class="status-bar"><span>9:41</span><span>●●●</span></div>
+        <div class="nav inline"><div class="nav-btn">Cancel</div><div class="title">Merge PDFs</div><div class="nav-btn bold">Merge</div></div>
+        <div class="screen-body">
+          <div class="body-pad">
+            <div class="section-label">3 files · will merge in this order</div>
+            <div class="file-group">
+              <div class="file-row">
+                <svg class="drag-handle" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+                <div class="file-badge"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--DocPDF)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6z"/><path d="M9 13h6M9 16h4"/></svg></div>
+                <div class="file-meta"><div class="file-name">Contract Cover.pdf</div><div class="file-sub">2 pages · 340 KB</div></div>
+                <svg class="remove-btn" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5l5 5M14.5 9.5l-5 5"/></svg>
+              </div>
+              <div class="file-row">
+                <svg class="drag-handle" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+                <div class="file-badge"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--DocPDF)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6z"/><path d="M9 13h6M9 16h4"/></svg></div>
+                <div class="file-meta"><div class="file-name">Service Contract.pdf</div><div class="file-sub">8 pages · 1.1 MB</div></div>
+                <svg class="remove-btn" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5l5 5M14.5 9.5l-5 5"/></svg>
+              </div>
+              <div class="file-row">
+                <svg class="drag-handle" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+                <div class="file-badge"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--DocPDF)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6z"/><path d="M9 13h6M9 16h4"/></svg></div>
+                <div class="file-meta"><div class="file-name">Signature Page.pdf</div><div class="file-sub">1 page · 90 KB</div></div>
+                <svg class="remove-btn" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5l5 5M14.5 9.5l-5 5"/></svg>
+              </div>
+              <div class="add-more-row">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                Add more files
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="home-indicator"></div>
+      </div></div>
+      <p class="frame-caption">Đã chọn 3 file, kéo thả (drag handle) để đổi thứ tự ghép — đúng thứ tự user thấy trên list. Nút "Merge" ở navbar bật sáng vì đủ ≥2 file.</p>
+    </div>
+
+    <div class="frame-card">
+      <div class="phone"><div class="phone-screen">
+        <div class="island"></div>
+        <div class="status-bar"><span>9:41</span><span>●●●</span></div>
+        <div class="nav inline"><div style="width:60px"></div><div class="title">Merging…</div><div style="width:60px"></div></div>
+        <div class="screen-body" style="display:flex;align-items:center;justify-content:center">
+          <div class="progress-card">
+            <div class="spinner-ring"></div>
+            <div class="progress-title">Merging 3 files</div>
+            <div class="progress-sub">Running in the background — won't block the app.</div>
+          </div>
+        </div>
+        <div class="home-indicator"></div>
+      </div></div>
+      <p class="frame-caption">Đang chạy nền (§7.3) — không block UI, không có nút Cancel vì thao tác PDFKit nhanh (khác OCR scan nhiều trang cần progress % chi tiết hơn).</p>
+    </div>
+
+    <div class="frame-card">
+      <div class="phone"><div class="phone-screen">
+        <div class="island"></div>
+        <div class="status-bar"><span>9:41</span><span>●●●</span></div>
+        <div class="nav inline"><div style="width:60px"></div><div class="title">Merge PDFs</div><div class="nav-btn bold">Done</div></div>
+        <div class="screen-body">
+          <div class="body-pad">
+            <div class="success-card">
+              <div class="success-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div>
+              <div class="success-title">Merged successfully</div>
+              <div class="success-sub">Saved to your Documents — it'll show up in Library too.</div>
+            </div>
+            <div class="result-file">
+              <div class="file-badge"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--DocPDF)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6z"/><path d="M9 13h6M9 16h4"/></svg></div>
+              <div class="file-meta"><div class="file-name">Merged.pdf</div><div class="file-sub">11 pages · 1.5 MB</div></div>
+            </div>
+            <div class="cta-primary" style="margin-bottom:10px">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v8H6z"/></svg>
+              Print
+            </div>
+            <div class="cta-secondary">Open in Library</div>
+          </div>
+        </div>
+        <div class="home-indicator"></div>
+      </div></div>
+      <p class="frame-caption">Kết quả lưu vào <code>Documents/</code> — đúng cùng chỗ scanner của Tủ hồ sơ quét, nên file xuất hiện luôn trong Library không cần bước import riêng. "Print" gọi thẳng <code>PDFToolsViewModel.print()</code> (AirPrint).</p>
+    </div>
+
+  </div>
+</div>
+
+<div class="lane">
+  <div class="lane-label">
+    <span class="n">03</span>
+    <h2>Split PDF</h2>
+    <span class="src">MergeSplitCompressView.swift + PDFToolsViewModel.split()</span>
+  </div>
+  <div class="frame-row">
+
+    <div class="frame-card">
+      <div class="phone"><div class="phone-screen">
+        <div class="island"></div>
+        <div class="status-bar"><span>9:41</span><span>●●●</span></div>
+        <div class="nav inline"><div class="nav-btn">Cancel</div><div class="title">Split PDF</div><div style="width:50px"></div></div>
+        <div class="screen-body">
+          <div class="body-pad">
+            <div class="empty-picker">
+              <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 12h16" stroke-dasharray="2.5 2.5"/></svg>
+              <div class="t">Choose a PDF</div>
+              <div class="s">Pick one file, then define the page ranges you want split out.</div>
+            </div>
+          </div>
+        </div>
+        <div class="home-indicator"></div>
+      </div></div>
+      <p class="frame-caption">Trạng thái rỗng — Split chỉ nhận 1 file input (khác Merge nhận nhiều).</p>
+    </div>
+
+    <div class="frame-card">
+      <div class="phone"><div class="phone-screen">
+        <div class="island"></div>
+        <div class="status-bar"><span>9:41</span><span>●●●</span></div>
+        <div class="nav inline"><div class="nav-btn">Cancel</div><div class="title">Split PDF</div><div class="nav-btn bold">Split</div></div>
+        <div class="screen-body">
+          <div class="body-pad">
+            <div class="file-group" style="margin-bottom:20px">
+              <div class="file-row">
+                <div class="file-badge"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--DocPDF)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6z"/><path d="M9 13h6M9 16h4"/></svg></div>
+                <div class="file-meta"><div class="file-name">Annual Report.pdf</div><div class="file-sub">24 pages · 3.2 MB</div></div>
+              </div>
+            </div>
+
+            <div class="section-label">Page ranges</div>
+            <div style="margin-bottom:14px">
+              <span class="range-chip">1–5 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></span>
+              <span class="range-chip">6–20 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></span>
+            </div>
+
+            <div class="stepper-row"><span class="label">From page</span><span class="value">21</span></div>
+            <div class="stepper-row"><span class="label">To page</span><span class="value">24</span></div>
+            <div class="cta-secondary">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+              Add this range
+            </div>
+          </div>
+        </div>
+        <div class="home-indicator"></div>
+      </div></div>
+      <p class="frame-caption">2 range đã thêm (1–5, 6–20), đang nhập range thứ 3 (21–24) qua stepper — khớp đúng kiểu <code>[ClosedRange&lt;Int&gt;]</code> mà <code>split()</code> nhận. 3 range → 3 file output.</p>
+    </div>
+
+    <div class="frame-card">
+      <div class="phone"><div class="phone-screen">
+        <div class="island"></div>
+        <div class="status-bar"><span>9:41</span><span>●●●</span></div>
+        <div class="nav inline"><div style="width:60px"></div><div class="title">Split PDF</div><div class="nav-btn bold">Done</div></div>
+        <div class="screen-body">
+          <div class="body-pad">
+            <div class="success-card" style="padding-top:8px">
+              <div class="success-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div>
+              <div class="success-title">Split into 3 files</div>
+              <div class="success-sub">Saved to your Documents.</div>
+            </div>
+            <div class="file-group">
+              <div class="file-row"><div class="file-badge"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--DocPDF)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6z"/></svg></div><div class="file-meta"><div class="file-name">Annual Report 1.pdf</div><div class="file-sub">Pages 1–5</div></div></div>
+              <div class="file-row"><div class="file-badge"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--DocPDF)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6z"/></svg></div><div class="file-meta"><div class="file-name">Annual Report 2.pdf</div><div class="file-sub">Pages 6–20</div></div></div>
+              <div class="file-row"><div class="file-badge"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--DocPDF)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6z"/></svg></div><div class="file-meta"><div class="file-name">Annual Report 3.pdf</div><div class="file-sub">Pages 21–24</div></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="home-indicator"></div>
+      </div></div>
+      <p class="frame-caption">Tên file tự đặt tránh trùng qua <code>FileManager+NonConflictingURL</code> (đã gom logic dùng chung sau đợt code-review trước). Không cần nút Print ở đây — nhiều file, ít có nhu cầu in ngay so với Merge.</p>
+    </div>
+
+  </div>
+</div>
+
+<div class="lane">
+  <div class="lane-label">
+    <span class="n">04</span>
+    <h2>Scan &amp; OCR</h2>
+    <span class="src">ScanFlowView.swift + OCRPreviewView.swift + OCRViewModel</span>
+  </div>
+  <div class="frame-row">
+
+    <div class="frame-card">
+      <div class="phone"><div class="phone-screen">
+        <div class="island"></div>
+        <div class="status-bar"><span>9:41</span><span>●●●</span></div>
+        <div class="nav"><div class="title">Scan &amp; OCR</div></div>
+        <div class="screen-body">
+          <div class="body-pad">
+            <div class="privacy-badge">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+              On-device — nothing leaves your phone
+            </div>
+            <div class="lang-row">
+              <div class="label">Recognition language</div>
+              <div class="value">Vietnamese, English ›</div>
+            </div>
+            <div class="empty-picker">
+              <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V6a2 2 0 0 1 2-2h2M20 8V6a2 2 0 0 1-2-2h-2M4 16v2a2 2 0 0 0 2 2h2M20 16v2a2 2 0 0 1-2 2h-2"/><rect x="8" y="9" width="8" height="6" rx="1"/></svg>
+              <div class="t">Scan a document</div>
+              <div class="s">Opens the system document scanner — flattens perspective and detects edges automatically.</div>
+            </div>
+          </div>
+        </div>
+        <div class="home-indicator"></div>
+      </div></div>
+      <p class="frame-caption">Badge "On-device" cố ý làm nổi bật — §6.5 ghi rõ đây là điểm khác biệt với AI tóm tắt/AI tạo văn bản (đều phải gọi cloud). Ngôn ngữ mặc định theo hệ thống, cho sửa tay trước khi scan (§6.3). Nút "Scan a document" mở <code>VNDocumentCameraViewController</code> — UI hệ thống, không mock được ở đây.</p>
+    </div>
+
+    <div class="frame-card">
+      <div class="phone"><div class="phone-screen">
+        <div class="island"></div>
+        <div class="status-bar"><span>9:41</span><span>●●●</span></div>
+        <div class="nav inline"><div style="width:60px"></div><div class="title">Recognizing…</div><div style="width:60px"></div></div>
+        <div class="screen-body" style="display:flex;align-items:center;justify-content:center">
+          <div class="progress-card" style="width:100%">
+            <div class="spinner-ring"></div>
+            <div class="progress-title">Recognizing page 4 of 6</div>
+            <div class="progress-sub">Up to 3 pages processed at once.</div>
+            <div class="progress-track"><div class="progress-fill" style="width:58%"></div></div>
+          </div>
+        </div>
+        <div class="home-indicator"></div>
+      </div></div>
+      <p class="frame-caption">Tiến độ theo từng trang — đúng <code>OCRViewModel.completedPageCount</code>/<code>totalPageCount</code>, giới hạn 3 trang chạy song song (§6.2, Vision khá nặng CPU).</p>
+    </div>
+
+    <div class="frame-card">
+      <div class="phone"><div class="phone-screen">
+        <div class="island"></div>
+        <div class="status-bar"><span>9:41</span><span>●●●</span></div>
+        <div class="nav inline"><div style="width:60px"></div><div class="title">Result</div><div class="nav-btn bold">Save</div></div>
+        <div class="screen-body">
+          <div class="body-pad">
+            <div class="page-tabs">
+              <div class="page-tab">1</div>
+              <div class="page-tab active">2<span class="warn-dot"></span></div>
+              <div class="page-tab">3</div>
+              <div class="page-tab">4</div>
+              <div class="page-tab">5</div>
+              <div class="page-tab">6</div>
+            </div>
+            <div class="ocr-text">
+              Service Agreement between <span class="low-conf">Ngưyễn</span> Văn A and Word Office Co., Ltd, effective from <span class="low-conf">03/1a/2026</span>. Both parties agree to the terms outlined in Section 2 below regarding scope of work and payment schedule.
+            </div>
+            <div class="confidence-note">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a6 6 0 0 0-6 6v4l-2 3h16l-2-3V8a6 6 0 0 0-6-6Z"/></svg>
+              2 words on this page have low confidence (highlighted) — double-check them before saving.
+            </div>
+          </div>
+        </div>
+        <div class="home-indicator"></div>
+      </div></div>
+      <p class="frame-caption">Tab trang nào có block confidence &lt;0.5 thì có chấm cam nhỏ (page 2 ở đây) — đúng §6.4 "không im lặng khi nhận diện sai". Chữ nghi ngờ tô vàng nhạt ngay trong văn bản, không chỉ báo chung chung. "Save" xuất PDF searchable (§6.5a, output MVP) — chưa xuất .docx sửa được (để Phase sau).</p>
+    </div>
+
+  </div>
+</div>
+
+<footer class="credits">Màu dùng đúng giá trị hex thật từ Assets.xcassets (BrandPrimary/DocumentPDF/StatusWarning...) — không đoán. Scope giới hạn đúng theo PDFToolsViewModel/OCRViewModel đã wire (PDF only, chưa DOCX/PPTX merge) · bấm Sáng/Tối để test cả 2 theme.</footer>

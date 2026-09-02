@@ -13,6 +13,7 @@ actor AutosaveScheduler: AutosaveScheduling {
         var debounceTask: Task<Void, Never>
         var hardIntervalTask: Task<Void, Never>
         var save: @Sendable () async throws -> Void
+        var onResult: @MainActor @Sendable (AutosaveOutcome) -> Void
     }
 
     private var pending: [UUID: Pending] = [:]
@@ -30,7 +31,11 @@ actor AutosaveScheduler: AutosaveScheduling {
 
     // MARK: - AutosaveScheduling
 
-    func scheduleChange(id: UUID, save: @escaping @Sendable () async throws -> Void) async {
+    func scheduleChange(
+        id: UUID,
+        save: @escaping @Sendable () async throws -> Void,
+        onResult: @escaping @MainActor @Sendable (AutosaveOutcome) -> Void
+    ) async {
         // Cancel the previous debounce task; keep the hard-interval running.
         pending[id]?.debounceTask.cancel()
 
@@ -56,7 +61,8 @@ actor AutosaveScheduler: AutosaveScheduling {
         pending[id] = Pending(
             debounceTask: debounceTask,
             hardIntervalTask: hardTask,
-            save: save
+            save: save,
+            onResult: onResult
         )
     }
 
@@ -69,21 +75,24 @@ actor AutosaveScheduler: AutosaveScheduling {
     func flush(id: UUID) async {
         guard let entry = pending[id] else { return }
         entry.debounceTask.cancel()
-        do {
-            try await entry.save()
-        } catch {
-            // Sprint 0.1: swallow; Sprint 0.5 wire to SessionStore.autosaveStatus.failed
-        }
+        await attemptSave(entry)
     }
 
     // MARK: - Private
 
     private func performSave(id: UUID) async {
         guard let entry = pending[id] else { return }
+        await attemptSave(entry)
+    }
+
+    /// Never swallows the outcome (§7.3 "never silent data loss") — every attempt,
+    /// scheduled or flushed, reports back through `onResult` on `MainActor`.
+    private func attemptSave(_ entry: Pending) async {
         do {
             try await entry.save()
+            await entry.onResult(.saved)
         } catch {
-            // Sprint 0.1: swallow; Sprint 0.5 wire to SessionStore.autosaveStatus.failed
+            await entry.onResult(.failed(message: error.localizedDescription))
         }
     }
 }

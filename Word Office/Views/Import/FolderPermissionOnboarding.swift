@@ -4,6 +4,7 @@ import SwiftUI
 /// grant that unlocks the whole library. The "aha" framed in `product-strategy-master`.
 struct FolderPermissionOnboarding: View {
     @Bindable var viewModel: FolderPermissionViewModel
+    let onSkip: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -33,6 +34,9 @@ struct FolderPermissionOnboarding: View {
 
             primaryCTA
                 .padding(.horizontal, DSSpacing.lg)
+                .padding(.bottom, DSSpacing.sm)
+
+            skipButton
                 .padding(.bottom, DSSpacing.xl)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -81,7 +85,7 @@ struct FolderPermissionOnboarding: View {
                 .foregroundStyle(Color.dsTextPrimary)
                 .multilineTextAlignment(.center)
 
-            Text("Pick a folder that holds your documents. Word Office scans it and tracks status — files stay in place, nothing is copied or uploaded.")
+            Text("Pick a folder that holds your documents. Word Office scans it and tracks status — files stay in place, nothing is copied or uploaded")
                 .font(.system(size: 15))
                 .foregroundStyle(Color.dsTextSecondary)
                 .multilineTextAlignment(.center)
@@ -100,7 +104,7 @@ struct FolderPermissionOnboarding: View {
                        subtitle: "Local metadata only")
             featureRow(icon: "arrow.triangle.2.circlepath",
                        title: "Change folder any time",
-                       subtitle: "Reset from the toolbar menu")
+                       subtitle: "Reset from Settings")
         }
     }
 
@@ -163,6 +167,13 @@ struct FolderPermissionOnboarding: View {
         .buttonStyle(PressableButtonStyle())
     }
 
+    private var skipButton: some View {
+        Button("Skip for now", action: onSkip)
+            .font(.system(size: 15, weight: .medium))
+            .foregroundStyle(Color.dsTextSecondary)
+            .disabled(viewModel.isRequesting)
+    }
+
     private var backgroundGradient: some View {
         LinearGradient(
             colors: [
@@ -223,7 +234,7 @@ private struct OnboardingPreview: View {
     }
 
     var body: some View {
-        FolderPermissionOnboarding(viewModel: viewModel)
+        FolderPermissionOnboarding(viewModel: viewModel, onSkip: {})
     }
 }
 
@@ -232,5 +243,5 @@ private struct OnboardingPreview: View {
 }
 
 #Preview("With error") {
-    OnboardingPreview(errorMessage: "System denied folder access. Please try again.")
+    OnboardingPreview(errorMessage: "System denied folder access. Please try again")
 }

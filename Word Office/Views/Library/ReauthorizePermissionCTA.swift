@@ -80,7 +80,7 @@ struct ReauthorizePermissionCTA: View {
                 .foregroundStyle(Color.dsTextPrimary)
                 .multilineTextAlignment(.center)
 
-            Text("iOS revoked access, or the folder was moved. Grant access again to pick up where you left off — your status data is still safe.")
+            Text("iOS revoked access, or the folder was moved. Grant access again to pick up where you left off — your status data is still safe")
                 .font(.system(size: 15))
                 .foregroundStyle(Color.dsTextSecondary)
                 .multilineTextAlignment(.center)
@@ -195,5 +195,5 @@ private struct ReauthCTAPreview: View {
 }
 
 #Preview("With error") {
-    ReauthCTAPreview(errorMessage: "Could not open the folder picker.")
+    ReauthCTAPreview(errorMessage: "Could not open the folder picker")
 }

@@ -6,16 +6,21 @@ struct DocumentMetadata: Identifiable, Hashable, Sendable, Codable {
     var lastOpenedAt: Date
     var lastModifiedAt: Date
     var remindAt: Date?
+    /// User-set pin, independent of `status` — a separate filter axis (Library-Home-v10
+    /// mockup). Never auto-inferred, same "no auto-suggestion" rule as `status`.
+    var isFavourite: Bool
 
-    init(id: String,
+    nonisolated init(id: String,
          status: DocumentStatus = .draft,
          lastOpenedAt: Date = Date(),
          lastModifiedAt: Date = Date(),
-         remindAt: Date? = nil) {
+         remindAt: Date? = nil,
+         isFavourite: Bool = false) {
         self.id = id
         self.status = status
         self.lastOpenedAt = lastOpenedAt
         self.lastModifiedAt = lastModifiedAt
         self.remindAt = remindAt
+        self.isFavourite = isFavourite
     }
 }

@@ -3,11 +3,22 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(ThemeStore.self) private var themeStore
 
+    /// Resets the granted-folder bookmark and sends `RootView` back to onboarding.
+    /// Wired to `FolderPermissionViewModel.resetPermission()` by the caller — this
+    /// view owns no permission state itself.
+    let onChangeFolder: () async -> Void
+
     var body: some View {
         @Bindable var theme = themeStore
 
         NavigationStack {
             Form {
+                Section("Library") {
+                    Button("Change folder…") {
+                        Task { await onChangeFolder() }
+                    }
+                }
+
                 Section("Appearance") {
                     Picker("Theme", selection: $theme.appearance) {
                         ForEach(AppTheme.allCases, id: \.self) { t in

@@ -19,12 +19,20 @@ extension URL {
     }
 
     private func relativePathDigest(from folderURL: URL) -> String {
-        let folderPath = folderURL.standardizedFileURL.path
-        let selfPath = standardizedFileURL.path
+        let folderPath = folderURL.resolvingSymlinksInPath().path
+        let selfPath = resolvingSymlinksInPath().path
         let relative = selfPath.hasPrefix(folderPath)
             ? String(selfPath.dropFirst(folderPath.count))
             : selfPath
-        let digest = SHA256.hash(data: Data(relative.utf8))
+        // Hash `folderPath` too, not just `relative` — `loadLibrary()` calls this
+        // once per source folder (the granted folder, then the sandbox
+        // `Documents/`, per its dual-source scan). Hashing only the relative
+        // suffix means a same-named file at the same relative position under
+        // two different source folders (e.g. both happen to have a root-level
+        // "Notes.docx") produces an identical ID, so `mergeSecondSource` treats
+        // one as a duplicate of the other and metadata gets applied to the
+        // wrong physical file.
+        let digest = SHA256.hash(data: Data((folderPath + "\u{0}" + relative).utf8))
         return digest.prefix(12).map { String(format: "%02x", $0) }.joined()
     }
 }

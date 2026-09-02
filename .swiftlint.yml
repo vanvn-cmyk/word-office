@@ -1,0 +1,16 @@
+only_rules:
+  - custom_rules
+
+excluded:
+  - Word OfficeTests
+  - .agents
+  - .build
+
+custom_rules:
+  no_direct_sdk_import:
+    included: ".*\\.swift"
+    excluded: ".*/Services/Implementations/SDK/.*"
+    name: "No direct Artifex SDK import"
+    regex: '^\s*import\s+Artifex\b'
+    message: "Only files under Services/Implementations/SDK/ may `import Artifex` (DIP boundary — PHASE_1_ARCHITECTURE.md §3). Depend on DocumentReading/DocumentWriting/DocumentSessionManaging protocols everywhere else."
+    severity: error

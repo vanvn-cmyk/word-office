@@ -28,6 +28,21 @@ final class DependencyContainer {
 
     let crashRecoveryScanner: CrashRecoveryScanner
 
+    // MARK: - PDF power tools + OCR + print (Sprint 0.3 — native, no SDK/SPM dependency)
+
+    let pdfMerger: PDFKitMerger
+    let pdfSplitter: PDFKitSplitter
+    let textRecognizer: VisionTextRecognizer
+    let documentPrinter: AirPrintCoordinator
+
+    // MARK: - Convert (§7.4, 2026-09-01 — Office↔PDF, Image↔PDF)
+
+    let documentExporter: MockArtifexDocumentExporter
+    let pdfTextExtractor: PDFKitTextExtractor
+    let pdfImageExporter: PDFKitImageExporter
+    let imagePDFExporter: UIGraphicsImagePDFExporter
+    let searchablePDFRenderer: CGSearchablePDFRenderer
+
     init() {
         let docsURL = URL.documentsDirectory
         self.localFileService = LocalFileServiceImpl(documentsURL: docsURL)
@@ -56,6 +71,17 @@ final class DependencyContainer {
         )
 
         self.crashRecoveryScanner = CrashRecoveryScanner(documentsURL: docsURL)
+
+        self.pdfMerger = PDFKitMerger()
+        self.pdfSplitter = PDFKitSplitter()
+        self.textRecognizer = VisionTextRecognizer()
+        self.documentPrinter = AirPrintCoordinator()
+
+        self.documentExporter = MockArtifexDocumentExporter()
+        self.pdfTextExtractor = PDFKitTextExtractor(recognizer: textRecognizer)
+        self.pdfImageExporter = PDFKitImageExporter()
+        self.imagePDFExporter = UIGraphicsImagePDFExporter()
+        self.searchablePDFRenderer = CGSearchablePDFRenderer()
     }
 
     // MARK: - Document session (SDK-backed)
@@ -109,6 +135,41 @@ final class DependencyContainer {
         SettingsViewModel()
     }
 
+    // MARK: - PDF Tools + OCR ViewModel factories (Sprint 0.3 — native, no SDK dependency)
+
+    func makePDFToolsViewModel() -> PDFToolsViewModel {
+        PDFToolsViewModel(
+            merger: pdfMerger,
+            splitter: pdfSplitter,
+            printer: documentPrinter,
+            exporter: documentExporter,
+            textExtractor: pdfTextExtractor,
+            imageExporter: pdfImageExporter,
+            pdfFromImages: imagePDFExporter,
+            documentsURL: localFileService.documentsURL,
+            recognitionLanguages: Self.defaultRecognitionLanguages()
+        )
+    }
+
+    func makeOCRViewModel() -> OCRViewModel {
+        OCRViewModel(
+            recognizer: textRecognizer,
+            searchablePDFRenderer: searchablePDFRenderer,
+            recognitionLanguages: Self.defaultRecognitionLanguages()
+        )
+    }
+
+    /// System language(s) first, English guaranteed as a fallback — never
+    /// hardcode English alone (§6.3). `Locale.preferredLanguages` already
+    /// yields well-formed BCP-47 tags (e.g. "vi-VN") that Vision accepts as-is.
+    private static func defaultRecognitionLanguages() -> [String] {
+        var languages = Locale.preferredLanguages
+        if !languages.contains(where: { $0.hasPrefix("en") }) {
+            languages.append("en-US")
+        }
+        return languages
+    }
+
     // MARK: - Library ViewModel factories (take LibraryStore as param — store lives at app scope)
 
     func makeLibraryViewModel(store: LibraryStore) -> LibraryViewModel {
@@ -118,7 +179,9 @@ final class DependencyContainer {
             scanner: documentLibraryScanner,
             metadataStore: metadataStore,
             reminders: remindScheduler,
-            importer: documentImporter
+            importer: documentImporter,
+            documentCreator: localFileService,
+            documentsURL: localFileService.documentsURL
         )
     }
 

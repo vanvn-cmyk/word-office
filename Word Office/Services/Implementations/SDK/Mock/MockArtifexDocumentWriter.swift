@@ -2,7 +2,8 @@ import Foundation
 import UIKit  // NSAttributedString RTF data(from:documentAttributes:) requires UIKit under Swift 6 MemberImportVisibility
 
 /// Mock writer. Sprint 0.1: real RTF/TXT/Markdown writes so autosave round-trip can be tested.
-/// DOCX/XLSX/PPTX/PDF no-op (Artifex writer swap in Sprint 0.2).
+/// DOCX now writes a real minimal OOXML package via `DOCXCodec` (plain text only — see that
+/// file's header comment). XLSX/PPTX/PDF still no-op. Real writer swap in Sprint 0.2.
 final class MockArtifexDocumentWriter: DocumentWriting {
     let kind: DocumentKind
 
@@ -24,7 +25,15 @@ final class MockArtifexDocumentWriter: DocumentWriting {
             )
             try data.write(to: url, options: .atomic)
 
-        case .docx, .xlsx, .pptx, .pdf, .doc, .xls, .ppt, .hwp, .hwpx:
+        case .docx:
+            // Same reasoning as MockArtifexDocumentReader's .docx case — must run
+            // off the caller's actor (autosave calls this from MainActor).
+            let text = content.attributedText
+            try await Task.detached(priority: .utility) {
+                try DOCXCodec.write(text, to: url)
+            }.value
+
+        case .xlsx, .pptx, .pdf, .doc, .xls, .ppt, .hwp, .hwpx:
             // Mock: no-op. Real writer via Artifex SDK arrives Sprint 0.2.
             break
         }

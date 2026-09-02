@@ -57,6 +57,12 @@ final class MetadataStoreImpl: MetadataStoring {
             )
         }
 
+        migrator.registerMigration("v2_favourite") { db in
+            try db.alter(table: "document_metadata") { t in
+                t.add(column: "is_favourite", .boolean).notNull().defaults(to: false)
+            }
+        }
+
         try migrator.migrate(db)
     }
 
@@ -74,20 +80,22 @@ final class MetadataStoreImpl: MetadataStoring {
             try db.execute(
                 sql: """
                     INSERT INTO document_metadata
-                        (id, status, last_opened_at, last_modified_at, remind_at)
-                    VALUES (?, ?, ?, ?, ?)
+                        (id, status, last_opened_at, last_modified_at, remind_at, is_favourite)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         status           = excluded.status,
                         last_opened_at   = excluded.last_opened_at,
                         last_modified_at = excluded.last_modified_at,
-                        remind_at        = excluded.remind_at
+                        remind_at        = excluded.remind_at,
+                        is_favourite     = excluded.is_favourite
                     """,
                 arguments: [
                     metadata.id,
                     metadata.status.rawValue,
                     metadata.lastOpenedAt.timeIntervalSince1970,
                     metadata.lastModifiedAt.timeIntervalSince1970,
-                    metadata.remindAt?.timeIntervalSince1970
+                    metadata.remindAt?.timeIntervalSince1970,
+                    metadata.isFavourite
                 ]
             )
         }
@@ -155,7 +163,8 @@ final class MetadataStoreImpl: MetadataStoring {
             status: DocumentStatus(rawValue: row["status"]) ?? .draft,
             lastOpenedAt: Date(timeIntervalSince1970: row["last_opened_at"]),
             lastModifiedAt: Date(timeIntervalSince1970: row["last_modified_at"]),
-            remindAt: (row["remind_at"] as TimeInterval?).map { Date(timeIntervalSince1970: $0) }
+            remindAt: (row["remind_at"] as TimeInterval?).map { Date(timeIntervalSince1970: $0) },
+            isFavourite: row["is_favourite"]
         )
     }
 

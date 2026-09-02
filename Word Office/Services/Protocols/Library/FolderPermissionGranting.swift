@@ -17,7 +17,7 @@ enum FolderPermissionError: Error, Sendable, LocalizedError {
         switch self {
         case .pickerFailed(let u):            "Couldn't open the folder picker: \(u)"
         case .bookmarkCreationFailed(let u):  "Couldn't create folder access: \(u)"
-        case .securityScopeAccessDenied:      "The system denied folder access."
+        case .securityScopeAccessDenied:      "The system denied folder access"
         }
     }
 }

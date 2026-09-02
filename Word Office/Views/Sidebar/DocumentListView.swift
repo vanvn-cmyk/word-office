@@ -14,7 +14,7 @@ struct DocumentListView: View {
                 EmptyStateView(
                     icon: "doc.badge.plus",
                     title: "No documents yet",
-                    message: "Create your first document to get started."
+                    message: "Create your first document to get started"
                 )
             } else {
                 List(selection: $selection) {

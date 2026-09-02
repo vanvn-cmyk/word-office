@@ -21,8 +21,10 @@ extension LibraryViewModel {
 
     /// Entries with `remindAt <= now`, sorted by remindAt ascending (soonest first).
     /// Rendered as the "Needs attention" section on top of `LibraryView`.
+    /// Reads `filteredEntries` (not `store.entries`) so the active type/status
+    /// filter narrows the set before due-sorting runs — see `+Filtering`.
     func dueReminderEntries(now: Date = .now) -> [LibraryEntry] {
-        store.entries
+        filteredEntries
             .filter { entry in
                 guard let remindAt = entry.metadata.remindAt else { return false }
                 return remindAt <= now
@@ -32,11 +34,12 @@ extension LibraryViewModel {
             }
     }
 
-    /// Non-due entries grouped by `DateBucket`, sorted by `modifiedAt` descending
-    /// inside each bucket. Empty buckets are dropped — view iterates only what it renders.
+    /// Non-due entries (from `filteredEntries`) grouped by `DateBucket`, sorted by
+    /// `modifiedAt` descending inside each bucket. Empty buckets are dropped —
+    /// view iterates only what it renders.
     func groupedEntries(now: Date = .now) -> [(bucket: DateBucket, entries: [LibraryEntry])] {
         let dueIDs = Set(dueReminderEntries(now: now).map(\.id))
-        let nonDue = store.entries
+        let nonDue = filteredEntries
             .filter { !dueIDs.contains($0.id) }
             .sorted { $0.document.modifiedAt > $1.document.modifiedAt }
 

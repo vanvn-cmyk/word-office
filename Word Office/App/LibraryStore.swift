@@ -13,6 +13,11 @@ final class LibraryStore {
     var entries: [LibraryEntry] = []
     var folderPermissionState: FolderPermissionState = .checking
 
+    /// Set when the user taps "Skip for now" on the permission onboarding screen.
+    /// In-memory only (never persisted) — a fresh cold launch re-shows onboarding
+    /// as long as no folder is granted, keeping the core-loop conversion chance alive.
+    var didSkipFolderOnboarding: Bool = false
+
     /// Drives the badge count on `LibraryView`. Derived — never write directly.
     /// See Library-Architecture.md §4 scenario 4 (status change → draftCount decreases automatically).
     var draftCount: Int {

@@ -77,18 +77,6 @@ final class LocalFileServiceImpl: DocumentListing, DocumentCreating {
     /// Auto-suffix "(2)", "(3)"... when the desired filename already exists.
     /// See Phase0-Implementation-Logic.md §5.4.
     private func nonConflictingURL(for fileName: String) throws -> URL {
-        let base = documentsURL.appendingPathComponent(fileName)
-        guard fileManager.fileExists(atPath: base.path) else { return base }
-
-        let ext = base.pathExtension
-        let stem = base.deletingPathExtension().lastPathComponent
-        var counter = 2
-        while true {
-            let candidate = documentsURL
-                .appendingPathComponent("\(stem) (\(counter))")
-                .appendingPathExtension(ext)
-            if !fileManager.fileExists(atPath: candidate.path) { return candidate }
-            counter += 1
-        }
+        fileManager.nonConflictingURL(for: fileName, in: documentsURL)
     }
 }

@@ -19,6 +19,7 @@ struct LibraryViewModelTests {
     let metadata: MockMetadataStore
     let reminders: MockReminders
     let importer: MockImporter
+    let creator: MockDocumentCreator
     let vm: LibraryViewModel
     let folderURL: URL
 
@@ -29,6 +30,7 @@ struct LibraryViewModelTests {
         self.metadata = MockMetadataStore()
         self.reminders = MockReminders()
         self.importer = MockImporter()
+        self.creator = MockDocumentCreator()
         self.folderURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("wordoffice-vm-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
@@ -39,7 +41,9 @@ struct LibraryViewModelTests {
             scanner: scanner,
             metadataStore: metadata,
             reminders: reminders,
-            importer: importer
+            importer: importer,
+            documentCreator: creator,
+            documentsURL: folderURL
         )
     }
 
@@ -320,5 +324,21 @@ final class MockImporter: DocumentImporting, @unchecked Sendable {
     func importFiles(from urls: [URL]) async -> [ImportOutcome] {
         lastImportedURLs = urls
         return outcomes
+    }
+}
+
+final class MockDocumentCreator: DocumentCreating, @unchecked Sendable {
+    var createdRequests: [(name: String, kind: DocumentKind)] = []
+    var result: Result<DocumentRef, Error>?
+
+    func create(name: String, kind: DocumentKind) async throws -> DocumentRef {
+        createdRequests.append((name, kind))
+        if let result { return try result.get() }
+        return DocumentRef(
+            name: "\(name).\(kind.rawValue)",
+            url: FileManager.default.temporaryDirectory.appendingPathComponent("\(name)-\(UUID().uuidString).\(kind.rawValue)"),
+            modifiedAt: Date(),
+            kind: kind
+        )
     }
 }

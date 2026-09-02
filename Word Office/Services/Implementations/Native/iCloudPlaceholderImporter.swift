@@ -8,7 +8,7 @@ import Foundation
 /// the query and forwards start/stop to main.
 actor ICloudPlaceholderImporter {
     struct DownloadTimeoutError: Error, LocalizedError {
-        var errorDescription: String? { "iCloud download timed out." }
+        var errorDescription: String? { "iCloud download timed out" }
     }
 
     /// Return whether the URL is currently a placeholder (needs downloading).

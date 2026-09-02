@@ -43,6 +43,7 @@ final class FolderPermissionViewModel {
     /// User taps "Choose folder" (onboarding) or "Re-grant access" (reauth CTA).
     /// Cancels are non-errors — state stays as-is so the same CTA is still available.
     func requestPermission() async {
+        guard !isRequesting else { return }
         isRequesting = true
         defer { isRequesting = false }
 
@@ -56,11 +57,18 @@ final class FolderPermissionViewModel {
         }
     }
 
+    /// User taps "Skip for now" on the permission onboarding screen — lets them
+    /// reach the Library shell without granting yet (Library shows its own CTA).
+    func skipOnboarding() {
+        store.didSkipFolderOnboarding = true
+    }
+
     /// User picks "Change folder" in settings. Clears Keychain + library entries.
     func resetPermission() async {
         do {
             try bookmarkStore.delete()
             store.folderPermissionState = .notGranted
+            store.didSkipFolderOnboarding = false
             store.clear()
             errorMessage = nil
         } catch {

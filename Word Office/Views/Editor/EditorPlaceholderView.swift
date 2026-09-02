@@ -23,6 +23,18 @@ struct EditorPlaceholderView: View {
         }
         .navigationTitle(ref.name)
         .navigationBarTitleDisplayMode(.inline)
+        .onDisappear {
+            // Best-effort: flush any pending edit, then stop the autosave
+            // scheduler's recurring hard-interval save for this document —
+            // see `EditorViewModel.stopAutosaving()`. Fires after the view is
+            // already gone (standard for cleanup on disappear), so this is
+            // fire-and-forget rather than something the view can await.
+            guard let vm = editorVM else { return }
+            Task {
+                await vm.flushIfNeeded()
+                await vm.stopAutosaving()
+            }
+        }
     }
 
     @ViewBuilder
@@ -32,8 +44,16 @@ struct EditorPlaceholderView: View {
                 ProgressView()
             }
 
+            if let errorMessage = vm.errorMessage {
+                ErrorBanner(message: errorMessage) {
+                    vm.errorMessage = nil
+                }
+                .padding(.horizontal, DSSpacing.md)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
             switch ref.kind {
-            case .txt, .rtf, .markdown:
+            case .txt, .rtf, .markdown, .docx:
                 // Sprint 0.1: real editing via a simple TextEditor bridge.
                 // Sprint 0.2 upgrades to UITextView bridge (rich text + UndoManager + selection binding).
                 @Bindable var bindableVM = vm
@@ -52,10 +72,11 @@ struct EditorPlaceholderView: View {
                 EmptyStateView(
                     icon: ref.kind.systemImage,
                     title: "\(ref.kind.displayName) preview",
-                    message: "Full editing available once the Artifex SDK is licensed (Sprint 0.2)."
+                    message: "Full editing available once the Artifex SDK is licensed (Sprint 0.2)"
                 )
             }
         }
+        .animation(.default, value: vm.errorMessage)
         .background(Color.dsDocumentCanvas)
     }
 }

@@ -27,7 +27,7 @@ final class FolderPermissionPicker: NSObject, FolderPermissionGranting {
         picker.allowsMultipleSelection = false
 
         guard let topVC = Self.topViewController() else {
-            resumeContinuation(with: .failure(FolderPermissionError.pickerFailed(underlying: "Couldn't find a view controller to present from.")))
+            resumeContinuation(with: .failure(FolderPermissionError.pickerFailed(underlying: "Couldn't find a view controller to present from")))
             return
         }
         topVC.present(picker, animated: true)

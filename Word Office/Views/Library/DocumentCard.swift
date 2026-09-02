@@ -5,42 +5,52 @@ import SwiftUI
 struct DocumentCard: View {
     let entry: LibraryEntry
     var onTap: (() -> Void)? = nil
+    var onToggleFavourite: (() -> Void)? = nil
 
     var body: some View {
-        Button {
-            onTap?()
-        } label: {
-            HStack(spacing: DSSpacing.sm) {
-                DSDocumentTypeBadge(kind: entry.document.kind)
-                    .frame(width: DSSize.fileIcon, height: DSSize.fileIcon)
+        HStack(spacing: DSSpacing.xxs) {
+            Button {
+                onTap?()
+            } label: {
+                HStack(spacing: DSSpacing.sm) {
+                    DSDocumentTypeBadge(kind: entry.document.kind)
+                        .frame(width: DSSize.fileIcon, height: DSSize.fileIcon)
 
-                VStack(alignment: .leading, spacing: DSSpacing.xxs) {
-                    Text(entry.document.name)
-                        .font(DSFont.headline)
-                        .foregroundStyle(Color.dsTextPrimary)
-                        .lineLimit(1)
-
-                    HStack(spacing: DSSpacing.xs) {
-                        StatusPill(status: entry.metadata.status)
-                        Text(entry.document.modifiedAt, style: .relative)
-                            .font(DSFont.footnote)
-                            .foregroundStyle(Color.dsTextSecondary)
+                    VStack(alignment: .leading, spacing: DSSpacing.xxs) {
+                        Text(entry.document.name)
+                            .font(DSFont.headline)
+                            .foregroundStyle(Color.dsTextPrimary)
                             .lineLimit(1)
+
+                        HStack(spacing: DSSpacing.xs) {
+                            StatusPill(status: entry.metadata.status)
+                            Text(entry.document.modifiedAt, style: .relative)
+                                .font(DSFont.footnote)
+                                .foregroundStyle(Color.dsTextSecondary)
+                                .lineLimit(1)
+                        }
+                    }
+
+                    Spacer(minLength: DSSpacing.xs)
+
+                    if let remindAt = entry.metadata.remindAt {
+                        ReminderChip(date: remindAt)
                     }
                 }
-
-                Spacer(minLength: DSSpacing.xs)
-
-                if let remindAt = entry.metadata.remindAt {
-                    ReminderChip(date: remindAt)
-                }
+                .padding(.vertical, DSSpacing.xs)
+                .contentShape(Rectangle())
             }
-            .padding(.vertical, DSSpacing.xs)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(accessibilityLabel)
+
+            // Sibling `Button`, not nested inside the row's — List gives each its
+            // own independent tap target this way (a Button nested in another
+            // Button's label never receives its own taps).
+            FavouriteToggleButton(isFavourite: entry.metadata.isFavourite) {
+                onToggleFavourite?()
+            }
         }
-        .buttonStyle(.plain)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(accessibilityLabel)
     }
 
     private var accessibilityLabel: String {
@@ -49,6 +59,23 @@ struct DocumentCard: View {
             parts.append("has reminder")
         }
         return parts.joined(separator: ", ")
+    }
+}
+
+struct FavouriteToggleButton: View {
+    let isFavourite: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: isFavourite ? "star.fill" : "star")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(isFavourite ? Color.dsStatusWarning : Color.dsBorderDefault)
+                .frame(width: DSSize.minimumTouchTarget, height: DSSize.minimumTouchTarget)
+        }
+        .buttonStyle(.plain)
+        .sensoryFeedback(.selection, trigger: isFavourite)
+        .accessibilityLabel(isFavourite ? "Remove from Favourites" : "Add to Favourites")
     }
 }
 

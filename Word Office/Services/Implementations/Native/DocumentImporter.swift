@@ -67,19 +67,6 @@ final class DocumentImporter: DocumentImporting {
     }
 
     private func nonConflictingDestination(for fileName: String) -> URL {
-        let base = documentsURL.appendingPathComponent(fileName)
-        guard fileManager.fileExists(atPath: base.path) else { return base }
-
-        let url = URL(fileURLWithPath: fileName)
-        let ext = url.pathExtension
-        let stem = url.deletingPathExtension().lastPathComponent
-        var counter = 2
-        while true {
-            let candidate = documentsURL
-                .appendingPathComponent("\(stem) (\(counter))")
-                .appendingPathExtension(ext)
-            if !fileManager.fileExists(atPath: candidate.path) { return candidate }
-            counter += 1
-        }
+        fileManager.nonConflictingURL(for: fileName, in: documentsURL)
     }
 }

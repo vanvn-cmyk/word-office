@@ -20,9 +20,9 @@ enum ImportError: Error, Sendable, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .securityScopeAccessDenied:  "Can't access the file — the system blocked permission."
+        case .securityScopeAccessDenied:  "Can't access the file — the system blocked permission"
         case .iCloudDownloadFailed(let u):"iCloud download failed: \(u)"
-        case .unsupportedType(let ext):   "File type .\(ext) is not supported yet."
+        case .unsupportedType(let ext):   "File type .\(ext) is not supported yet"
         case .copyFailed(let u):          "Couldn't copy the file into the app: \(u)"
         }
     }

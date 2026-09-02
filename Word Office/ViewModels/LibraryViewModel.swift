@@ -17,34 +17,64 @@ final class LibraryViewModel {
     var errorMessage: String?
     private(set) var isLoading: Bool = false
 
+    /// Active type/status filters — see `LibraryViewModel+Filtering.swift`.
+    var typeFilter: DocumentTypeFilter = .all
+    var statusFilter: DocumentStatus?
+    var favouritesOnly: Bool = false
+    var searchText: String = ""
+
     let store: LibraryStore
     private let bookmarkStore: any FolderBookmarkResolving
     private let scanner: any DocumentLibraryScanning
     private let metadataStore: any MetadataStoring
     private let reminders: any RemindScheduling
     private let importer: any DocumentImporting
+    private let documentCreator: any DocumentCreating
+    private let documentsURL: URL
+    /// Bumped at the start of every `loadLibrary()` call — a scan that finishes
+    /// after a newer one has started (e.g. "Change folder…" resets state while
+    /// the previous scan is still running) checks its own generation before
+    /// writing to `store` and no-ops instead of resurrecting stale results.
+    private var loadGeneration = 0
 
     init(store: LibraryStore,
          bookmarkStore: any FolderBookmarkResolving,
          scanner: any DocumentLibraryScanning,
          metadataStore: any MetadataStoring,
          reminders: any RemindScheduling,
-         importer: any DocumentImporting) {
+         importer: any DocumentImporting,
+         documentCreator: any DocumentCreating,
+         documentsURL: URL) {
         self.store = store
         self.bookmarkStore = bookmarkStore
         self.scanner = scanner
         self.metadataStore = metadataStore
         self.reminders = reminders
         self.importer = importer
+        self.documentCreator = documentCreator
+        self.documentsURL = documentsURL
     }
 
     // MARK: - Loading
 
     func loadLibrary() async {
+        loadGeneration += 1
+        let generation = loadGeneration
+
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            // Gated the same way every `store` write below is — an older call
+            // superseded by a newer one (e.g. pull-to-refresh racing the
+            // `.task(id:)` reload) must not clear `isLoading` out from under the
+            // newer, still-in-flight call; only the call that's still current
+            // when it finishes should flip it off.
+            if generation == loadGeneration {
+                isLoading = false
+            }
+        }
 
         guard let bookmark = bookmarkStore.loadSaved() else {
+            guard generation == loadGeneration else { return }
             store.folderPermissionState = .notGranted
             store.clear()
             return
@@ -55,10 +85,12 @@ final class LibraryViewModel {
             folderURL = try bookmarkStore.resolve(bookmark)
         } catch FolderBookmarkError.revoked, FolderBookmarkError.bookmarkStale, FolderBookmarkError.corruptedBookmark {
             // Never silently empty the library — CTA lives in the view (Library-Architecture.md §7 trap #4).
+            guard generation == loadGeneration else { return }
             store.folderPermissionState = .revoked
             store.clear()
             return
         } catch {
+            guard generation == loadGeneration else { return }
             store.folderPermissionState = .revoked
             errorMessage = error.localizedDescription
             store.clear()
@@ -66,23 +98,49 @@ final class LibraryViewModel {
         }
 
         guard folderURL.startAccessingSecurityScopedResource() else {
+            guard generation == loadGeneration else { return }
             store.folderPermissionState = .revoked
             store.clear()
             return
         }
         defer { folderURL.stopAccessingSecurityScopedResource() }
 
+        guard generation == loadGeneration else { return }
         store.folderPermissionState = .granted
 
-        let scanned = await scanner.scan(folder: folderURL)
+        // Two sources merged by documentID (Phase0-Implementation-Logic-v2.md §10.1):
+        // the granted external folder, and files copied into the sandbox by
+        // `importFiles()`. Independent scans — one being slow/empty never blocks the other.
+        // Skip the second scan entirely when the granted folder IS `Documents/` —
+        // otherwise every load double-scans and double-joins the same file list.
+        // `resolvingSymlinksInPath()`, not `standardizedFileURL` — the latter
+        // doesn't collapse `/var` vs `/private/var`-style symlink differences,
+        // so a bookmark resolved through one form and `documentsURL` through the
+        // other would compare unequal even when they're the same physical
+        // folder, defeating this skip and duplicating every file in the library.
+        let sameFolder = folderURL.resolvingSymlinksInPath().path == documentsURL.resolvingSymlinksInPath().path
+        let grantedScanned: [LibraryScanEntry]
+        let sandboxScanned: [LibraryScanEntry]
+        if sameFolder {
+            grantedScanned = await scanner.scan(folder: folderURL)
+            sandboxScanned = []
+        } else {
+            async let grantedScan = scanner.scan(folder: folderURL)
+            async let sandboxScan = scanner.scan(folder: documentsURL)
+            (grantedScanned, sandboxScanned) = await (grantedScan, sandboxScan)
+        }
         let now = Date()
 
         do {
-            let entries = try await joinWithMetadata(scanned, folderURL: folderURL, now: now)
-            let sorted = try await sortByDueReminders(entries, at: now)
+            let granted = try await joinWithMetadata(grantedScanned, folderURL: folderURL, now: now)
+            let sandbox = try await joinWithMetadata(sandboxScanned, folderURL: documentsURL, now: now)
+            let merged = mergeSecondSource(sandbox, into: granted)
+            let sorted = try await sortByDueReminders(merged, at: now)
+            guard generation == loadGeneration else { return }
             store.replaceAll(sorted)
             errorMessage = nil
         } catch {
+            guard generation == loadGeneration else { return }
             errorMessage = error.localizedDescription
         }
     }
@@ -94,6 +152,14 @@ final class LibraryViewModel {
     func setStatus(_ status: DocumentStatus, for entryID: String) async {
         guard var entry = store.entries.first(where: { $0.id == entryID }) else { return }
         entry.metadata.status = status
+        entry.metadata.lastModifiedAt = Date()
+        await persist(entry)
+    }
+
+    /// Toggle the pin — independent of `status`, same manual-only rule as above.
+    func setFavourite(_ isFavourite: Bool, for entryID: String) async {
+        guard var entry = store.entries.first(where: { $0.id == entryID }) else { return }
+        entry.metadata.isFavourite = isFavourite
         entry.metadata.lastModifiedAt = Date()
         await persist(entry)
     }
@@ -121,12 +187,23 @@ final class LibraryViewModel {
     /// Sets `errorMessage` to the first failure's message if any URL failed;
     /// caller reads full per-URL outcomes from the return value.
     ///
-    /// Note: imports land in app sandbox (`Documents/`), NOT the user-granted
-    /// folder — they don't appear in `LibraryView` unless the granted folder
-    /// happens to be `Documents/`. Sandbox-file listing is a v2 doc §4.5 concern.
+    /// Each success is upserted into `store` immediately (instant feedback —
+    /// the row appears without waiting for the next `loadLibrary()` scan);
+    /// `loadLibrary()` also merges sandbox `Documents/` as a second source so
+    /// imported files still show up after a relaunch.
     @discardableResult
     func importFiles(from urls: [URL]) async -> [ImportOutcome] {
         let outcomes = await importer.importFiles(from: urls)
+        let now = Date()
+
+        for outcome in outcomes {
+            guard case .success(let ref) = outcome.result else { continue }
+            let docID = ref.url.documentID(within: documentsURL)
+            let metadata = DocumentMetadata(id: docID, lastOpenedAt: now, lastModifiedAt: ref.modifiedAt)
+            try? await metadataStore.upsert(metadata)
+            store.upsert(LibraryEntry(document: ref, metadata: metadata, downloadState: .local))
+        }
+
         if let firstFailure = outcomes.first(where: {
             if case .failure = $0.result { return true }
             return false
@@ -136,7 +213,48 @@ final class LibraryViewModel {
         return outcomes
     }
 
+    // MARK: - Create new (FAB → "Create new")
+
+    enum CreateDocumentOutcome: Sendable, Equatable {
+        case created
+        /// `.xlsx`/`.pptx` — `MockArtifexDocumentWriter` no-ops those today (real writer
+        /// arrives with the Artifex SDK swap). Surfaced honestly instead of leaving a
+        /// dead 0-byte file the user can't actually open in Excel/PowerPoint.
+        case unsupported
+        case failed(String)
+    }
+
+    /// Blank document from the FAB "Create new" menu. Only `.docx` produces a real,
+    /// openable file today — `DOCXCodec` writes a genuine minimal OOXML package
+    /// (same codec Scan's "Export as Word" uses), unlike the legacy `LocalFileServiceImpl
+    /// .create` 0-byte stub it's built on top of.
+    @discardableResult
+    func createBlankDocument(kind: DocumentKind) async -> CreateDocumentOutcome {
+        guard kind == .docx else { return .unsupported }
+        do {
+            let ref = try await documentCreator.create(name: "Untitled", kind: kind)
+            try DOCXCodec.write(AttributedString(""), to: ref.url)
+            let now = Date()
+            let docID = ref.url.documentID(within: documentsURL)
+            let metadata = DocumentMetadata(id: docID, lastOpenedAt: now, lastModifiedAt: now)
+            try? await metadataStore.upsert(metadata)
+            store.upsert(LibraryEntry(document: ref, metadata: metadata, downloadState: .local))
+            return .created
+        } catch {
+            errorMessage = error.localizedDescription
+            return .failed(error.localizedDescription)
+        }
+    }
+
     // MARK: - Private helpers
+
+    /// Appends `secondary` entries not already present in `primary` (by documentID).
+    /// `primary` (the granted folder) wins on collision — matters when the granted
+    /// folder happens to be `Documents/` itself, so the same file isn't scanned twice.
+    private func mergeSecondSource(_ secondary: [LibraryEntry], into primary: [LibraryEntry]) -> [LibraryEntry] {
+        let primaryIDs = Set(primary.map(\.id))
+        return primary + secondary.filter { !primaryIDs.contains($0.id) }
+    }
 
     private func joinWithMetadata(_ scanned: [LibraryScanEntry],
                                   folderURL: URL,

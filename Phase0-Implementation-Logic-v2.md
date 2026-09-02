@@ -283,7 +283,11 @@ Vì persona (mục 3, `product-strategy-master.md`) gồm nhóm dùng iPad Pro +
 
 ## 6. OCR — scan giấy thành văn bản `[NATIVE]`, KHÔNG có ở SDK (đã xác nhận quét 627 class)
 
-### 6.1 — Luồng scan: dùng document scanner có sẵn, không tự làm camera
+### 6.1 — 3 nguồn input, không chỉ camera (bổ sung 2026-09-01)
+
+Ban đầu chỉ định camera-scan trực tiếp — mở rộng theo yêu cầu user thành **3 nguồn input**, cùng đổ vào chung 1 pipeline OCR (§6.2-6.4):
+
+1. **Camera scan giấy thật** — dùng document scanner có sẵn, không tự làm camera:
 
 ```swift
 let scanner = VNDocumentCameraViewController()
@@ -300,6 +304,23 @@ func documentCameraViewController(_ controller: VNDocumentCameraViewController,
 ```
 
 **Điểm cần chú ý**: dùng `VNDocumentCameraViewController` thay vì tự làm camera capture như A1 đang làm (chỉ chụp ảnh thường qua `BSImagePicker` rồi ghép PDF, không có edge-detection) — vừa rẻ hơn vừa chất lượng nhận diện tốt hơn hẳn.
+
+2. **Ảnh có sẵn trong Thư viện ảnh** (chụp viết tay, chụp văn bản đánh máy...) — `PHPickerViewController`, mỗi ảnh chọn ra `CGImage`, đổ thẳng vào cùng `ocrQueue` như trên. Không cần code nhận diện riêng — dùng chung `VisionTextRecognizer`, Vision tự xử lý cả chữ in lẫn chữ viết tay (độ chính xác chữ viết tay thấp hơn chữ in — vẫn phải qua bộ lọc confidence §6.4 như thường).
+
+3. **File PDF có sẵn (dạng ảnh scan, không có lớp chữ số)** — vd PDF cũ scan từ máy photocopy, khác với PDF đã có sẵn chữ số (trường hợp đó dùng thẳng `PDFPage.string`, không cần OCR — xem §7.4 "PDF → Word"). Phải tự phát hiện trước khi quyết định nhánh xử lý:
+
+```swift
+func needsOCR(_ pdfPage: PDFPage) -> Bool {
+    let text = pdfPage.string?.trimmingCharacters(in: .whitespacesAndNewlines)
+    return text?.isEmpty ?? true   // không có lớp chữ → phải OCR
+}
+
+// nếu cần OCR: render trang ra ảnh rồi đổ vào đúng pipeline camera-scan ở trên
+let image = pdfPage.thumbnail(of: targetSize, for: .mediaBox)
+ocrQueue.enqueue(image, pageIndex: i)
+```
+
+**Điểm cần chú ý — dùng CHUNG 1 pipeline cho cả 3 nguồn**: không viết 3 luồng OCR riêng — camera/Photos/PDF-scan đều quy về cùng `[CGImage]` rồi gọi đúng `OCRViewModel.recognize()` đã có, khác nhau chỉ ở bước lấy `CGImage` ban đầu.
 
 ### 6.2 — Xử lý nền, không block UI khi scan nhiều trang
 
@@ -330,19 +351,30 @@ for observation in results as! [VNRecognizedTextObservation] {
 
 Im lặng coi như đúng 100% là nguồn lỗi phổ biến nhất của tính năng OCR.
 
-### 6.5 — 2 dạng output
+### 6.5 — 2 dạng output (thứ tự ưu tiên đổi lại 2026-09-01 — user cần "sửa được" là yêu cầu chính, không phải chỉ tìm/copy)
 
-**(a) PDF "searchable"** (ưu tiên cho MVP — rẻ hơn, chỉ cần chọn/tìm được chữ): vẽ text nhận diện được đè lên ảnh scan, invisible (render mode "không tô màu, không vẽ"), dùng PDFKit/CGPDFContext, hoàn toàn native.
+**(a) File .docx sửa được `[TỰ BUILD]` — output CHÍNH, vào MVP** (không còn là "đắt, để Phase sau" — đã rẻ đi nhiều vì tái dùng đúng `DOCXCodec.write()` đã có cho Editor, giống hệt cách "PDF → Word" ở §7.4 làm):
 
-**(b) File .docx sửa được** (đắt hơn, cần dựng lại cấu trúc XML — để Phase sau nếu user thật sự cần).
+```swift
+let text = ocrResult.blocks.map(\.text).joined(separator: "\n")   // OCRResult.fullText đã có sẵn
+try DOCXCodec.write(AttributedString(text), to: outputURL)
+```
+
+Giới hạn thật (nói rõ cho user, đừng để kỳ vọng sai): chỉ ra được **chữ thuần**, KHÔNG giữ layout/bảng/vị trí như bản gốc — giống đúng giới hạn của "PDF → Word" §7.4.
+
+**(b) PDF "searchable" `[NATIVE]` — output PHỤ, tuỳ chọn thêm** (giữ nguyên hình ảnh gốc, chỉ cần chọn/tìm/copy được chữ, không sửa nội dung): vẽ text nhận diện được đè lên ảnh scan, invisible (render mode "không tô màu, không vẽ"), dùng PDFKit/CGPDFContext, hoàn toàn native. Hợp cho trường hợp cần giữ đúng hình ảnh gốc (vd hồ sơ pháp lý) mà vẫn tìm được chữ.
+
+Cho user chọn xuất (a), (b), hay cả 2 sau khi OCR xong — không ép 1 trong 2.
 
 **Điểm cộng cho positioning**: pipeline OCR chạy 100% on-device (Vision không gọi mạng) — khác hẳn nhóm AI ở Phụ lục A (AI tóm tắt, Phase 1) và Phụ lục B (AI tạo văn bản, Phase 2), cả 2 đều chắc chắn phải gọi cloud. Đáng nhấn mạnh sự khác biệt này rõ trong UI.
 
 ---
 
-## 7. Merge / Split — Word/PDF/PPT `[TỰ BUILD]`, không có ở SDK lẫn 2 đối thủ
+## 7. Merge / Split / Convert — Word/PDF/PPT/Image `[TỰ BUILD]` (Convert Office→PDF dùng `[SDK]`), phần lớn không có ở SDK lẫn 2 đối thủ
 
-> **Compress đã chuyển sang Phase 1** (logic nén ảnh nhúng PDF/DOCX/PPTX giữ nguyên ở §8.1/8.2 phần compress trong bản gốc, dùng lại khi tới Phase 1).
+> **2026-09-01: bổ sung §7.4 Convert** (Office↔PDF, Image↔PDF) theo yêu cầu mở rộng scope — 4 chiều convert mới, tái dùng engine đã có sẵn (SDK `exportAs`, `DOCXCodec`, `PDFKit`, `UIGraphicsPDFRenderer`), không cần viết engine mới. Xem §7.4.
+
+> **Compress đã chuyển sang Phase 1** (logic nén ảnh nhúng PDF/DOCX/PPTX giữ nguyên ở §8.1/8.2 phần compress trong bản gốc, dùng lại khi tới Phase 1). **2026-08-31**: 4 file stub Compress còn sót lại trong codebase từ bản scaffold gốc (`PDFCompressing.swift`, `OfficeCompressing.swift`, `PDFKitCompressor.swift`, `OOXMLMediaCompressor.swift`) đã bị xoá để khớp đúng quyết định này — không file/type nào implement Compress tồn tại trong MVP nữa, tạo lại khi tới Phase 1.
 
 ### 7.1 — PDF: rẻ nhất, dùng `PDFKit` (native, độc lập với SDK license)
 
@@ -389,6 +421,55 @@ MergeSplitOperation
 ```
 
 **Điểm cần chú ý — bẫy hay gặp nhất**: quên đồng bộ `[Content_Types].xml`/`_rels/*` là nguyên nhân phổ biến nhất khiến file merge mở được trong app tự build (dễ dãi bỏ qua lỗi) nhưng **mở lỗi/báo hỏng trong Word/PowerPoint thật** — luôn test round-trip bằng Word/PowerPoint thật, không chỉ bằng chính SDK đang dùng.
+
+### 7.4 — Convert: Office ⇄ PDF, Image ⇄ PDF `[TỰ BUILD + SDK]` (bổ sung 2026-09-01)
+
+4 chiều convert mới, đứng riêng trong Tools (không cần mở editor). Cả 4 dùng chung `PDFToolsViewModel` — mỗi chiều là 1 method mới cùng pattern reentrancy-guard/progress với `merge()`/`split()` đã có, **không tạo ViewModel riêng**.
+
+**Office (Word/Excel/PPT) → PDF `[SDK]`** — dùng lại đúng API đã ghi ở §1 (`DocumentSession.exportAs(.pdf)`), chỉ khác chỗ gọi: mở session ở chế độ "headless" (không `presentViewController`), export xong đóng session ngay — không phải mở cả editor rồi export như luồng chỉnh sửa thường. SDK không hỗ trợ export trực tiếp Excel/PPT thì dùng đúng fallback native đã ghi ở §1 (`UIPrintPageRenderer`/`UIGraphicsPDFRenderer`).
+
+**PDF → Word `[TỰ BUILD]`** — KHÔNG giữ được định dạng/ảnh/bảng ở MVP, chỉ trích xuất text thuần, tái dùng đúng `DOCXCodec.write` đã có cho Editor (`Services/Implementations/Native/DOCXCodec.swift`) — không viết engine ghi DOCX mới. **Phải tự phát hiện PDF có lớp chữ số hay không trước** (đúng `needsOCR()` ở §6.1.3) — 2 nhánh khác hẳn nhau về chi phí, không được giả định mọi PDF đều có sẵn chữ:
+
+```swift
+var text = ""
+for i in 0..<pdfDocument.pageCount {
+    guard let page = pdfDocument.page(at: i) else { continue }
+    if needsOCR(page) {
+        // PDF scan cũ, không có lớp chữ — fallback OCR, dùng CHUNG pipeline §6
+        let image = page.thumbnail(of: targetSize, for: .mediaBox)
+        let result = try await recognizer.recognize(in: image, pageIndex: i, languages: languages)
+        text += result.fullText + "\n\n"
+    } else {
+        text += (page.string ?? "") + "\n\n"   // đã có chữ số sẵn, không cần OCR — rẻ hơn nhiều
+    }
+}
+try DOCXCodec.write(AttributedString(text), to: outputURL)
+```
+
+**Bắt buộc hiện banner cảnh báo trước khi convert** ("Chỉ giữ văn bản, mất định dạng/ảnh/bảng") — không được im lặng hạ chất lượng, đúng nguyên tắc §6.4/rule.md #6. Nhánh OCR nên hiện thêm cảnh báo phụ ("PDF này không có chữ số sẵn, đang nhận diện — có thể chậm hơn") vì tốn thời gian hơn hẳn nhánh đọc trực tiếp.
+
+**PDF → Image `[NATIVE]`** — rẻ nhất trong 4 mục, thuần PDFKit, không cần thư viện thêm:
+
+```swift
+let page = pdfDocument.page(at: i)!
+let image = page.thumbnail(of: targetSize, for: .mediaBox)
+```
+
+Cho chọn range trang (tái dùng UI stepper/chip đã có ở Split §7.1) hoặc "toàn bộ". Output PNG, 1 file/trang, đặt tên tránh trùng qua `FileManager+NonConflictingURL` đã có.
+
+**Image → PDF `[NATIVE]`** — đối xứng OCR scan (§6) nhưng KHÔNG chạy Vision, chỉ vẽ ảnh gốc vào từng trang:
+
+```swift
+let renderer = UIGraphicsPDFRenderer(bounds: pageBounds)
+try renderer.writePDF(to: outputURL) { ctx in
+    for image in images {
+        ctx.beginPage()
+        image.draw(in: pageBounds)
+    }
+}
+```
+
+Nhận nhiều ảnh, sắp thứ tự bằng drag handle (tái dùng đúng UI list kéo-thả đã có ở Merge §7.1) — mỗi ảnh = 1 trang, không auto-crop/rotate ở MVP (để Phase sau nếu cần "quét từ ảnh có sẵn" giống camera scanner thật).
 
 ---
 
@@ -685,7 +766,7 @@ Roadmap không giới hạn 1 thị trường — system prompt cần theo ngôn
 
 | Nhóm | Tính năng | Vì sao |
 |---|---|---|
-| **Rẻ (native/SDK có sẵn, chỉ cần wire đúng)** | Core editing, AirPrint, OCR (Vision), layout adaptive | Framework Apple hoặc API SDK đã có, việc chính là kiến trúc gọi đúng chỗ |
+| **Rẻ (native/SDK có sẵn, chỉ cần wire đúng)** | Core editing, AirPrint, OCR (Vision), layout adaptive, **Convert Office→PDF/PDF→Word/PDF→IMG/IMG→PDF (mục 7.4, bổ sung 2026-09-01)** | Framework Apple hoặc API SDK đã có, việc chính là kiến trúc gọi đúng chỗ — Convert tái dùng nguyên `exportAs` (SDK), `DOCXCodec`, `PDFKit`, `UIGraphicsPDFRenderer` đã có sẵn, không viết engine mới |
 | **Trung bình (SDK có phần, tự build phần UI/wrap, hoặc thuần local)** | iPad multi-pane, Note/comment, E-signature, **Add file — cấp quyền + auto-scan (mục 4)**, **Core loop "Tủ hồ sơ" (mục 10)** | SDK cấp data/API gốc nhưng UI và logic nghiệp vụ phải tự làm; Add file/Tủ hồ sơ không cần SDK/backend nào nhưng nhiều phần nhỏ phải làm đúng (bookmark thư mục, xử lý `isStale`/revoke, key bền vững cho document) — dễ nhìn "rẻ" vì toàn API native nhưng dễ sai vặt nếu làm ẩu |
 | **Đắt (không ai có sẵn, tự viết từ đầu)** | Files app provider, Merge/Split (Word/PPT), Watermark | Không SDK nào có sẵn — công sức dev thật, không "rẻ" như nghe tên gọi |
 
