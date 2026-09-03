@@ -20,66 +20,106 @@ import SwiftUI
 /// adaptive presentation/dismissal timing was fighting the icon's rotation
 /// and made the close transition read as sluggish.
 struct LibraryAddButton: View {
+    /// Diameter of the circular FAB. Also used to compute how far above the
+    /// FAB the popup menu sits (see `body`'s `.padding(.bottom, ...)`), so both
+    /// values stay in lockstep.
+    static let fabDiameter: CGFloat = 56
+
     @Bindable var viewModel: LibraryViewModel
     let container: DependencyContainer
 
-    @State private var isMenuOpen = false
+    /// Open state of the popup menu — owned by `RootView` and threaded in
+    /// here so `RootView.libraryShell` can render a full-screen invisible
+    /// scrim that dismisses the menu on any outside tap (matching native
+    /// `Menu`/`.popover` UX). If this were `@State private` here, the scrim
+    /// couldn't observe or write the flag.
+    @Binding var isMenuOpen: Bool
     @State private var isPresentingImporter = false
     @State private var isPresentingScan = false
     @State private var comingSoonKind: DocumentKind?
     @State private var ocrVM: OCRViewModel?
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: DSSpacing.sm) {
-            if isMenuOpen {
-                addMenuContent
-                    .transition(.scale(scale: 0.85, anchor: .bottomTrailing).combined(with: .opacity))
-            }
-            fabButton
-        }
-        .fileImporter(
-            isPresented: $isPresentingImporter,
-            allowedContentTypes: AddFileMenu.supportedTypes,
-            allowsMultipleSelection: true
-        ) { result in
-            if case .success(let urls) = result {
-                Task { await viewModel.importFiles(from: urls) }
-            }
-        }
-        .alert(
-            "Coming soon",
-            isPresented: Binding(
-                get: { comingSoonKind != nil },
-                set: { if !$0 { comingSoonKind = nil } }
-            ),
-            presenting: comingSoonKind
-        ) { _ in
-            Button("OK", role: .cancel) { comingSoonKind = nil }
-        } message: { kind in
-            Text("Creating a blank \(kind.displayName) document needs the full Office SDK, which isn't wired in yet. Word documents already work — or import an existing file")
-        }
-        .sheet(isPresented: $isPresentingScan) {
-            NavigationStack {
-                if let ocrVM {
-                    ScanFlowView(viewModel: ocrVM)
-                } else {
-                    ProgressView()
+        // `fabButton` is the ONLY layout-participating child here. The popup
+        // menu attaches via `.overlay` so it doesn't contribute to this view's
+        // size — otherwise the enclosing `HStack` in `RootView.customTabBar`
+        // expands to the menu's 220pt width when opened, pushing FAB + menu
+        // past the right screen edge (tab pill ~228 + spacing 12 + menu 220 =
+        // 460 > screen width - 32pt padding on any current iPhone).
+        //
+        // Positioning trick: anchor the padded box's BOTTOM-trailing corner to
+        // the FAB's bottom-trailing corner (via `.overlay(alignment:
+        // .bottomTrailing)`), then pad the menu at the bottom by
+        // (`Self.fabDiameter` + `DSSpacing.lg`). The invisible bottom padding
+        // pushes the visible menu upward so its bottom sits `DSSpacing.lg`
+        // above the FAB's top edge. `.fixedSize()` guards against the
+        // overlay's parent-size proposal (56×56) squeezing the menu's
+        // intrinsic 220×~380 dimensions.
+        //
+        // Why `DSSpacing.lg` and not a smaller value: the sibling tab pill in
+        // `RootView.customTabBar` uses the same `HStack(alignment: .bottom)`,
+        // and the pill is 12pt taller than the FAB (56 button + 12pt inner
+        // padding for the material capsule), so its TOP sits 12pt above the
+        // FAB's top. A gap of just `DSSpacing.sm` (12pt) puts the menu bottom
+        // flush with the pill's top — visually reads as overlap. `DSSpacing.lg`
+        // (20pt) clears the pill top with 8pt of visible breathing room.
+        //
+        // Padding was preferred over `.alignmentGuide(.top)` here because
+        // `.transition` did not reliably propagate a modified `.top` guide out
+        // to the overlay's alignment placement in practice — the menu
+        // rendered downward from FAB.top instead of upward.
+        fabButton
+            .overlay(alignment: .bottomTrailing) {
+                if isMenuOpen {
+                    addMenuContent
+                        .fixedSize()
+                        .padding(.bottom, Self.fabDiameter + DSSpacing.lg)
+                        .transition(.scale(scale: 0.85, anchor: .bottomTrailing).combined(with: .opacity))
                 }
             }
-        }
-        .task { if ocrVM == nil { ocrVM = container.makeOCRViewModel() } }
+            .fileImporter(
+                isPresented: $isPresentingImporter,
+                allowedContentTypes: AddFileMenu.supportedTypes,
+                allowsMultipleSelection: true
+            ) { result in
+                if case .success(let urls) = result {
+                    Task { await viewModel.importFiles(from: urls) }
+                }
+            }
+            .alert(
+                "Coming soon",
+                isPresented: Binding(
+                    get: { comingSoonKind != nil },
+                    set: { if !$0 { comingSoonKind = nil } }
+                ),
+                presenting: comingSoonKind
+            ) { _ in
+                Button("OK", role: .cancel) { comingSoonKind = nil }
+            } message: { kind in
+                Text("Creating a blank \(kind.displayName) document needs the full Office SDK, which isn't wired in yet. Word documents already work — or import an existing file")
+            }
+            .sheet(isPresented: $isPresentingScan) {
+                NavigationStack {
+                    if let ocrVM {
+                        ScanFlowView(viewModel: ocrVM)
+                    } else {
+                        ProgressView()
+                    }
+                }
+            }
+            .task { if ocrVM == nil { ocrVM = container.makeOCRViewModel() } }
     }
 
     // MARK: - FAB
 
     private var fabButton: some View {
         Button {
-            isMenuOpen ? closeMenu() : openMenu()
+            if isMenuOpen { closeMenu() } else { openMenu() }
         } label: {
             Image(systemName: "plus")
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: 56, height: 56)
+                .frame(width: Self.fabDiameter, height: Self.fabDiameter)
                 .background(
                     LinearGradient(
                         colors: [Color.dsBrandPrimary, Color.dsBrandPrimaryPressed],
@@ -103,6 +143,12 @@ struct LibraryAddButton: View {
     }
 
     private func closeMenu() {
+        // Idempotency guard: if `isMenuOpen` is already false when this
+        // fires (e.g., the outside-tap scrim in `RootView` already toggled
+        // the shared binding one tick before a menu row's action ran),
+        // opening a `withAnimation` transaction on a no-op state change
+        // spends a frame animating nothing. Mirrors `RootView.closeFABMenu`.
+        guard isMenuOpen else { return }
         withAnimation(.easeOut(duration: 0.15)) { isMenuOpen = false }
     }
 
@@ -139,6 +185,17 @@ struct LibraryAddButton: View {
         .background(Color.dsBackgroundElevated, in: RoundedRectangle(cornerRadius: DSRadius.large, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: DSRadius.large, style: .continuous).strokeBorder(Color.dsBorderSubtle))
         .shadow(color: .black.opacity(0.18), radius: 20, y: 8)
+        // `.contentShape` on the finished card so the whole card absorbs
+        // hit-testing. Without this, taps into "dead" regions (section
+        // headers, dividers, padding between rows) fall through the overlay
+        // to the underlying `fabButton` and toggle the menu shut
+        // unexpectedly — SwiftUI's `.background(Color, in: Shape)` fill
+        // isn't guaranteed to absorb taps for the overlay parent.
+        .contentShape(RoundedRectangle(cornerRadius: DSRadius.large, style: .continuous))
+        // Group the menu for VoiceOver so it reads as a labeled container
+        // of options rather than 5 orphan buttons floating next to the FAB.
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Add options")
     }
 
     private func menuSectionHeader(_ title: String) -> some View {
@@ -148,6 +205,7 @@ struct LibraryAddButton: View {
             .padding(.horizontal, DSSpacing.md)
             .padding(.top, DSSpacing.sm)
             .padding(.bottom, DSSpacing.xxs)
+            .accessibilityAddTraits(.isHeader)
     }
 
     private func menuRow(icon: String, title: String, action: @escaping () -> Void) -> some View {

@@ -1,11 +1,29 @@
 # Word Office — Guideline bám theo (Sprint 0.1 → 0.2 gate)
 
 > **Mục tiêu file này:** danh sách công việc **theo thứ tự** để bạn tự làm được.
-> **Cập nhật:** 2026-09-02 (session 9 — Library Home v10 code thật xong (Favourite/Search/Grid/FAB Menu) + FAB "+" đổi kiến trúc 4 lần trong session (cuối cùng bỏ hẳn `TabView`, `RootView` tự vẽ tab bar) + app icon/splash mới + bỏ dấu chấm cuối câu toàn bộ text UI + 2 đợt `/code-review` (15 lỗi thật, 1 crash) đã fix hết — **user yêu cầu "hold" cuối session, đợt review cuối cùng CHƯA chạy xong, cần review lại trước khi tiếp tục**. Chi tiết đầy đủ ở `CHANGELOG.md` Session 9.)
+> **Cập nhật:** 2026-09-03 (session 10 — đóng lại 2 vòng review dở dang từ Session 9 (`/code-review` + `/swiftui-expert-skill`, tổng 8 finding fix hết) + fix bug FAB "+" menu tràn phải màn hình (user tự phát hiện trên iPhone 16e sim) + upgrade tab bar pill lên **Liquid Glass** (iOS 26 native, nhất quán màu giữa các tab) + outside-tap-to-dismiss cho FAB menu. Chi tiết đầy đủ ở `CHANGELOG.md` Session 10.)
 
 ---
 
 ## ⭐ Where we left off — resume ở đây khi mở lại project
+
+**Session 10 (2026-09-03) end state:**
+
+- ✅ **Fix FAB "+" menu tràn phải màn hình** — restructure `LibraryAddButton.body` từ `VStack(alignment: .trailing)` bao (menu+FAB) — kiến trúc cũ đẩy `HStack` `customTabBar` phồng 220pt vượt available width → sang `fabButton.overlay(alignment: .bottomTrailing) { menu.fixedSize().padding(.bottom, fabDiameter + DSSpacing.lg) }`. Padding trick vì `.alignmentGuide(.top)` không propagate qua overlay chain khi có `.transition` (verified thực tế).
+- ✅ **Liquid Glass tab bar pill** — chọn Option A qua `/swiftui-expert-skill` tư vấn (3 option). Lý do: `.regularMaterial` cũ adaptive → pill khác màu giữa Library vs Settings tab. Glass render surface độc lập → nhất quán. Extension `tabBarPillStyle()` collapse thành 1 dòng direct call sau finding review (fallback iOS <26 là dead code do `IPHONEOS_DEPLOYMENT_TARGET = 26.2` + không hỗ trợ Mac Catalyst).
+- ✅ **Outside-tap-to-dismiss FAB menu** — lift `isMenuOpen` state từ `LibraryAddButton` `@State private` → `RootView` `@Binding`. Thêm scrim `Color.clear.contentShape(Rectangle()).ignoresSafeArea().onTapGesture` giữa content ZStack và `customTabBar`. `.onChange(of: selectedTab)` auto-close khi đổi tab. `withAnimation(.easeOut(duration: 0.15))` matched giữa 2 helper cho animation identical.
+- ✅ **Accessibility grouping menu** — `.accessibilityElement(children: .contain) + .accessibilityLabel("Add options")` trên `addMenuContent`, `.accessibilityAddTraits(.isHeader)` trên section header, `.contentShape(RoundedRectangle)` để hit-test absorb toàn card (fix tap fall-through qua dead area vào fabButton).
+- ✅ **2 vòng review đầy đủ** (`/code-review` + `/swiftui-expert-skill`) — 8 finding trong 2 vòng, fix hết. Session 9's "hold" đã xử lý xong.
+- ✅ **Build sạch + install lên iPhone 16e sim** (`iOS 26.3`) qua CLI `simctl install/launch` sau mỗi fix để user verify bằng mắt.
+
+**Resume session sau**: bạn chọn 1 trong 3 track (recommendation của session 10):
+1. **Small polish**: fix nit hiệu năng `LibraryView` (computed properties `dueEntries`/`groupedSections` gọi 2-3x/render, gom vào `let` cục bộ) + xoá dead views `Views/Sidebar/DocumentListView.swift` + `Views/Tabs/FilesTabView.swift` (đã bị `RootView.customTabBar` thay từ Session 6, giờ orphan) + quyết định wire hoặc ẩn Premium `TODO(paywall)` icon.
+2. **Sprint 0.3 non-UI** (không blocked bởi Artifex hoặc Team ID): PDF Merge/Split thật (mục 8 MVP, PDFKit native — protocol đã có, cần thay stub) → OCR Vision native (mục 7 MVP, `VNRecognizeTextRequest`) → AirPrint wrapper.
+3. **Sprint 0.4+ MVP items lớn**: iPad adaptive layout (`NavigationSplitView` + size classes, mục 3 + 6), Comment/note (mục 9), E-signature vẽ tay + Watermark (mục 11), Crash-recovery UI banner (backend ready từ Session 4, UI wire chưa xong).
+
+**External blockers không đổi**: Artifex license (Sprint 0.2 gate cứng), Bundle ID + Team ID (App Group cho `FilesProviderExtension`).
+
+---
 
 **Session 9 (2026-09-02) end state:**
 

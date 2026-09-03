@@ -1,5 +1,24 @@
 import SwiftUI
 
+/// Tab-bar pill surface — Liquid Glass. Glass renders a consistent surface
+/// across whatever content sits behind the pill (Library's list card vs
+/// Settings's grouped form); `.regularMaterial` did not — that material
+/// samples underlying content and visibly shifted tone between tabs.
+/// Border + shadow intentionally omitted: glass already provides its own
+/// edge highlight and depth, and stacking them produces a double-outline.
+/// Applied after `.padding(6)` on the pill per the skill's modifier-order
+/// rule (visual-effect modifiers go last).
+///
+/// No `#available` gate: `IPHONEOS_DEPLOYMENT_TARGET = 26.2` and this
+/// target ships only for iphoneos/iphonesimulator, so every runtime device
+/// satisfies iOS 26+. If deployment target is ever lowered, re-add a
+/// `.regularMaterial + strokeBorder + shadow` fallback branch here.
+fileprivate extension View {
+    func tabBarPillStyle() -> some View {
+        glassEffect(.regular, in: .capsule)
+    }
+}
+
 /// Root switch based on `LibraryStore.folderPermissionState` — core loop MVP §10 v2.
 ///
 /// State handling:
@@ -15,6 +34,12 @@ struct RootView: View {
     @State private var libraryVM: LibraryViewModel?
     @State private var permissionVM: FolderPermissionViewModel?
     @State private var selectedTab: RootTab = .library
+    /// FAB "+" menu open state — lifted from `LibraryAddButton` so
+    /// `libraryShell` can render a screen-wide invisible scrim that
+    /// dismisses the menu on any outside tap, matching native `Menu`/
+    /// `.popover` UX. Also lets `.onChange(of: selectedTab)` close the menu
+    /// automatically when the user switches tab with menu open.
+    @State private var isFABMenuOpen = false
 
     var body: some View {
         Group {
@@ -101,18 +126,54 @@ struct RootView: View {
                     Color.clear.frame(height: 84)
                 }
 
+                // Full-screen invisible scrim — captures outside taps while
+                // the FAB menu is open so any tap outside the FAB or menu
+                // dismisses it, matching native `Menu`/`.popover` UX. Sits
+                // between the tab content ZStack (below it) and
+                // `customTabBar` (above it) — the pill's tab buttons and the
+                // FAB itself stay interactive above the scrim; a tap-driven
+                // tab switch is handled separately via
+                // `.onChange(of: selectedTab)` below.
+                if isFABMenuOpen {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .ignoresSafeArea()
+                        .onTapGesture { closeFABMenu() }
+                        .transition(.opacity)
+                }
+
                 customTabBar
             }
+            // Switching tab with the FAB menu open would leave the menu
+            // dangling over an unrelated tab. Close it as part of the same
+            // interaction.
+            .onChange(of: selectedTab) { closeFABMenu() }
         } else {
             checkingView
         }
     }
 
+    /// Closes the FAB "+" menu with the same 0.15s ease-out as
+    /// `LibraryAddButton.closeMenu()`, so scrim-driven and FAB-toggle-driven
+    /// dismissals animate identically.
+    private func closeFABMenu() {
+        guard isFABMenuOpen else { return }
+        withAnimation(.easeOut(duration: 0.15)) { isFABMenuOpen = false }
+    }
+
     private var customTabBar: some View {
-        // `.bottom` alignment — `LibraryAddButton` grows upward when its menu
-        // opens (its popup sits above the "+" in its own VStack), which would
-        // otherwise vertically re-center against the shorter tab pill and
-        // visibly shift the "+" up/down as the menu opens/closes.
+        // `.bottom` alignment — the tab pill (68pt: 56pt buttons + 12pt
+        // capsule inner padding) is 12pt taller than the FAB (56pt).
+        // Anchoring both to their bottoms keeps a shared baseline that
+        // reads as a coherent floating bar.
+        //
+        // Historical note: this alignment also used to guard against the
+        // FAB re-centering when the popup menu opened, back when the menu
+        // was a VStack sibling of the FAB and expanded the enclosing view
+        // upward. After the menu moved to `.overlay` on the FAB in
+        // `LibraryAddButton`, `LibraryAddButton` no longer changes size
+        // when the menu opens — the re-centering risk is gone. The
+        // alignment stays purely for the visual baseline above.
         HStack(alignment: .bottom, spacing: DSSpacing.sm) {
             HStack(spacing: 2) {
                 tabBarButton(.library, label: "Library", systemImage: "tray.full")
@@ -120,12 +181,10 @@ struct RootView: View {
                 tabBarButton(.settings, label: "Settings", systemImage: "gearshape")
             }
             .padding(6)
-            .background(.regularMaterial, in: Capsule())
-            .overlay(Capsule().strokeBorder(Color.dsBorderSubtle))
-            .shadow(color: .black.opacity(0.12), radius: 16, y: 6)
+            .tabBarPillStyle()
 
             if let libraryVM {
-                LibraryAddButton(viewModel: libraryVM, container: container)
+                LibraryAddButton(viewModel: libraryVM, container: container, isMenuOpen: $isFABMenuOpen)
             }
         }
         .padding(.horizontal, DSSpacing.md)

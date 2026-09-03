@@ -1,3 +1,8 @@
+---
+name: ui-ux
+description: Use when designing, reviewing, or refactoring user interfaces — visual design decisions, design system audits, component architecture, user flows, state coverage (hover/focus/active/disabled/loading/error/empty), spacing/typography/color scales, accessibility, and front-end implementation patterns.
+---
+
 # UI/UX Design Skill
 
 Deep guidance for designing and building high-quality user interfaces. Load this skill when working on visual design, component architecture, user flows, or front-end implementation.

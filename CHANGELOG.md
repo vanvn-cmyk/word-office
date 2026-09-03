@@ -6,6 +6,39 @@ Format tham khảo [Keep a Changelog](https://keepachangelog.com/). Entry mới 
 
 ---
 
+## [Unreleased] — 2026-09-03 (Session 10)
+
+Session ngắn — chủ đề duy nhất là **đóng lại các đợt review dở dang từ Session 9** (user "hold" cuối session trước) + fix 1 bug user tự phát hiện trên simulator (FAB "+" menu tràn ra ngoài cạnh phải màn hình). Trong quá trình fix bug cũng đồng thời upgrade tab bar pill lên **Liquid Glass** (iOS 26 native) qua tư vấn `/swiftui-expert-skill` để nhất quán màu tab bar giữa các tab. Sau đó chạy đủ 2 review skill theo `rule.md` #4 (`/code-review` + `/swiftui-expert-skill`) trên diff, bắt tổng 8 finding, fix hết.
+
+- ✅ **Fix FAB "+" menu tràn phải màn hình** — user thấy trên iPhone 16e sim: menu 220pt align phải với FAB, `VStack(alignment: .trailing)` bao (menu+FAB) khiến `LibraryAddButton` phồng lên 220pt, đẩy `HStack` `customTabBar` (tab pill ~228 + spacing 12 + LibraryAddButton 220 = 460pt) vượt available width (iPhone 393 - 32 padding = 361pt), đẩy FAB + menu ra ngoài mép phải màn hình. Fix: restructure `LibraryAddButton.body` sang `fabButton.overlay(alignment: .bottomTrailing) { addMenuContent.fixedSize().padding(.bottom, fabDiameter + DSSpacing.lg) }`. Kỹ thuật: padding invisible đẩy menu lên trên FAB, alignment `.bottomTrailing` pin padded box vào FAB bottom. Thử `.alignmentGuide(.top) { $0[.bottom] + gap }` trước nhưng `.transition` không propagate `.top` guide qua overlay chain — menu render xuống dưới FAB.top thay vì lên (verified thực tế). Thêm `static let fabDiameter: CGFloat = 56` làm single source of truth cho FAB frame + menu padding. Gap chọn `DSSpacing.lg` (20pt) chứ không `DSSpacing.sm` (12pt) vì trong `HStack(alignment: .bottom)` pill cao hơn FAB 12pt (56 button + 12 padding), gap 12pt = menu bottom flush pill top = trông đè.
+- ✅ **Liquid Glass tab bar pill** — chọn Option A qua `/swiftui-expert-skill` tư vấn (3 option: A=Liquid Glass, B=`.thickMaterial`, C=solid color). Lý do gốc: `.regularMaterial` cũ adaptive theo content phía sau — pill khác màu giữa Library tab (list-card trắng) vs Settings tab (grouped-form xám-tím), vi phạm cảm giác nhất quán. Liquid Glass render surface độc lập content phía sau → nhất quán. `RootView.swift` đổi từ `.background(.regularMaterial, in: Capsule()) + .overlay(strokeBorder) + .shadow(...)` sang `.glassEffect(.regular, in: .capsule)` qua helper `fileprivate extension View { func tabBarPillStyle() }`. Bỏ border+shadow vì glass tự có edge highlight + depth (skill khuyến nghị, tránh double-outline). Ban đầu có `#available(iOS 26, *)` fallback nhưng đóng session sau bằng finding review: `IPHONEOS_DEPLOYMENT_TARGET = 26.2` + `SUPPORTED_PLATFORMS = iphoneos/iphonesimulator` (không Mac Catalyst) → fallback branch không bao giờ chạy → collapse extension thành 1 dòng direct call.
+- ✅ **`/code-review` + `/swiftui-expert-skill` — 5 finding CONFIRMED, fix hết**:
+  1. **Outside-tap không dismiss menu**: khác native `Menu`/`.popover`. Fix: lift `isMenuOpen` từ `LibraryAddButton` `@State private` → `RootView` `@State` + `@Binding`. Thêm scrim `Color.clear.contentShape(Rectangle()).ignoresSafeArea().onTapGesture { closeFABMenu() }` giữa content ZStack và `customTabBar` trong `libraryShell`. `withAnimation(.easeOut(duration: 0.15))` matched giữa `LibraryAddButton.closeMenu()` và `RootView.closeFABMenu()` cho animation identical.
+  2. **Tap fall-through qua "dead area" menu vào fabButton**: Text section header + Divider + padding vertical giữa row không có Button absorb, `.background(Color, in: Shape)` không guarantee absorb hit-test → tap dead area = fall through xuống fabButton = menu đóng bất ngờ. Fix: thêm `.contentShape(RoundedRectangle(cornerRadius: DSRadius.large, style: .continuous))` sau `.background(...)` trên `addMenuContent`.
+  3. **Missing accessibility grouping menu**: VoiceOver announce 5 rows như buttons rời rạc. Fix: `.accessibilityElement(children: .contain) + .accessibilityLabel("Add options")` trên `addMenuContent`. Thêm `.accessibilityAddTraits(.isHeader)` trên `menuSectionHeader`.
+  4. **Tab switch với menu open → menu không đóng**: `.onChange(of: selectedTab) { closeFABMenu() }` trên `libraryShell` ZStack.
+  5. **Stale comment `RootView.customTabBar`**: kiến trúc cũ VStack, sau restructure `LibraryAddButton` không đổi size khi menu mở nữa. Update comment giải thích lý do `.bottom` alignment mới thuần visual baseline (pill 68pt vs FAB 56pt shared bottom).
+- ✅ **`/code-review` final — 3 finding cosmetic, fix hết**:
+  1. `tabBarPillStyle()` fallback iOS <26 là dead code (đã note ở trên) — collapse thành 1 dòng.
+  2. Ternary as statement `isMenuOpen ? closeMenu() : openMenu()` → `if isMenuOpen { closeMenu() } else { openMenu() }` — idiomatic Swift.
+  3. `LibraryAddButton.closeMenu()` thiếu idempotency guard — asymmetric với `RootView.closeFABMenu()` (có guard) → gọi vào no-op state change vẫn mở `withAnimation` transaction, tốn 1 animation frame. Fix: thêm `guard isMenuOpen else { return }`.
+- ✅ **Build sạch nhiều lần** (`xcodebuild ... BUILD SUCCEEDED`) sau mỗi đợt sửa. Install + launch thẳng lên iPhone 16e sim (iOS 26.3) qua `simctl install`+`launch` để user test bằng mắt sau mỗi lần fix.
+
+---
+
+### 🔨 Code Deliverables — Session 10
+
+#### FAB "+" menu positioning
+- `Views/Library/LibraryAddButton.swift` (edit) — restructure body VStack → overlay+padding, add `static let fabDiameter`, lift `isMenuOpen` state → `@Binding`, add `.contentShape` + accessibility grouping on menu card, `.isHeader` on section header, idempotency guard on `closeMenu()`, ternary → if/else.
+
+#### Tab bar Liquid Glass + outside-tap-dismiss
+- `Views/Root/RootView.swift` (edit) — add `tabBarPillStyle()` extension (collapse to direct `.glassEffect` call), replace 3 chained modifiers in `customTabBar` with `.tabBarPillStyle()`, add `@State isFABMenuOpen` + `closeFABMenu()` helper, add scrim in `libraryShell` ZStack, add `.onChange(of: selectedTab)` auto-close, pass `$isFABMenuOpen` binding to `LibraryAddButton`, update stale `.bottom` alignment comment.
+
+#### Skill metadata (auto)
+- `.agents/skills/ui-ux/SKILL.md` (edit) — YAML frontmatter (name + description) auto-added by skill invocation.
+
+---
+
 ## [Unreleased] — 2026-09-02 (Session 9)
 
 Session dài nhất tới giờ, chủ đề chính là **thiết kế lại toàn bộ Library Home** theo mockup `Library-Home-v10-Refinements.html` (Favourite, Search, Grid view, FAB Menu 3 nhóm) — nhưng phần tốn công nhất lại không phải feature mới mà là **vị trí FAB "+" so với tab bar**: đi qua 4 kiến trúc khác nhau trong 1 session (overlay-trong-tab → overlay-trên-`TabView` → `.tabViewBottomAccessory` → tự vẽ tab bar riêng) vì 2 API native đầu đều gây lỗi hiển thị thật (không phải chỉnh số sai), phải bỏ hẳn `TabView`/`Tab` để có kiểm soát layout 100%. Cộng thêm: app icon mới, splash screen, sweep bỏ dấu chấm cuối câu toàn bộ text UI theo yêu cầu user, và 2 đợt `/code-review` riêng biệt bắt tổng 15 lỗi thật (1 crash) — đều đã fix. User yêu cầu "hold" review ở cuối session (đã dừng agent đang chạy) — **chưa có đợt review cuối cùng xác nhận trạng thái sau các fix mới nhất**.
