@@ -6,6 +6,9 @@ struct EmptyStateView: View {
     let title: LocalizedStringKey
     let message: LocalizedStringKey
     var action: (label: LocalizedStringKey, handler: () -> Void)?
+    /// Secondary action shown below the primary as a `.bordered` button.
+    /// When nil, only the primary button is shown (existing behaviour).
+    var secondaryAction: (label: LocalizedStringKey, handler: () -> Void)? = nil
 
     var body: some View {
         VStack(spacing: DSSpacing.md) {
@@ -24,9 +27,15 @@ struct EmptyStateView: View {
             }
 
             if let action {
-                Button(action.label, action: action.handler)
-                    .buttonStyle(.borderedProminent)
-                    .padding(.top, DSSpacing.xs)
+                VStack(spacing: DSSpacing.sm) {
+                    Button(action.label, action: action.handler)
+                        .buttonStyle(.borderedProminent)
+                    if let secondaryAction {
+                        Button(secondaryAction.label, action: secondaryAction.handler)
+                            .buttonStyle(.bordered)
+                    }
+                }
+                .padding(.top, DSSpacing.xs)
             }
         }
         .padding(DSSpacing.xl)

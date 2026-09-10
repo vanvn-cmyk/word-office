@@ -15,6 +15,10 @@ enum DocumentKind: String, Codable, Hashable, Sendable, CaseIterable {
     // Korean format — check UTI support Sprint 0.1
     case hwp
     case hwpx
+    // Archive — added S18 for "Convert to ZIP" kebab action so scanner
+    // doesn't drop the produced .zip; not editable, kind is used purely
+    // for icon + display in the Library list.
+    case zip
 
     var displayName: String { rawValue.uppercased() }
 
@@ -27,6 +31,7 @@ enum DocumentKind: String, Codable, Hashable, Sendable, CaseIterable {
         case .pptx, .ppt:          "rectangle.on.rectangle.fill"
         case .pdf:                 "doc.fill"
         case .hwp, .hwpx:          "doc.text"
+        case .zip:                 "doc.zipper"
         }
     }
 

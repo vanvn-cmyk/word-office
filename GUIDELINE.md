@@ -1,11 +1,53 @@
 # Word Office — Guideline bám theo (Sprint 0.1 → 0.2 gate)
 
 > **Mục tiêu file này:** danh sách công việc **theo thứ tự** để bạn tự làm được.
-> **Cập nhật:** 2026-09-03 (session 10 — đóng lại 2 vòng review dở dang từ Session 9 (`/code-review` + `/swiftui-expert-skill`, tổng 8 finding fix hết) + fix bug FAB "+" menu tràn phải màn hình (user tự phát hiện trên iPhone 16e sim) + upgrade tab bar pill lên **Liquid Glass** (iOS 26 native, nhất quán màu giữa các tab) + outside-tap-to-dismiss cho FAB menu. Chi tiết đầy đủ ở `CHANGELOG.md` Session 10.)
+> **Cập nhật:** 2026-09-05/06 (session 13 — dọn nợ `/code-review` từ Session 10-12: 4 đợt review, 23 finding fix hết (double-dismiss races, tab-bar preference OR-bug, chữ ký stretch méo, double-tap tạo file trùng, VM state không reset, shared VM error bleed, print reentrancy, reduce-motion, v.v.) + redesign icon Premium (crown.fill gradient gold, 2 token màu mới). **6 finding còn lại hoãn có lý do rõ ràng** (4 cần verify thật trên device, 2 cần user chốt hướng UX/kiến trúc trước khi code) — xem `CHANGELOG.md` Session 13 Nhóm 5.)
 
 ---
 
 ## ⭐ Where we left off — resume ở đây khi mở lại project
+
+**Session 13 (2026-09-05/06) end state:**
+
+- ✅ **4 đợt `/code-review` (23 finding), fix hết** — chi tiết đầy đủ ở `CHANGELOG.md` Session 13 Nhóm 1-2-4-5. Đáng chú ý nhất: `RootView` tab-bar preference OR-bug (1 tab ẩn tab bar ảnh hưởng app-wide), `PDFKitSignatureStamper` stretch méo chữ ký khi lưu (preview đúng, output sai), double-tap Merge/Split/Convert tạo file trùng âm thầm, `DocumentPickerExporter` double-dismiss iPad, `PDFToolsViewModel.print()` thiếu reentrancy guard, animation/spring 10+ chỗ chưa gate `accessibilityReduceMotion`.
+- ✅ **Icon Premium redesign** — `sparkles` → `crown.fill` badge tròn gradient gold + shadow. 2 token mới `dsPremiumGoldStart`/`dsPremiumGoldEnd` (Apple systemYellow/systemOrange hex thật) sau khi vòng 1 (tái dùng `dsStatusWarning`) bị user chê ra màu nâu/đồng, không phải gold.
+- ⏸️ **OPEN — 6 finding hoãn có chủ đích, KHÔNG phải quên**:
+  1. Nghi vấn `TabBarVisualHiddenPreferenceKey` có thể vẫn stuck — suy đoán theo tương tự, chưa verify được là bug thật (lý do: cơ chế `PreferenceKey` tính lại theo cây view mỗi render, không phải kiểu event có thể miss).
+  2. Rotation chưa xử lý ở Sign/Fill Form placement — nghi vấn, code hiện tại dùng API cấp cao PDFKit (`pdfView.convert`, `page.draw`) vốn tự xử lý rotation nhất quán, nhiều khả năng đã đúng — cần test trên 1 file PDF scan bị xoay thật mới biết chắc.
+  3. Nút "Print" mất sau khi Merge — tính năng rớt khi refactor Session 12, cần chốt lại luồng UX trước khi code (rule.md #2).
+  4. `LibraryViewModel` full-rescan mỗi lần save thay vì upsert 1 file — ĐÃ LÀ quyết định có chủ đích từ Session 12 (comment ghi rõ lý do lấy đúng metadata/iCloud state), không phải bug — cần user quyết đổi hay giữ.
+  5. Sign/Fill Form trùng lặp gần như nguyên khối state machine preview→confirm→commit — refactor rủi ro cao (đụng đúng logic dismiss-race vừa fix cẩn thận), nên làm sau khi đã test bằng mắt.
+  6. Gap nhỏ mới lộ ra: `PrintFlowView` nút Print không phản ánh `viewModel.isProcessing` (guard mới thêm chặn đúng nhưng user bấm không thấy phản hồi gì) + 4 finding duplication/design-taste pre-existing (`LibraryEditorSheet`/`ToolsEditorSheet` trùng nhau, `closeFABMenu`/`closeMenu` trùng nhau, `IconBadge` trùng `DSDocumentTypeBadge`, `PressableCardButtonStyle` dùng `.interactiveSpring` vi phạm thẳng rule "no spring physics" trong `~/CLAUDE.md`).
+
+**Resume session sau**: (1) **ưu tiên trước hết — test bằng mắt trên simulator** (chưa làm được suốt session này, cần user tự bấm qua onboarding "Skip for now", máy dev thiếu quyền Accessibility để tự động hoá). (2) Sau khi test xong, quyết từng mục trong 6 finding hoãn ở trên — đặc biệt 2 mục cần verify thật (#1, #2) giờ mới test được. (3) Commit theo timeline như đã note từ Session 12 (giờ là 4 lô: Session 10 chiều / 11 / 12 / 13).
+
+**External blockers không đổi**: Artifex license (Sprint 0.2 gate cứng), Bundle ID + Team ID (App Group cho `FilesProviderExtension`).
+
+---
+
+**Session 10 continuation (2026-09-03 chiều) end state:**
+
+- ✅ **Toast system + kebab menu (3-phase, fully wired)** — `DSToastPresenter` @Observable @MainActor global + `DSToast` visual card + `toastHost(_:)` modifier. Replace 4 success screens (Merge/Split/Convert/Scan) → toast fires + auto-navigate sang màn file mới qua sheet `EditorPlaceholderView`. Kebab menu 4 actions (Edit / Save to Files / Share / Favourite) trên `DocumentCard` + `DocumentGrid` file rows.
+- ✅ **Toast anchored TOP** (dưới status bar/Dynamic Island) — bottom conflict với tab bar + FAB. `toastHost(_:)` modifier applied ở scene-root `Word_OfficeApp` + inside `LibraryEditorSheet` + `ToolsEditorSheet` + FAB scan sheet — sheets ABOVE scene overlay trong z-order, cần in-sheet host để toast không bị che.
+- ✅ **7 bug + UX gap fixed** — nil-VM race (destinations blank spinner do lazy `.task` không fire kịp trong ZStack+opacity pattern), Cancel duplicate với back chevron (3 view push-only + 1 conditional cho ScanFlowView), empty state buttons bị tab bar che (`EmptyStateView` maxHeight infinity + siblings), "2 secs" live-tick time (`Text(date, style: .relative)` compound format + auto-refresh → đổi `format: .relative(presentation: .named)` static), missing modifiedAt real value (`.now` hardcode → `URL.contentModificationDateOrNow`), dead dismiss vars trong 3 view sau bỏ Cancel, missing DSToastPresenter env trong `#Preview("Root — checking")`.
+- ✅ **6 SwiftUI review findings + 1 CRITICAL regression fixed** — Editor sheet Done button write parent state → extract wrapper struct với `@Environment(\.dismiss)`. DSToast Button vs onTapGesture. VoiceOver announcement qua `UIAccessibility.post`. Toast bị sheet che (CRITICAL regression từ auto-navigate work) → `toastHost(_:)` modifier apply inside sheets.
+- ✅ **Build clean** (`xcodebuild ... BUILD SUCCEEDED`) + app install/relaunch iPhone 16e sim (iOS 26.3) qua CLI sau mỗi fix để user test bằng mắt. Session cuối PID 46717.
+
+**🚧 OPEN — chờ user chốt sáng mai (2026-09-04)**:
+
+User test PDF→Image flow, thấy toast "Exported 1 image" fire ở top nhưng KHÔNG navigate (behavior đặc biệt của pdfToImage — output nhiều ảnh, editor không preview được). User comment: *"ô chưa điều hướng sang màn hình mới là màn hình revert file thành công à, áp dụng cho mọi tinsh năng của tools"*. Câu chưa rõ, có 3 interpretation:
+
+- **A. Bỏ HẾT auto-navigate** — TẤT CẢ tools chỉ toast + stay at picker (như pdfToImage hiện tại). Undo work Nhóm 5 (~50 dòng revert).
+- **B. Giữ auto-navigate**, thêm cho pdfToImage 1 cách khác (VD: gallery view/preview ảnh đầu tiên). Thêm view mới cho image preview.
+- **C. Cái khác** — user chưa nói cụ thể.
+
+Đã ask user chọn 1/2/3 — user reply *"tạm thời lưu lại vấn đề nhé... mai tôi quay lại xử lý tiếp"*.
+
+**Resume session sau**: (1) User chốt A/B/C cho câu hỏi trên → apply theo choice. (2) Address 5 code-review findings CHƯA fix (VM churn trong State(wrappedValue:), Item Equatable với UUID id latent, @MainActor cosmetic redundant, ShareLink thiếu SharePreview, DocumentPickerExporter sheet + ignoresSafeArea double-dismiss on iPad, Scan partial-failure silent loss). (3) Sau đó có thể chuyển hướng khác (Sprint 0.4+ MVP items lớn: iPad adaptive layout, Comment/note, E-signature, Crash-recovery banner).
+
+**External blockers không đổi**: Artifex license (Sprint 0.2 gate cứng), Bundle ID + Team ID (App Group cho `FilesProviderExtension`).
+
+---
 
 **Session 10 (2026-09-03) end state:**
 

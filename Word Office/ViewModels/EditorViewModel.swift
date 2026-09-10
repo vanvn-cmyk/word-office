@@ -97,7 +97,6 @@ final class EditorViewModel {
 
     /// Never swallows a failed autosave (§7.3 "never silent data loss") — surfaces
     /// it via `errorMessage` and keeps `isDirty` true so the UI still shows unsaved work.
-    @MainActor
     private func handleAutosaveOutcome(_ outcome: AutosaveOutcome, for snapshot: DocumentContent) {
         switch outcome {
         case .saved:

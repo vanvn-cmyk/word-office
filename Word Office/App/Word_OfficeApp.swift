@@ -7,6 +7,9 @@ struct Word_OfficeApp: App {
     @State private var sessionStore = SessionStore()
     @State private var libraryStore = LibraryStore()
     @State private var container = DependencyContainer()
+    /// App-scope toast presenter — injected via `.environment(_:)` so any
+    /// view can trigger a bottom toast via `@Environment(DSToastPresenter.self)`.
+    @State private var toastPresenter = DSToastPresenter()
 
     @Environment(\.scenePhase) private var scenePhase
     @State private var isShowingSplash = true
@@ -19,6 +22,7 @@ struct Word_OfficeApp: App {
                     .environment(themeStore)
                     .environment(sessionStore)
                     .environment(libraryStore)
+                    .environment(toastPresenter)
                     .preferredColorScheme(themeStore.preferredColorScheme)
                     .tint(Color.dsBrandPrimary)
                     .onChange(of: scenePhase) { _, newPhase in
@@ -30,6 +34,13 @@ struct Word_OfficeApp: App {
                         .transition(.opacity)
                 }
             }
+            // Scene-root toast host. Second (in-sheet) toast hosts are
+            // applied inside `EditorSheet` (the shared editor wrapper)
+            // and `LibraryAddButton`'s FAB scan sheet — SwiftUI sheets
+            // present above scene-root overlays, so a toast fired while
+            // any sheet is up is invisible unless the sheet itself
+            // hosts one too.
+            .toastHost(toastPresenter)
             .task {
                 // Fixed minimum display time (not tied to any real loading state —
                 // `DependencyContainer`/`RootView`'s own permission check are fast
@@ -46,7 +57,6 @@ struct Word_OfficeApp: App {
     /// would otherwise wait out). MVP has a single active editor at a time —
     /// tracked via `SessionStore.currentDocument`. Multi-doc future: iterate all
     /// pending IDs held by the scheduler.
-    @MainActor
     private func handleScenePhaseChange(_ phase: ScenePhase) {
         guard phase == .background else { return }
         guard let ref = sessionStore.currentDocument else { return }

@@ -22,7 +22,7 @@ struct DSDocumentTypeBadge: View {
         case .pptx, .ppt:                Color.dsDocumentPresentation.opacity(0.12)
         case .pdf:                       Color.dsDocumentPDF.opacity(0.12)
         case .txt, .rtf, .markdown,
-             .hwp, .hwpx:                Color.dsDocumentGeneric.opacity(0.12)
+             .hwp, .hwpx, .zip:          Color.dsDocumentGeneric.opacity(0.12)
         }
     }
 
@@ -33,7 +33,7 @@ struct DSDocumentTypeBadge: View {
         case .pptx, .ppt:                .dsDocumentPresentation
         case .pdf:                       .dsDocumentPDF
         case .txt, .rtf, .markdown,
-             .hwp, .hwpx:                .dsDocumentGeneric
+             .hwp, .hwpx, .zip:          .dsDocumentGeneric
         }
     }
 }

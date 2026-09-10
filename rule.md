@@ -79,6 +79,79 @@ nguyên tắc gốc trong `~/CLAUDE.md` (không thiết kế cho hypothetical re
 gặp). Ưu tiên đúng hơn nhanh. Mọi thay đổi ảnh hưởng dữ liệu người dùng thật (vd ghi đè file
 `.docx`) phải có safety-guard, không được âm thầm phá dữ liệu (đã áp dụng ở `DOCXCodec`).
 
+## 7. Luôn load `/swiftui-expert-skill` KHI viết code SwiftUI (không chỉ review)
+
+Rule #4 đã yêu cầu review sau khi viết. Rule này bổ sung: **TRƯỚC hoặc TRONG lúc triển khai
+code SwiftUI mới / sửa View / state / animation / layout hiện có**, phải LOAD `/swiftui-expert-skill`
+để consult reference (`references/latest-apis.md`, `references/liquid-glass.md`,
+`references/state-management.md`, `references/animation-basics.md`, v.v.) TRƯỚC khi quyết định
+API/pattern. Áp dụng cho mọi file `.swift` trong `Views/`, `App/`, `DesignSystem/`, và ViewModel
+nếu đụng state observable.
+
+Lý do: skill chứa knowledge iOS 26+ API mới nhất, deprecated API, patterns HIG. Đã ship nhầm
+`.interactiveSpring` vi phạm rule "no spring physics for UI chrome" và `.buttonBorderShape(.circle)`
+không work trên iOS 26 toolbar auto-glass — đó là lý do skill phải load TRƯỚC khi quyết định
+pattern, không phải fix sau qua review. Skill portable qua repo (`.agents/skills/swiftui-expert-skill/`,
+xem rule #4.1).
+
+Ngoại lệ: chỉ sửa 1 dòng thuần logic không đụng API SwiftUI/UIKit (VD `.disabled(x || y)`, đổi
+tên biến) — không cần load. Đụng đến View builder, modifier, state, animation, layout, gesture,
+accessibility, focus, sheet, navigation — LUÔN load.
+
+## 8. Compact bottom sheet — cách tính height và tránh dead space
+
+Áp dụng cho mọi `.sheet` dùng `.presentationDetents([.height(N)])` (ví dụ: `ImageConvertPickerSheet`, `ScanSourcePickerSheet`, bất kỳ sheet picker nhỏ nào).
+
+### Quy tắc bắt buộc
+
+**Không dùng `Spacer()` bên trong VStack của sheet** — `Spacer` luôn expand để lấp đầy phần còn lại của detent, tạo ra dead space trống ở cuối sheet (đúng bug xảy ra ở `ImageConvertPickerSheet` ngày 2026-09-10).
+
+**Thay thế**: dùng fixed padding ở cuối VStack:
+```swift
+VStack(spacing: 0) {
+    // ... nội dung sheet ...
+}
+.padding(.bottom, DSSpacing.md)   // ← fixed, không phải Spacer
+.presentationDetents([.height(N)])
+```
+
+### Cách tính N (detent height)
+
+Cộng lần lượt chiều cao các component, dùng token DSSpacing:
+
+| Token | pt |
+|-------|----|
+| xxs   | 4  |
+| xs    | 8  |
+| sm    | 12 |
+| md    | 16 |
+| lg    | 20 |
+| xl    | 24 |
+| xxl   | 32 |
+
+**Pattern chuẩn cho sheet có drag indicator + title + N rows:**
+
+```
+drag indicator = top_pad(sm=12) + height(4) + bottom_pad(md=16)  = 32pt
+title row      = font_height(~20) + bottom_pad(md=16)            = 36pt
+mỗi row        = vertical_pad(sm=12) × 2 + icon_size(36)         = 60pt
+divider giữa rows                                                 ≈ 1pt
+spacing xs=8 giữa mỗi child trong VStack (xs=8)                  = N×8pt
+bottom padding                                                     = 16pt (md)
+```
+
+**Ví dụ thực tế** (`ImageConvertPickerSheet`, 2 rows):
+```
+32 + 36 + 60 + 8 + 1 + 8 + 60 + 16 = 221pt → dùng .height(224) (thêm 3pt buffer)
+```
+
+### Checklist trước khi ship một compact sheet
+
+- [ ] Không có `Spacer()` / `Spacer(minLength:)` bên trong VStack chính
+- [ ] Có `.padding(.bottom, DSSpacing.md)` cuối VStack
+- [ ] `.presentationDetents([.height(N)])` với N tính theo công thức trên
+- [ ] Đã chạy app thật hoặc simulator để xác nhận không còn dead space
+
 ---
 
 *File này là rule bắt buộc cho project Word Office — đọc trước khi bắt đầu bất kỳ phiên làm

@@ -6,6 +6,1163 @@ Format tham khảo [Keep a Changelog](https://keepachangelog.com/). Entry mới 
 
 ---
 
+## [Unreleased] — 2026-09-10 (Session 23 — UX polish: FileSourcePickerSheet + PrintFlowView auto-picker + PremiumButton size + Onboarding status bar)
+
+Screenshot-driven polish session. 7 discrete changes across 6 files. All UNCOMMITTED (cumulative ~17+ lô from S10c).
+
+### 📋 FileSourcePickerSheet — message param + font bump
+
+- Added `var message: LocalizedStringKey? = nil` — when set, renders a body-font context line above the two source rows. Sheet auto-grows from 155 → 190pt to accommodate.
+- `fileSourcePicker(isPresented:message:onLibrary:onBrowse:)` modifier updated with matching `message` param (default nil — all existing callers unaffected).
+- Row title font: `DSFont.callout.weight(.semibold)` → `DSFont.body.weight(.semibold)`. Row subtitle: `DSFont.footnote` → `DSFont.subheadline`. Sheet reads heavier and more legible.
+
+### 🖨️ PrintFlowView — auto-present source picker on entry
+
+- Added `@State private var isSourcePickerPresented = false` + `.task { isSourcePickerPresented = true }` — source picker sheet now auto-presents when the view first appears, matching the Sign/Fill flow pattern.
+- `printEmptyState` simplified: removed the inline card rows (now in the sheet). Hero icon + title + subtitle remain; replaced card section with a single `"Choose a file"` `.borderedProminent` button to re-open the picker after dismiss.
+- `printSourceRow` helper deleted (no longer used).
+- Sheet message: `"Select where your file is stored"`.
+
+### 👑 PremiumButton — larger circle + stronger shadow
+
+- Circle: 24 → 30 → **36pt**.
+- Crown icon: 12 → 15 → **18pt bold**.
+- Drop shadow: `black.opacity(0.12), radius 1, y 0.5` → **`black.opacity(0.18), radius 2, y 1.5`**.
+- Gold glow: `dsPremiumGoldEnd.opacity(0.35), radius 7, y 2` → **`dsPremiumGoldEnd.opacity(0.42), radius 9, y 3`** — previous `radius 16, y 6, opacity 0.65` caused visible smear/streak on white navbar background; scaled back to maintain glow without bleed.
+- Radial highlight `endRadius`: 20 → 26 → **32** (scaled proportionally with circle size).
+- Crown inner shadow: `black.opacity(0.22), radius 1` → **`black.opacity(0.35), radius 2, y 1`**.
+
+### ⚙️ SettingsView — Developer: Reset Onboarding button
+
+- Added `@AppStorage("root.hasCompletedOnboarding")` to `SettingsView`.
+- New **"Developer"** section at the bottom of the Settings form with one row: `"Reset Onboarding"` (arrow.counterclockwise icon, gray tint).
+- Tap clears `SampleFileSeeder.didSeedDefaultsKey` + `hasCompletedOnboarding` → RootView immediately un-mounts the main shell and shows onboarding from S1.
+- Purpose: dev/QA convenience — previously the only way to re-see onboarding was uninstall/reinstall.
+
+### 🌌 OnboardingContainerView — white status bar bleed fixed
+
+- Added `.background(Color(red: 0.04, green: 0.09, blue: 0.28).ignoresSafeArea())` to the outer `ZStack`.
+- Root cause: iOS 26 lets window background bleed through the Dynamic Island / status bar zone when no explicit fill is set. The aurora gradient's own `.ignoresSafeArea()` covers the content area but not the window-level gap at the very top. The dark navy constant matches every page palette's top stop so there is no visible seam.
+
+### 🔧 Simulator — build + run pipeline established
+
+- First successful build + run on **iPhone Air** simulator (UDID `C8E2D455`, iOS 26, already Booted).
+- Xcode located at `~/Downloads/Xcode.app`; `xcode-select` still points to CommandLineTools — use full path `~/Downloads/Xcode.app/Contents/Developer/usr/bin/xcodebuild` for all build commands.
+- Derived data: `/tmp/WordOffice-DerivedData`. Bundle ID: `com.app.word.office.Word-Office`.
+- **Discovered**: `SampleFileSeeder` sets `didSeedDefaultsKey` in `DependencyContainer.init` before first render → onboarding always skipped on fresh install (by design, Session 19). "Reset Onboarding" button in Settings is now the clean way to force onboarding for testing.
+- **Known edge case**: after Reset Onboarding + "Maybe Later" → "No folder yet" empty state shown (seeded files not visible without a folder). Three fix options documented; deferred per user decision.
+
+---
+
+## [Unreleased] — 2026-09-10 (Session 21 — Paywall real plans + Scan source-picker rework + Library favourite/delete + onboarding-flow audit)
+
+Long iterative UI session across 3 features, mostly driven by rapid screenshot-and-fix rounds. Two genuine bugs surfaced mid-flow (not requested, found while implementing something else) and got fixed in place; both are called out below since they're the kind of thing worth knowing landed even though nobody explicitly asked for them.
+
+### 💳 Nhóm 1 — Paywall: Weekly/Monthly real plan structure
+
+- Replaced the placeholder Weekly/Yearly plan pair with **Weekly (3-day trial, default-selected) / Monthly (no trial)** — matches a trial-led paywall pattern. Corner badge shortened "3-DAY FREE TRIAL" → "3-DAY FREE" after it duplicated the row's own caption text ("3-day trial, then billed weekly") right below it — badge only needs to flag the offer, the caption explains it.
+- CTA copy is plan-aware: "Start Trial Now" when Weekly is selected, "Continue" for Monthly.
+- Price is a **skeleton placeholder** (`PriceSkeleton`, pulsing bar), not invented `"$X.XX"` text — no real StoreKit product exists yet, and a literal price string reads as real data rather than "loading."
+- **Layout lesson learned the hard way**: the hero illustration's real size ceiling was never `maxHeight`/padding on the image itself — it was the fixed-screen `ZStack` + `Spacer` layout forcing the illustration to compete with the benefit list + bottom card for one fixed vertical budget. A `ScrollView` pass fixed the squeeze but let content overflow below the fold (rejected on sight — forced scroll on a paywall). Landed on: fixed (non-scrolling) layout restored, illustration cropped (1668×943 → 1400×943, mild crop, backed up original), benefit list subtitles traded off against illustration size per explicit user call, benefit list font/icon size bumped once more space was available.
+- Illustration crop, gradient (3-stop instead of flat 2-color), vignette, and headline text-shadow were all separate polish passes layered on top of the structural fix.
+
+### 📷 Nhóm 2 — Scan & OCR: source picker consolidation
+
+- Collapsed 3 stacked buttons (Scan with Camera / Choose from Photos / Choose a PDF) into a single **"Choose a Source"** CTA opening a custom bottom sheet (tried `Menu` first — rejected as "bottom sheet đi ổn hơn"). Added matching icons to all 3 rows (previously only Camera had one) and applied `.disabled` camera-gating to `addMoreTile`'s picker too (only the empty-state one had it before).
+- Sheet sizing/positioning went through several rounds of hand-tuned constants (230 → 195 → 165 → 145, top padding 0 → sm → xl → xxl) before landing on values grounded in an actual pixel measurement of a real screenshot (calibrated px→pt scale off the system drag-indicator's fixed size) rather than more guessing.
+- **Real bug found + fixed** (not requested — surfaced during an unrelated `/swiftui-expert-skill` review of this same code): the quick "Photos" shortcut overlaid on the live camera scanner sets `isPhotosPickerPresented`, but the `.photosPicker(isPresented:)` modifier answering it was scoped inside `emptyAddPages` — once `pages` had ≥1 entry, `addPagesState` renders `pagesGrid` instead, and the shortcut silently did nothing. Moved the modifier to `body`'s top level (matching `.fileImporter`'s already-correct placement right next to it).
+
+### 📚 Nhóm 3 — Library: sample-file banner, favourite icon, delete file
+
+- **Onboarding-flow audit finding**: the 4-screen `OnboardingContainerView` pager (aurora backgrounds, folder-permission gate S4) is currently **dead code in production** — `SampleFileSeeder` seeds 3 tour files and flips `hasCompletedOnboarding` synchronously in `DependencyContainer.init`, before `RootView`'s first render, so the pager never mounts for any real install. The only path from "viewing sample files" to "your real folder" was a plain "Change folder…" row buried in Settings → Library, with zero signal anywhere in the primary flow that the 3 seeded files aren't the user's own documents.
+  - Fix: `LibraryStore.hasExternalFolder` (set by `LibraryViewModel.loadLibrary()`, which already computed this distinction to decide which folder to scan) drives a new `sampleLibraryBanner` in `LibraryView` — "You're viewing sample files" + a "Choose" button reusing the same `onRequestPermission` closure `EmptyStateView`'s CTA already uses.
+- **Favourite un-consolidated back to a visible star** on both list (`DocumentCard`) and grid (`DocumentTile`) cards — had previously been merged into the kebab menu per an earlier session's request ("one action control per row"); explicitly asked back out this session. First pass put star+kebab side by side in an `HStack`, then stacked them in a `VStack` sibling (grew the whole row to ~92pt to fit two 44pt touch targets stacked — flagged as an unrequested height increase); final version uses an `.overlay(alignment: .trailing)` so the row's height stays driven by its own content, with both controls sized to 28pt (matching the grid tile's existing sizing for the same two controls, not a new arbitrary deviation from the 44pt HIG minimum).
+- **New feature: Delete File** — the kebab menu never had a delete/remove action before this. Added `LibraryViewModel.deleteFile(entryID:) -> DeleteOutcome`, mirroring the existing security-scope-claim pattern from `convertToZip`'s delete-source path (needed for files in a user-bookmarked external folder, not just the sandbox). Took the freed-up "Add to Favourites" slot in the kebab menu (now redundant with the visible star) — destructive red styling, confirmation `.alert` before it fires ("This file will be permanently deleted and can't be recovered"), success/error toast after.
+- "Today" section-header gap tightened via `.listSectionSpacing(DSSpacing.sm)` — a raw `CGFloat`, not just the `.default`/`.compact` enum cases (confirmed via Apple docs after the built-in `.compact` value still read as too far).
+
+---
+
+## [Unreleased] — 2026-09-10 (Session 22 cont. — Library source picker for all PDF tool views)
+
+Continuation of Session 22 after context compaction. Adds library source picker to the remaining PDF tool views that still opened only device Files.app.
+
+### 🗂️ LibraryFilePicker — shared component
+
+- **Extracted** the private `LibraryPDFPicker` struct from `MergeSplitCompressView.swift` into a new shared internal component: `Views/Common/LibraryFilePicker.swift`.
+- Now accepts a generic `filter: (LibraryEntry) -> Bool` predicate instead of hard-coding `.pdf` kind, plus configurable `emptyTitle` / `emptyMessage` / `emptySystemImage` for per-context empty states.
+- Multi-select and single-select modes retained; selected-row brand-tint background (no icons) retained.
+- `MergeSplitCompressView` updated to call `LibraryFilePicker(filter: { $0.document.kind == .pdf }, ...)` — identical behaviour, zero visible change for Merge/Split.
+
+### 📄 ConvertFlowView — library source for all applicable directions
+
+- Added `@Environment(LibraryStore.self)` + `@State private var isLibraryPickerPresented = false`.
+- **Office→PDF**: empty state → "Pick from Library" (primary) / "Browse Files" (secondary); library sheet filters to non-PDF entries (`$0.document.kind != .pdf`) with empty message "No Office documents in Library".
+- **PDF→Word** and **PDF→Image**: same two-button empty state; library sheet filters to `.pdf` with "No PDFs in Library" empty message.
+- **Image→PDF**: unchanged — `PhotosPicker` is the correct and only picker for photos; no library option applicable.
+- Direction-aware filter/title/message computed via `libraryFilter`, `libraryEmptyTitle`, `libraryEmptyMessage` properties.
+
+### ✏️ FillFormView — library source on pick stage
+
+- Added `@Environment(LibraryStore.self)` + `@State private var isLibraryPickerPresented = false`.
+- `pickStage` empty state: "Choose a PDF to fill" now has "Pick from Library" (primary) + "Browse Files" (secondary).
+- Single-select `LibraryFilePicker` sheet (filter: `.pdf` only); callback calls existing `handleFilePicked(.success(url))`.
+
+### ✍️ SignFlowView — library source on pick stage
+
+- Same changes as FillFormView.
+- `pickStage`: "Choose a PDF to sign" now has "Pick from Library" (primary) + "Browse Files" (secondary).
+
+---
+
+## [Unreleased] — 2026-09-10 (Session 22 — UX polish: Library cleanup + Image & PDF bottom sheet + Merge/Split library picker + Print in preview + 1-page warning redesign + DateBucket bug fix)
+
+Screenshot-driven UX pass across Library, Tools, and PDF tool screens. 9 discrete changes, all UNCOMMITTED (cumulative ~16+ lô from S10c).
+
+### 🗂️ Library
+
+- **Removed sample-files banner** — `sampleLibraryBanner` and its `listHeader` conditional deleted from `LibraryView`. No longer needed after the decision to use seeded files as a natural onboarding path rather than an explicit prompt.
+- **Tightened spacing** between type-chip strip and first section header: `listRowInsets` bottom `sm → xxs` (12→4pt), `listSectionSpacing` `sm → xxs` (12→4pt). Previous ~40pt gap was: 8 (VStack) + 12 (row insets) + 12 (section spacing) + ~8 system. Now ~24pt.
+- **"Get Started" section label fix** — `DateBucket.today.displayName` was hard-coded to `"Get Started"` causing every file imported today to show that label. Reverted to `"Today"`. Added `sectionTitle(for:)` in `LibraryView` that returns `"Get Started"` only when **all** files in the today bucket are pre-seeded samples (name starts with `"Get Started"`). As soon as any user file lands in that bucket, the label switches to `"Today"`.
+
+### 👑 PremiumButton
+
+- Removed `.glassEffect(.regular, in: .circle)` — it was applied to a 44pt touch-target frame around a 24pt visual circle. The transparent ring sampled dark background content (FAB glass, tab bar glass), rendering as a visible dark veil/streak. Fix: remove glassEffect entirely. The button is never inside a SwiftUI `.toolbar`, so there is no auto-capsule-wrap risk to defend against.
+
+### 🖼️ Image & PDF — bottom sheet (was: hub screen)
+
+- `NavigationStack` in `ToolsTabView` converted to path-based (`path: $navPath`).
+- "Image & PDF" card changed from `NavigationLink(value: .imageConvert)` to `Button { isImageConvertSheetPresented = true }`.
+- **`ImageConvertPickerSheet`** (new `private struct`): compact `.presentationDetents([.height(240)])` bottom sheet with two rows — PDF to Image and Image to PDF, each with `IconBadge` + text + chevron. Tapping a row dismisses the sheet then `navPath.append(.convert(direction))` pushes directly into `ConvertFlowView`.
+- Removed `case imageConvert` from `PDFToolDestination` and deleted `ImageConvertHubView`.
+
+### 📄 Merge PDFs — Library source
+
+- Added `@Environment(LibraryStore.self)` + `isLibraryPickerPresented` to `MergeView`.
+- Empty state: two buttons — "Pick from Library" (`.borderedProminent`) + "Browse Files" (`.bordered`).
+- "Add more files" list row → `Menu` with "From Library" and "Browse Files" options — preserves the row's existing appearance, source chooser on tap.
+- Multi-select `LibraryPDFPicker` sheet: filters library to `.pdf` only, row background tint on selection (no icons), "Add N files" confirm button.
+
+### ✂️ Split PDF — Library source + 1-page warning redesign
+
+- Added `@Environment(LibraryStore.self)` + `isLibraryPickerPresented` to `SplitView`.
+- Empty state: same two-button pattern as Merge.
+- **1-page warning redesign**: replaced the two disconnected white card sections (file card + warning card + dead space) with: file row in a fixed-height `List` at top, then `ContentUnavailableView` filling the remaining screen with a large warning icon, title, description, and "Pick from Library" + "Browse Files" recovery buttons.
+- Single-select `LibraryPDFPicker` sheet: tap a row → picks immediately → calls `handleFilePicked(.success(url))`.
+
+### 🖨️ Print in Preview filled PDF
+
+- `PreviewConfirmSheet` (used by Fill Form and Sign preview) now has a **Print** button in `.bottomBar` toolbar placement.
+- `performPrint()` calls `UIPrintInteractionController.shared` directly (inline, no coordinator injection needed — view already has the URL). `isPrinting` guard prevents double-tap.
+
+### 🧩 EmptyStateView
+
+- Added `secondaryAction: (label:handler:)? = nil` parameter — renders as a `.bordered` button below the primary `.borderedProminent` button in a `VStack(spacing: DSSpacing.sm)`. All existing callers unaffected (nil default).
+
+---
+
+## [Unreleased] — 2026-09-10 (Session 20 — Core-editing engine evaluation: GroupDocs.Editor Cloud API, isolated harness, NOT app code)
+
+Not app code — this session evaluated third-party SDKs for the MVP's core "real docx/xlsx/pptx edit" requirement, entirely outside the Xcode project. Built an isolated Node.js test harness at sibling folder `SDK-Integration-Test/01-groupdocs-editor/` (kept deliberately separate from `Word Office/` per user request — no Swift touched).
+
+### 🔍 Research — engine shortlist before this session
+
+Prior research (see Claude memory `project_office_competitor_ipa_teardown.md`) ruled out Artifex SmartOffice SDK (no longer sold to new customers) and found both tracked competitors + a 3rd competitor use either Artifex (legacy license) or a fully-offline ONLYOFFICE build (`x2t.wasm`, unofficial community WASM port, AGPL license risk unresolved). Shortlist for a new build: GroupDocs.Editor Cloud API, Syncfusion Document/Spreadsheet Editor (no PPT support), ONLYOFFICE self-hosted Document Server. Priority order decided: test GroupDocs.Editor first (self-serve, no infra, covers all 3 formats) before committing engineering effort to the heavier options.
+
+### 🧪 GroupDocs.Editor Cloud API — live integration test
+
+- Signed up for GroupDocs Cloud free trial (150 API calls/month), created an Internal Storage + Application (Client ID/Secret in harness's local `.env`, gitignored).
+- **API correction found via live testing, not docs**: the storage file-upload endpoint (`PUT /v1.0/editor/storage/file/{path}`) requires **multipart/form-data** with field name `File` — the public docs examples show plain `POST` + raw octet-stream body, which returns `405` (wrong verb) and, even after switching to `PUT` with a raw body, a `500 internalError: "Synchronous operations are disallowed. Call ReadAsync or set AllowSynchronousIO to true instead."` (server-side bug/limitation on GroupDocs's end for raw-body PUT on this route). Confirmed working combo via curl before touching harness code: `PUT` + multipart `File` field → `200 {"uploaded":[...],"errors":[]}`.
+- docx round-trip (upload → `editor/load` → HTML → edit → `editor/save`) works after that fix.
+- **Real fidelity bug found**: a real xlsx file (`remote_tv_funnel.xlsx`) using Excel **Data Bar conditional formatting** fails `editor/load` with `500 internalError`: `"Unexpected character '''-39 has occured at position '5115' at the 'Beginning' parsing-stage during HTML attributes parsing"` — GroupDocs's internal `mso-databar` markup has a quote-mixing bug in their own HTML parser. This is a genuine vendor-side limitation, not a code bug on our end. Not yet determined whether this is isolated to Data Bar specifically or a broader xlsx-conditional-formatting gap — next session should test more xlsx files (with/without Data Bar) and a PPTX with animations/charts (the original biggest fidelity risk flagged in the SDK research) before drawing conclusions.
+
+### 🏗️ Error-handling decision for this failure class
+
+Discussed how the real app should behave when `editor/load`/`save` fails on a real user's file (any conversion-based SDK will hit this occasionally). Decided **not** to build a "view-only fallback" render path yet (would need a second conversion engine just to catch failures — premature engineering for an unverified failure rate). Implemented only the baseline safety net in the test harness as a pattern to carry into the real app later: (1) the user's original file is never touched — all API work happens on an uploaded copy; (2) friendly, plain-English error messages shown to the user with a collapsible "Technical details" section carrying the raw provider error, instead of dumping raw JSON as the primary message. Deferred: filing the Data Bar bug with GroupDocs support; tracking real-world failure frequency via analytics once shipped (that data, not guessing, should decide whether a fallback/split-engine-per-format strategy is worth building).
+
+### ⚠️ Correction / open discrepancy to reconcile
+
+An older entry in this same file (pre-2026-08-25, company-machine session, before this changelog's current owner) recorded a decision to reject Syncfusion/Aspose and use a "combo Swift OSS" engine instead (see `reference_office_engines_ios.md` in that machine's own Claude memory — not accessible from this machine). This session's research did not reference or reconcile that decision — worth checking next session whether that OSS-combo path was ever prototyped/abandoned, and why the project is now re-evaluating cloud SDKs (GroupDocs/Syncfusion/ONLYOFFICE) instead of continuing it.
+
+### Next steps (tomorrow)
+
+- Test 2-3 more xlsx files (some with Data Bar/icon sets/pivot tables, some plain) to see if the bug is isolated.
+- Test a real PPTX with animations/charts through the harness — this was the original #1 fidelity risk flagged before any SDK was chosen.
+- If GroupDocs clears both tests: move toward a real Xcode spike (with go-ahead per rule.md #1). If not: fall back to the Syncfusion / ONLYOFFICE self-host paths already researched.
+
+---
+
+## [Unreleased] — 2026-09-09 (Session 19 — Delta merge + Save-choice sheet + Import/ZIP conflict dialogs + toast polish + Paywall overhaul)
+
+Massive full-day session — took the personal-machine Session-14 delta the user brought in as a folder drop, cherry-picked the additive changes safely onto the S18 baseline (crucially NOT overwriting the S15–S18 polish work), then extended into three feature-shape refactors driven by the user's core-loop UX complaint about Library duplicates. Two rounds of `/code-review` in-session drove another ~10 fixes on top of the shipped work.
+
+### 🧩 Nhóm 1 — Delta merge từ máy nhà (Session 14 personal machine → S18 company machine)
+
+- Read README + CHANGELOG + GUIDELINE of the `Word-Office-Session14-Delta/` folder-drop first, diff'd every file against company baseline, produced a per-file merge plan before touching anything.
+- **Merged**: `SettingsView.swift` (stub 61 → full 257 lines: Premium banner + icon rows + General section + sheet-Rating/Paywall), `RatingDialogView.swift` (new, `.spring()` violation → `.easeOut` per rule.md), `PaywallView.swift` (backup S18 → `.s18-backup.swifttxt`, apply delta + dead-space fix `VStack + Spacer(minLength:)`), assets `SettingsPremiumBanner.imageset` + `PaywallHeroIllustration.imageset`, `project.pbxproj` (UT target — safe because git log showed company pbxproj untouched since S4, diff was strict superset).
+- **Skipped**: `LibraryView.swift` / `RootView.swift` / `ToolsTabView.swift` (would overwrite S15–S18 polish), `IconPencilCase.imageset` / `IconOfficeSupplies.imageset` (user chose to keep SF Symbol `wrench.and.screwdriver` for Tools tab).
+- Build broke once: I put the S18 Paywall backup file INSIDE `Word Office/` folder with `.swifttxt` extension, but `PBXFileSystemSynchronizedRootGroup` (Xcode 16+) grabs EVERY file regardless of extension → "Unexpected input file". Moved backup out to project root, build clean.
+
+### 🎨 Nhóm 2 — Settings polish sau merge
+
+- Title alignment left + font DS tokens (user complained default centered inline nav title was inconsistent with Library/Tools). Replaced `.prominentInlineTitle` with `titleRow` pattern (`.font(.largeTitle.bold())` HStack) matching Library / Tools convention.
+- White background bug: applied `.background(Color.dsBackgroundSecondary)` didn't work → `Form` (`insetGrouped` List) has its own OPAQUE `systemGroupedBackground` that overrides. Fix: `.scrollContentBackground(.hidden)` (iOS 16+, `references/list-patterns.md` §Custom List Backgrounds).
+- Font audit: added explicit `.font(DSFont.body)` on all row labels + fixed "Change folder…" being accent-blue (button tint) → forced `Color.dsTextPrimary` matching Share/Rate rows.
+
+### 🔍 Nhóm 3 — LibraryView search viewMode fix
+
+- User bug: tap search + type → view flipped from grid to list. Root cause: search-mode branch (`if !viewModel.searchText.isEmpty`) hardcoded `ForEach { row(for: entry) }` (list-only), bypassing the `sectionRows(...)` helper which handles both grid and list per `viewMode`. Fix: swap to `sectionRows(viewModel.searchResults)` — 1-line, respects viewMode across all branches.
+
+### 💾 Nhóm 4 — Save-choice sheet (Sign + Fill Form)
+
+- Design: user tap Save on preview → confirmation dialog "Save as new file" (default) / "Replace original" (destructive) / "Cancel". Modified `PreviewConfirmSheet` API from single `onConfirm: () -> Void` → `(PreviewSaveMode) -> Void` with system `.confirmationDialog` opened from toolbar Save tap.
+- `SignatureViewModel.commitPreview(_:mode:)` + `FillFormViewModel.commitPreview(_:mode:)` — `.newFile` = `nonConflictingURL` + `moveItem`, `.replaceOriginal` = `FileManager.replaceItemAt`.
+- **First code-review** (in-session) flagged 6 CONFIRMED + 4 PLAUSIBLE. Fixed all 10:
+  - **#1/#2/#3** Security-scope + NSFileCoordinator missing on `replaceItemAt(sourceURL, …)` — external iCloud/Files-provider PDFs would EACCES or corrupt. Fix: extracted `PreviewCommitting` protocol + `LocalPreviewCommitter` service that wraps `startAccessingSecurityScopedResource` + `NSFileCoordinator.coordinate(writingItemAt:, .forReplacing)` + off-main dispatch (`Task.detached(priority: .userInitiated)`).
+  - **#4** "System trash bin" comment was factually false on iOS — updated to reflect actual `replaceItemAt` atomic-exchange semantics (unrecoverable).
+  - **#5** Notification scope: `documentsDidChange` was posted even when source lived outside `documentsURL` — Library re-scan found nothing, toast lied. Fix: `PreviewCommitResult.isInDocumentsFolder` gate.
+  - **#6** Extract shared `PreviewCommitter` service (both VMs delegated instead of duplicating).
+  - **#7** Non-exhaustive ternary on `PreviewSaveMode` → exhaustive `switch mode` for toast copy.
+  - **#8** `isProcessing = true / defer nil` in `commitPreview` (was missing).
+  - **#13** External-source destructive gate: `canReplaceSourceInPlace` VM computed + `canReplaceOriginal` sheet param → dialog hides "Replace original" for external sources.
+  - Bonus #11 + #14 also fixed.
+
+### 🍞 Nhóm 5 — Toast polish (Save to Device / Share / Favourite + copy overhaul + icon)
+
+- Added 3 missing toasts: `DocumentPickerExporter` completion callback → "Saved to Files", `ActivityView.completionWithItemsHandler` → "Shared" success, `LibraryView.performToggleFavourite` helper → `.info` toast "Added to your Favourites" / "Removed from your Favourites".
+- Icon flip-flop: user said "bỏ icon" → removed → user said "chán" → restored with `.top` alignment (title line-limit is 2 now, so `.center` alignment would drift icon down to the middle of a 2-3 line stack).
+- Copy overhaul — 18 toast strings across 7 files rewritten in more polite / longer tone: "Saved to Files" → "Your document was saved to Files", "File renamed" → "Your file was renamed successfully", "Couldn't rename" → "We couldn't rename this file", etc. Possessive "your" + completed-action phrasing + "we couldn't" self-attribution on errors (Apple system-app tone).
+
+### 📥 Nhóm 6 — Import name-conflict dialog + queue orchestration
+
+- User Home screenshot had 3+ duplicate "1. Hướng dẫn MỞ FILE (...)" entries → chose Files.app-style per-file conflict resolution as the fix (chose over content-hash dedup for MVP simplicity).
+- `DocumentImporting` protocol: added `ImportConflictResolution` enum (keepBoth / replace / skip), `ImportResult` enum (imported(DocumentRef) / skipped(URL)), `nameConflict(for:) async -> URL?` + `importOne(url:resolution:) async -> ImportOutcome`. Retyped `ImportOutcome.result` from `Result<DocumentRef, ImportError>` → `Result<ImportResult, ImportError>` (this later flagged as OCP violation, see §Nhóm 9).
+- `DocumentImporter` impl: `.replace` uses staging temp URL + `replaceItemAt` (extensions differ across staging → destination, so full staging is needed).
+- `LibraryViewModel`: queue orchestration — `pendingImportConflict: PendingImportConflict?` @Observable state, `pendingImportQueue: [URL]`, `resolveImportConflict(_:)`, `cancelImportBatch()`, `processNextPendingImport()`. Single batch-summary toast via `lastImportBatchSummary: String?` observable + View `.onChange` (VM stays clean of View concerns).
+- `LibraryView`: `.confirmationDialog(presenting:)` with 4 buttons (Keep Both / Replace destructive / Skip / Cancel cancel-role). Fast-path bypasses dialog when no conflict — batch of all-new files stays a single tap.
+
+### 📦 Nhóm 7 — ZIP dialog TRƯỚC op
+
+- Design: dialog appears IMMEDIATELY on kebab tap (before zip runs) so a Cancel path saves the wait on a large PDF.
+- `LibraryViewModel.convertToZip(entryID:deleteSource:)` — `deleteSource: true` for Files.app-style "Replace with ZIP" (extensions differ so `replaceItemAt` can't be used; zip-first-then-delete ordering guarantees zero data loss if delete step fails).
+- `LibraryView`: `PendingZipRequest: Identifiable` local `@State` + `.confirmationDialog` with Keep Both / Replace with ZIP destructive / Cancel.
+
+### 🔧 Nhóm 8 — ZIP P1 fix (from in-session code-review)
+
+- Original `convertToZip` returned `String?` (nil = success, non-nil = error). Toast "The original file was replaced with a ZIP archive" fired for the whole delete-source path — including the case where the `try?` delete SILENTLY failed and both files stayed on disk (lied to user).
+- Fix: return `ConvertToZipOutcome` enum (createdKeepingSource / createdAndReplacedSource / **createdButSourceRemains** / failed). Verify actual filesystem state with `FileManager.fileExists(atPath:)` after the delete. `.createdButSourceRemains` shares the honest "Your ZIP archive is ready" toast copy with `.createdKeepingSource` — user gets truth, not a lie about replacement.
+
+### 🚨 Nhóm 9 — Second code-review fixes (15 findings, applied 6 critical)
+
+Post-Import + ZIP shipped, second `/code-review` pass ran. 15 findings, applied 6 critical:
+
+- **#1 SHIP-BLOCKING** — Import conflict dialog binding cancels batch on EVERY button tap. Root cause: button action `Task { await resolveImportConflict(...) }` returns sync → SwiftUI dismisses dialog → binding.set(false) → sees `pendingImportConflict != nil` (Task hasn't run yet) → `cancelImportBatch()` → everything cleared → Task's guard nil → no-op. Every user tap silently cancelled the whole batch. Fix: `@State didPickImportResolution` flag pattern (same shape as `PreviewConfirmSheet.didCommit`) — resolution buttons set flag true BEFORE scheduling Task, binding setter only cancels on !flag && pendingConflict != nil (i.e. genuine swipe-out only).
+- **#3 SHIP-BLOCKING** — `PKInkingTool(.pen, color: .label, ...)` bakes near-white strokes in Dark Mode → `PKDrawing.pngData` composites onto white PDF page → invisible signature (silent data loss, toast says success). Fix: `.label` → `.black` hardcoded (ink is ink regardless of theme). Same pattern already documented in `PDFKitFormFiller` for text fill.
+- **#2** Test target fail build: `MockImporter` didn't conform to new protocol shape + tests used old `ImportOutcome.success(DocumentRef)` (now `.success(.imported(DocumentRef))`) + `importFiles` return changed from `[ImportOutcome]` → `Void`. Fix: extended MockImporter + updated 2 test bodies. **36/36 tests still passing.**
+- **#4** Security-scope MISSING at 5 sites: `SignatureViewModel.selectPDF`, `FillFormViewModel.selectPDF`, `PDFKitFormFiller.fill`, `PDFKitSignatureStamper.stamp`, `ScanFlowView.renderPages`. Fix: `startAccessingSecurityScopedResource` + defer-stop wrap at every site. iCloud/Files-provider PDFs now open correctly.
+- **#5** `canReplaceSourceInPlace` used `path.hasPrefix(documentsURL.path)` → sibling directory `Documents-Backup/foo.pdf` false-positive bypassed the destructive-Replace safety gate. Fix: new `URL+IsInside.swift` extension (path-component compare, not raw string), applied at 3 sites (`SignatureViewModel`, `FillFormViewModel`, `LocalPreviewCommitter`).
+- **#15** Vietnamese in doc comments across 3 files (`PaywallView.swift`, `LibraryView.swift`, `DSToast.swift`) violating English-only rule from 2026-08-28. Fixed.
+- Skipped: **#6** OCP proper refactor (cost high, #2 fixed the immediate CI break); **#7-14** perf/altitude backlog (row-per-`FileActionsMenu` weight, autoHideTabBar Task allocation, store O(N) lookups, NotificationCenter broadcast dup, PDFView main-thread parse, first-tap dropped bug, flow view scaffold dup).
+
+### 💳 Nhóm 10 — Paywall overhaul (multi-round per screenshot feedback)
+
+- Presentation: `.sheet` → `.fullScreenCover` at 3 call sites (LibraryView / SettingsView / ToolsTabView) — paywall is a full-page product-selling surface, not a modal decision.
+- Removed hero chrome per user: no more "Restore" text top-left, no more X close button in hero. Restore lives in footer; X hoisted to a `.overlay(alignment: .topTrailing)` on the whole PaywallView so `.fullScreenCover` still has a dismiss affordance.
+- Fixed white strip above hero: added `.ignoresSafeArea(.container, edges: .top)` on ScrollView (was on inner PaywallHeroHeader which the ScrollView clipped).
+- Illustration enlargement: hero frame `340 → 420pt`, horizontal padding `xxl (32pt) → md (16pt)`, top spacer `xl → lg`, bottom `lg → sm`.
+- Bottom curve: replaced straight fade LinearGradient with `HeroBottomCurve: Shape` (quad-Bézier dipping 32pt below the frame at midpoint) applied via `.clipShape` — organic wave where blue meets white body content.
+- Gradient blue-only per user "tone màu đúng": `#0055EB → #B06DFC` (blue→purple) → `#0055E6 → #5A9BFA` (deep royal blue → lighter blue), both in brand-blue family.
+- 3-second close delay: `@State showCloseButton = false` + `.task { try? await Task.sleep(for: .seconds(3)); withAnimation { showCloseButton = true } }`. Fresh delay window per `.fullScreenCover` presentation (view teardown resets state). Reduce-motion gated.
+- Benefit layout final: swapped 2×2 checkmark bullets → 2×2 product tiles (icon top 32pt + title bottom in shadowed rounded card, `ToolsTabView` tool-card recipe). 4 SF Symbols: `doc.text.fill` / `wrench.and.screwdriver.fill` / `doc.text.viewfinder` / `signature`. Iterated through: original checkmark grid → per-feature icon+subtitle 4-row list (rejected) → back to checkmark grid → new tile grid (selected).
+
+### 🧰 Nhóm 11 — Icon tab bar Tools (per personal-machine setup, then reverted per user pick)
+
+- User picked "Giữ SF Symbol `wrench.and.screwdriver`" initially → skipped tab bar icon change.
+- Then user provided `icons8-edit-property-48.png` → wired custom asset `IconEditProperty.imageset` (universal, template rendering intent) + cherry-picked minimal `isCustomAsset` support to `RootView.tabBarButton` (kept all S15-S18 Liquid Glass polish + reduceMotion + haptic filter intact).
+
+### Build & Test state
+
+- Clean build (`xcodebuild ... BUILD SUCCEEDED`) after every batch.
+- `xcodebuild test` → **36/36 pass** after Nhóm 9's test-target fix (was failing before).
+- User verified visually on iPhone 16e simulator after most iterations — many rounds of screenshot feedback.
+
+### Trạng thái cuối session — vẫn UNCOMMITTED
+
+Cộng dồn từ Session 10 chiều → 18 (chưa commit từ trước) + toàn bộ Nhóm 1-11 hôm nay = **~15+ lô UNCOMMITTED**. Commit split recommendation: (a) Delta merge, (b) Settings polish, (c) Library search viewMode fix, (d) Save-choice sheet + PreviewCommitter refactor, (e) Toast additions + copy polish, (f) Import conflict dialog, (g) ZIP dialog, (h) Code-review Nhóm 9 fixes, (i) Paywall overhaul.
+
+**Còn tồn cho session sau:**
+
+1. User TEST bằng mắt Sign / Fill Save-choice trên external iCloud PDF (security-scope fix chưa verify với file thật iCloud).
+2. Verify Import conflict dialog flow — import 3 file với 2 file trùng tên → dialog per-file → check each button apply đúng (bug #1 fix chưa test bằng mắt).
+3. Backlog code-review #6 OCP proper refactor (`ConflictResolvingImporting` sub-protocol) + #7-14 perf/altitude.
+4. Paywall còn nợ: pricing + StoreKit product IDs + Terms/Privacy real URLs (user chọn để trống, chờ khi user quyết).
+5. Vẫn 6 finding hoãn từ Session 13 chưa động (xem GUIDELINE Session 13 block).
+
+### 🔨 Code Deliverables — Session 19
+
+**NEW files (5)**: `Services/Protocols/Document/PreviewCommitting.swift`, `Services/Implementations/Native/LocalPreviewCommitter.swift`, `Extensions/URL+IsInside.swift`, `Views/Settings/RatingDialogView.swift` (merged), 4 imagesets (`SettingsPremiumBanner`, `PaywallHeroIllustration`, `IconEditProperty`, hero backup .swifttxt).
+
+**MODIFIED (13+ files)**: `Views/Paywall/PaywallView.swift` (massive overhaul), `Views/Settings/SettingsView.swift`, `Views/Library/LibraryView.swift`, `Views/Library/DocumentCard.swift`, `Views/Common/DocumentPickerExporter.swift`, `Views/PDFTools/SignFlowView.swift` + `FillFormView.swift` + `PreviewConfirmSheet.swift`, `Views/OCR/ScanFlowView.swift`, `Views/PDFTools/ConvertFlowView.swift` + `MergeSplitCompressView.swift`, `Views/Signature/SignatureCanvasView.swift`, `Views/Root/RootView.swift`, `Views/Tabs/ToolsTabView.swift`, `ViewModels/SignatureViewModel.swift` + `FillFormViewModel.swift` + `LibraryViewModel.swift`, `Services/Protocols/FileIO/DocumentImporting.swift`, `Services/Implementations/Native/DocumentImporter.swift`, `Services/Implementations/Native/PDFKitFormFiller.swift` + `PDFKitSignatureStamper.swift`, `DesignSystem/Components/Feedback/DSToast.swift`, `App/DependencyContainer.swift`, `Word OfficeTests/LibraryViewModelTests.swift`, `Word Office.xcodeproj/project.pbxproj` (from delta merge — UT target added).
+
+---
+
+## [Unreleased] — 2026-09-07 (Session 17 — Library section-card overhaul + Icon system migration + SVG asset refresh)
+
+Session dài, iterate theo screenshot user gửi liên tục sau Session 16 wrap. Trọng tâm: section card của DocumentCard "hẹp lại" (user cảm giác rộng quá) — sau nhiều approach thất bại phải break away khỏi shared `insetGrouped` card sang **individual row cards**. Song song migrate toàn bộ hệ thống icon sang `DocumentKindIcon` component + copy 4 SVG mới (Asset/ folder) vào imagesets. Nhóm phụ: shadow, spacing, popover shift-left attempts.
+
+### 🟢 Nhóm 1 — Section card width shrink (nhiều approach thất bại → individual row cards)
+
+**Approach 1 (thất bại)**: `.contentMargins(.horizontal, X)` không target scope. Section card hẹp nhưng scroll indicator dịch vào giữa → user complain "không phải thanh scroll di chuyển sang, tôi muốn sửa lại section này ngắn đi cơ mà".
+
+**Approach 2 (thất bại)**: `.padding(.horizontal, DSSpacing.xl)` trên toàn List → hẹp cả header (search bar, hero card, chips) → user reject.
+
+**Approach 3 (thất bại)**: Approach 2 + `listRowInsets(EdgeInsets(leading: sm - xl, ...))` negative compensate cho header row → "Your Cabinet" title bị cut off left (SwiftUI clip content ở List boundary khi negative inset). User: "sửa linh tinh quá đấy, revert lại cho tôi chỗ đó".
+
+**Approach 4 (thất bại)**: `.contentMargins(.horizontal, DSSpacing.lg → 32, for: .scrollContent)` — scope `.scrollContent` giữ scroll indicator ở edge nhưng vẫn ảnh hưởng header. User cũng reject.
+
+**Approach 5 (FINAL, chấp nhận)**: **Break away insetGrouped shared card** — mỗi document row thành individual card riêng:
+
+- `listRowBackground(Color.clear)` — bỏ system section-card fill
+- `listRowSeparator(.hidden)` — bỏ divider line giữa rows
+- `listRowInsets(EdgeInsets(top: xxs, leading: xs, bottom: xxs, trailing: xs))` — outer inset tạo gap dọc + hẹp card ngang
+- Inner `.padding(.horizontal, sm).padding(.vertical, sm)` + `.background(dsBackgroundElevated, in: RoundedRectangle(cornerRadius: DSRadius.card))` + `.overlay(strokeBorder(dsBorderSubtle))` — mỗi row là 1 rounded rect riêng biệt
+
+Iterate width sau đó: `md=16 → sm=12 → xs=8` (user complain "hẹp quá" 2 vòng liên tục).
+
+### 🟢 Nhóm 2 — Row card shadow (2-layer Tools pattern)
+
+Sau khi break shared card, mỗi row cần shadow riêng để có depth:
+
+```swift
+.shadow(color: .black.opacity(0.05), radius: 8, y: 4)  // ambient
+.shadow(color: .black.opacity(0.04), radius: 2, y: 1)  // contact
+```
+
+App-consistent với ToolCardSurface / hero card pattern (từ Session 14).
+
+### 🟢 Nhóm 3 — Icon system migration → `DocumentKindIcon` component
+
+**NEW** `struct DocumentKindIcon: View` trong `DocumentCard.swift`. Render logic:
+
+```swift
+if let assetName = Self.assetName(for: kind) {
+    Image(assetName)
+        .resizable()
+        .renderingMode(.original)
+        .interpolation(.high)
+        .antialiased(true)
+        .aspectRatio(contentMode: .fit)
+} else {
+    DSDocumentTypeBadge(kind: kind)  // fallback SF Symbol cho txt/rtf/markdown/hwp/hwpx
+}
+```
+
+Mapping:
+- `.docx / .doc` → `DocumentIconWord`
+- `.xlsx / .xls` → `DocumentIconSpreadsheet`
+- `.pptx / .ppt` → `DocumentIconPresentation`
+- `.pdf` → `DocumentIconPDF`
+
+**Migrated surfaces** (user request "update lại toàn bộ icon"):
+- `DocumentCard.swift` (list rows) — icon frame 44 → 36pt (nhỏ hơn 18%)
+- `DocumentGrid.swift` (grid tiles) — giữ 44pt
+- `DSFileRow.swift` (design system generic file row)
+- `ToolResultGalleryView.swift` `fileBadge(_:)` — 2 chỗ (recognized kind + fallback .pdf)
+- `LibraryAddButton.swift` — không đổi, đã dùng `Image(assetName)` direct từ Session 15
+
+**Không migrate** (không có SVG asset tương ứng):
+- `EditorPlaceholderView.swift` — empty state cho txt/rtf/markdown/doc/xls/ppt/hwp/hwpx, keep SF Symbol
+- `DocumentListView.swift` — "New Document" picker (txt/rtf/markdown only)
+
+### 🟢 Nhóm 4 — SVG asset refresh (user thay file mới trong `Asset/` root)
+
+User replace 4 SVG source ở `Word Office/Asset/` — mới là raster wrapped SVG (embed base64 PNG, ~175-196KB each, khác hoàn toàn old vector SVG với `<linearGradient>` / `<path>` shapes).
+
+Copy overwrite giữ tên `_icon.svg` trong imagesets (Contents.json không cần đổi):
+```
+Asset/document.svg     → DocumentIconWord.imageset/document_icon.svg
+Asset/spreadsheet.svg  → DocumentIconSpreadsheet.imageset/spreadsheet_icon.svg
+Asset/presentation.svg → DocumentIconPresentation.imageset/presentation_icon.svg
+Asset/pdf.svg          → DocumentIconPDF.imageset/pdf_icon.svg
+```
+
+**Rendering enhancement** cho raster-wrapped SVG downscale ở small size (16pt chip / 36pt row):
+- `.interpolation(.high)` — high-quality antialias khi resize
+- `.antialiased(true)` — smooth edges
+- Chip strip `typeIcon(_:)` frame `16 → 18pt` (dễ nhìn hơn)
+
+Applied cho cả `DocumentKindIcon` và `typeIcon` (chip strip) trong LibraryView.
+
+**Cần Xcode Clean Build Folder** để invalidate `Assets.car` cache — replace SVG cùng tên không tự trigger recompile asset catalog.
+
+### 🟢 Nhóm 5 — Row spacing / gap
+
+Trước: rows liền nhau chỉ separator line ngăn cách.
+Sau: `.listRowSeparator(.hidden)` + outer `listRowInsets` vertical `xxs=4pt` → 8pt gap tổng giữa 2 cards liên tiếp.
+
+Inner content padding `vertical sm=12pt` tạo breathing room trong từng card.
+
+### 🟢 Nhóm 6 — Popover filter shift-left attempts
+
+User feedback: dropdown popover filter "sát edge quá, di chuyển vào 1 chút". Không có API SwiftUI trực tiếp shift popover — thử:
+
+1. **Attempt 1 (thất bại)**: Set `frame(width: 220)` popover → auto-position anchor arrow ở button. Vì filter button ở rightmost, popover full-width 220 bị system push toward center. User reject "co width vào cho phù hợp là được".
+2. **Attempt 2 (thất bại)**: Remove `frame(width:)` — popover auto-size ~370pt full screen width. User complain "sang bên trái 1 chút nữa".
+3. **Attempt 3 (chấp nhận)**: `.padding(.leading, DSSpacing.xs)` trên VStack `filterPopoverContent` — force natural width rộng thêm 8pt, iOS shift left edge closer to screen edge. Không cần frame width explicit.
+
+### 🟢 Nhóm 7 — Tools tab icon (unresolved)
+
+User request "sửa lại icon Tools thành loại khác". Tôi đưa 4+ vòng suggestion (technical, magical, office-style, workspace) — user không chọn phương án nào ("có gợi ý khác không" × 4). Cuối cùng "thôi tạm thời thế" → giữ nguyên `wrench.and.screwdriver`. **UNRESOLVED**.
+
+### 📁 Files touched
+
+- `Views/Library/LibraryView.swift` — nhiều iteration section card, row(), chip strip typeIcon frame/interpolation, filter popover leading padding
+- `Views/Library/DocumentCard.swift` — `DocumentKindIcon` component NEW, icon frame 44 → 36pt
+- `Views/Library/DocumentGrid.swift` — `DSDocumentTypeBadge` → `DocumentKindIcon`
+- `DesignSystem/Components/File/DSFileRow.swift` — `DSDocumentTypeBadge` → `DocumentKindIcon`
+- `Views/PDFTools/ToolResultGalleryView.swift` — `DSDocumentTypeBadge` → `DocumentKindIcon` (2 chỗ)
+- `Assets.xcassets/DocumentIcon{Word,Spreadsheet,Presentation,PDF}.imageset/*_icon.svg` — overwrite bằng SVG mới từ `Asset/`
+
+### 🟠 UNCOMMITTED cộng dồn
+
+**8 lô** (S10c + S11 + S12 + S13 + S14 + S15 + S16 + S17) chưa commit. Convention user: commit sau.
+
+### Where we left off
+
+Session 17 wrap — Library section-card visual overhaul + icon system fully migrated. Tools tab icon vẫn wrench (user không chọn). Sau session này, next có thể: commit toàn bộ 8 lô hoặc DEFERRED perf (LibraryViewModel coalescing).
+
+---
+
+## [Unreleased] — 2026-09-07 (Session 15 — Icons app 4-type + Library polish rapid-fire + Code-review Đợt 2 HIGH)
+
+Session dài chiều tối, rapid-fire iterate theo screenshot user gửi liên tục. Bắt đầu bằng import 4 SVG icon app (Word/Excel/PPT/PDF) vào chip strip + Create New menu, sau đó 15+ vòng polish LibraryView (chip visual, search collapse, filter dropdown 5 iteration, tab bar Liquid Glass 4 iteration), fix 2 build critical (typo `cliimport` + `isEnabled` arg deprecated), cuối cùng apply Đợt 2 code-review HIGH (RootView tab bar haptic + reduceMotion). 8 nhóm chính.
+
+### 🟢 Nhóm 1 — Icons app 4-type (Word / Excel / PowerPoint / PDF)
+
+**NEW** 4 `.imageset` folder dưới `Word Office/Assets.xcassets/` — mỗi cái chứa SVG source + `Contents.json` (single-scale universal, `preserves-vector-representation: true`):
+
+- `DocumentIconWord.imageset/document_icon.svg`
+- `DocumentIconSpreadsheet.imageset/spreadsheet_icon.svg`
+- `DocumentIconPresentation.imageset/presentation_icon.svg`
+- `DocumentIconPDF.imageset/pdf_icon.svg`
+
+Naming match `Color.dsDocumentWord/Spreadsheet/Presentation/PDF` token existing. `Asset/*.svg` root **giữ nguyên** làm source-of-truth, không đụng.
+
+**Xcode project** dùng `PBXFileSystemSynchronizedRootGroup` (line 31-37 pbxproj) → chỉ đặt imageset vào folder là Xcode auto-pick, **không sửa `project.pbxproj`** (an toàn hơn approach edit tay pbxproj em ban đầu suggest).
+
+**3 vòng iterate SVG shadow cleanup** (user complain "đen đen quanh icon"):
+
+1. **Iter 1**: `sed 's/ filter="url(#shadow)"//g'` bỏ 2 filter reference `feDropShadow` khỏi 2 `<g>` inner sheets — SwiftUI cleanup `.clipShape(RoundedRectangle(cornerRadius: 3))` workaround em set trước.
+2. **Iter 2**: `sed '2,9d'` xoá hẳn `<defs>` block đầu tiên (chứa cả `filter id="shadow"` + `filter id="soft"` feGaussianBlur định nghĩa) — icon còn `<defs>` thứ 2 với gradients.
+3. **Iter 3**: `sed '18,22d'` bỏ **rear sheet group** (`<g opacity="0.95">` với path fill `url(#sheet2)` dark blue/red gradient vươn ra top-right của front sheet) → user thấy dark blend "đen đen" từ rear sheet peek. Icon còn front sheet light gradient + fold corner + content bars + highlight stroke.
+
+**SwiftUI wire-up**:
+
+- `LibraryView.swift` `TypeTabButton` — `@ViewBuilder leadingMarker` switch:
+  - `.all` → `Circle().fill(dsBrandPrimary if !selected else dsTextOnBrand).frame(7×7)` (dot brand)
+  - `.word/.excel/.powerPoint/.pdf` → `typeIcon(name)` = `Image(name).resizable().renderingMode(.original).frame(16×16)`
+- `LibraryAddButton.swift` — overload `menuRow(image:title:action:)` cạnh overload SF Symbol. Icon 24×24 `.renderingMode(.original)`. Helper `iconAssetName(for: DocumentKind)` map `.docx → DocumentIconWord`, `.xlsx → DocumentIconSpreadsheet`, `.pptx → DocumentIconPresentation`. Line 181 call site swap sang `menuRow(image: iconAssetName(...))`. "Import file" + "Scan document" giữ SF Symbol.
+
+### 🟢 Nhóm 2 — Chip strip visual (Type filter Word/Excel/PPT/PDF)
+
+**Chip All order**: sort động theo count DESC, `.all` LUÔN đầu (tap-back stable target). Tiebreak enum order `[.word, .excel, .powerPoint, .pdf]`. `sortedTypeFilters` computed với `.enumerated()` để giữ original offset cho tiebreak. `.smooth(0.28)` animation khi reorder.
+
+**Bỏ `GlassEffectContainer`** — container shared sampling region bled ambient shadow vào gap 8pt giữa chip (user thấy "đen đen lạ" giữa chip). Mỗi chip render `.glassEffect` độc lập, gap sạch. Skill khuyến khích container cho unified tone nhưng khi gây visual bug → bỏ.
+
+**Chip surface** (2-layer selected + flat unselected):
+- Selected: `.background { Capsule().fill(dsBrandPrimary) }` solid + `.glassEffect(.regular.tint(dsBrandPrimary).interactive(), in: .capsule)` overlay sheen (2-layer). Text/icon `dsTextOnBrand` white.
+- Unselected: `.background { Capsule().fill(dsBackgroundElevated) }` flat white — **bỏ hẳn `.glassEffect(.regular.interactive())`**. Skill note "glass has nothing to refract through on light bg" — glass rim highlight render như "viền" user complain.
+
+**Bỏ 2-layer shadow chip** (`black 0.04 r=1 y=0.5` + `black 0.05 r=6 y=3`) — user thấy "chéo, nhem nhem" do 2 shadow `y+` không đối xứng. Chip glass native đủ ambient, không cần shadow bên ngoài.
+
+### 🟢 Nhóm 3 — Search + action row polish
+
+**Sát icon + widen search**: HStack spacing `DSSpacing.sm=12` → `xs=8` → search field rộng thêm ~8pt.
+
+**Symbol pair upgrade** (2 iteration):
+- **Iter 1**: filled variants `square.grid.2x2.fill` / `list.bullet.rectangle.fill`. User complain filter+viewMode confuse (cùng 3 line motif).
+- **Iter 2 final**: outline pair Files.app pattern `square.grid.2x2` / `list.bullet` — cân weight với filter outline.
+
+**Row reorder**: `[search | viewMode | filter]` → `[search | filter | viewMode]` — filter kề search vì tần suất dùng cao hơn (narrowing content > switching view mode).
+
+**Search collapse pattern** (Files.app-like):
+- `isSearchCollapsed = isSearchFocused || !viewModel.searchText.isEmpty`.
+- Collapsed: 2 icon slide out sang phải, "Cancel" slide in — `.smooth(0.28)` (thay `.snappy` có bounce khiến "jerky"). `.move(edge: .trailing).combined(with: .opacity)` transition.
+- Cancel tap: clear text + blur focus → mọi thứ về mặc định.
+- **Iter 3**: TRIED collapse header (title/hero/chip) khi search focus → `.insetGrouped` List reflow row height "khựng". → Cuối bỏ hẳn collapse header, chỉ animate `searchAndActionsRow`. Chip strip vẫn visible — user filter chip + search song song không mất flow.
+
+**Badge count filter**: minWidth 16→14, font 10→9, offset (4,-4)→(6,-6) — không đè icon body (user complain "đè đầu icon filter").
+
+**Bỏ subtitle heroCopy** ("Freshly scanned — everything starts as a draft") khỏi `listHeader` — user request.
+
+### 🟡 Nhóm 4 — Empty states (filter + search) inline
+
+**Filter empty** (`libraryList` line 118-119 refactor):
+- Xóa branch `else if isFiltering && dueEntries.isEmpty && groupedSections.isEmpty { filteredEmptyState }` replace toàn List.
+- **NEW inline Section**: khi filter yields empty → render `filteredEmptyStateContent` (VStack với icon `line.3.horizontal.decrease.circle` 40pt + "No results" headline + description + button stack) như 1 Section trong List với `.listRowInsets(top: xl, leading: md, ...)`. **Chip strip vẫn visible above** → user có tap-back to `● All`.
+- Button "Show all types" khi `typeFilter != .all` — leading trong stack (case user hit nhiều nhất).
+
+**Search no-result** (merge `searchResultsList` cũ vào 1 List):
+- Xóa `ContentUnavailableView.search(text:)` full-screen pane.
+- **NEW `searchNoResultsContent`** — VStack magnifier icon + "No Results for X" + hint. Rendered như Section trong main List.
+- Search field + Cancel vẫn reachable (không bị block).
+
+### 🟠 Nhóm 5 — Tab bar Liquid Glass (4 iteration)
+
+**RootView.tabBarButton** — pill selected: 4 iteration:
+
+1. **Original**: `.background(dsBrandPrimarySubtle, in: Capsule())` + `foregroundStyle(dsBrandPrimary)` — user complain "select không rõ".
+2. **Iter A**: `.glassEffect(.regular.tint(brand.opacity(0.95)).interactive(), in: .capsule, isEnabled: isSelected)` + `foregroundStyle(dsTextOnBrand white)`. **Build fail** — `isEnabled:` arg không tồn tại SDK (skill reference outdated).
+3. **Iter B**: `.background { Capsule().fill(brand) }` solid + `.glassEffect(isSelected ? .regular.tint(brand).interactive() : .identity, in: .capsule)` — full brand tint + white text pop rõ. User complain "khác ban đầu".
+4. **Iter C final**: `.background { if selected { Capsule().fill(dsBrandPrimarySubtle) } }` subtle + `foregroundStyle(brand)` blue text + `.glassEffect(selected ? .regular.interactive() : .identity, in: .capsule)` — match original pattern + thêm glass sheen overlay.
+
+`.identity` glass style là "no-op pass-through" (skill line 80) → conditional glass mà không cần `isEnabled` argument (không tồn tại SDK).
+
+### 🔵 Nhóm 6 — Filter dropdown (5 iteration lớn)
+
+User feedback rapid về Menu che chip strip → 5 iteration approach:
+
+1. **Menu SwiftUI native** (S14 original) — che chip.
+2. **Sheet slide-up bottom** (`.presentationDetents([.medium])` + `.presentationDragIndicator(.visible)` + custom `LibraryFilterSheet.swift`) — user complain "sao không bàn tự chốt".
+3. **Inline expandable panel** — Button toggle `isFilterExpanded` + `filterExpandedPanel` VStack (Toggle Favourites + Status chip strip horizontal + Clear all) render inline trong `listHeader` push chip xuống. User complain "đừng tự sửa, chỉ cần dropdown".
+4. **Menu SwiftUI restore** — vẫn che icon khi content lớn.
+5. **Popover ép compact final** — `.popover(isPresented:, arrowEdge: .top)` + `.presentationCompactAdaptation(.popover)` (iOS 16.4+). Custom `filterPopoverContent` VStack width 240 với `popoverSectionHeader` + `popoverActionRow` helpers. Arrow ↑ chỉ về icon, xổ dưới, icon nổi trên. **Trade-off**: non-standard iPhone HIG (iPad-style) — user accept sau khi Menu iOS heuristic không control được position.
+
+### 🟢 Nhóm 7 — Code-review Đợt 2 HIGH (RootView tab bar)
+
+Fork `/code-review` full uncommitted scope trả 7 findings mới. Apply 2 HIGH:
+
+- **`RootView.tabBarButton:236`** — `.sensoryFeedback(.selection, trigger: isSelected)` thêm closure `{ _, newValue in newValue }` — chỉ fire haptic khi false→true (chip mới select), không fire khi true→false. Trước: double haptic mỗi lần đổi tab. Session 14 đã fix pattern này cho `TypeTabButton` nhưng tab bar miss.
+- **`RootView.tabBarButton:233`** — `.animation(.easeOut(0.2))` → `.animation(reduceMotion ? nil : .easeOut(0.2))`. `reduceMotion` env đã có sẵn line 34.
+
+Hoãn 5 findings khác (dismiss latch race SignFlow/FillForm, dead binding FillFormPDFView, redundant onDismiss LibraryView+ToolResultGalleryView, silent Image LibraryAddButton default, notification storm LibraryViewModel) — tracked cho Đợt 3.
+
+### 🔴 Nhóm 8 — Build fix critical
+
+**`LibraryViewModel.swift:1`** — typo `cliimport Foundation` thay `import Foundation` (55 issues cascade — không thấy Foundation → mọi type URL/Date/NotificationCenter/NSObjectProtocol). Không phải em edit — có thể user auto-complete glitch.
+
+**`.glassEffect(..., isEnabled: ...)` arg deprecated** — SDK không expose parameter (skill reference outdated line 43). Fix: dùng conditional Glass style `.regular.tint(brand).interactive() : .identity` cho selected/unselected. `.identity` = no-op pass-through (skill line 80). Apply cả RootView tabBarButton + LibraryView TypeTabButton.
+
+### 🔧 Files impacted — Session 15
+
+**NEW** (8 file):
+- `Word Office/Assets.xcassets/DocumentIconWord.imageset/{Contents.json, document_icon.svg}`
+- `Word Office/Assets.xcassets/DocumentIconSpreadsheet.imageset/{Contents.json, spreadsheet_icon.svg}`
+- `Word Office/Assets.xcassets/DocumentIconPresentation.imageset/{Contents.json, presentation_icon.svg}`
+- `Word Office/Assets.xcassets/DocumentIconPDF.imageset/{Contents.json, pdf_icon.svg}`
+
+**NEW → DELETED trong session** (không đi vào commit): `Views/Library/LibraryFilterSheet.swift` (Sheet approach reject) + inline `filterExpandedPanel` computed + inline `filterStatusChip` helper.
+
+**EDITED** (~5):
+- `Views/Library/LibraryView.swift` — MASSIVE (chip strip visual, search collapse, empty states inline, sort chip, symbol pair, badge shrink, filter popover 5 iteration end state, subtitle removal, listHeader mount full).
+- `Views/Library/LibraryAddButton.swift` — overload `menuRow(image:)` + `iconAssetName(for:)` helper.
+- `Views/Root/RootView.swift` — tab bar Liquid Glass pill 4 iteration end state + haptic closure filter + reduceMotion gate.
+- `ViewModels/LibraryViewModel.swift` — typo fix `cliimport → import`.
+
+### Review state
+
+- **Fork `/code-review`** (full uncommitted scope, ~7250 lines S10-S15) — 7 findings, apply 2 HIGH. 5 findings tracked cho Đợt 3.
+- **Skill consulted**: `swiftui-expert-skill` scoped variant `.claude/skills/swiftui-expert-skill/` — `references/liquid-glass.md`, `references/focus-patterns.md`, `references/latest-apis.md`. Skill note "glass no refract on light bg" áp dụng cho chip unselected + tab bar unselected.
+
+### Trạng thái cuối session — vẫn UNCOMMITTED
+
+Cộng dồn 6 lô (S10 chiều + S11 + S12 + S13 + S14 + S15) chưa commit. User yêu cầu commit sau session dài polish.
+
+**Còn tồn lại** (Đợt 3 backlog):
+- **5 findings từ Fork code-review** hoãn: dismiss latch race SignFlow+FillForm (`shouldDismissAfterPreviewCloses` stuck true), dead binding FillFormPDFView.currentPageIndex, redundant `.sheet(onDismiss:)` 2 site, silent Image "" LibraryAddButton.iconAssetName default, notification storm LibraryViewModel (deferred perf).
+
+### Where we left off
+
+User accept Popover approach cho filter, session 15 wrap up. Direction session 16: Đợt 2 backlog fix (state race bugs SignFlow/FillForm) đã chốt trước khi session end.
+
+**Rủi ro known**:
+- Popover `.presentationCompactAdaptation(.popover)` không phải standard iPhone HIG — có thể user complain "iPad-style" sau này. Currently accepted.
+- Chip strip flat white unselected mất Liquid Glass character — trade-off cho gap sạch không viền.
+- Tab bar iteration C (subtle + brand blue text + glass sheen) — user OK current, nhưng chưa verify visually rebuild.
+
+---
+
+## [Unreleased] — 2026-09-07 (Session 14 — Đợt 1 HIGH fixes + Library UI polish massive + Đợt 3 nợ chất lượng)
+
+Session dài, chia 5 nhóm chính. Bắt đầu bằng dọn 4-5 nợ chất lượng từ backlog Session 13 (Đợt 3), sau đó apply Đợt 1 HIGH findings (4 finding từ code-review fork), rồi mass UI polish LibraryView theo yêu cầu user (10+ vòng iterate crown/search/hero/icons/spacing), cuối cùng thêm rule #7 vào `rule.md` (luôn load `/swiftui-expert-skill` khi viết code SwiftUI).
+
+### 🟢 Nhóm 1 — Đợt 3 fix nợ chất lượng (5 finding, backlog từ S13)
+
+- **`PrintFlowView.swift:56`** — `.disabled(sourceURL == nil || viewModel.isProcessing)` — Print button giờ phản ánh isProcessing guard S13 mới thêm (share `pdfToolsVM` với Merge/Split/Convert, guard tồn tại nhưng UI không phản ánh, user tap không có phản hồi).
+- **`ToolsTabView.swift PressableCardButtonStyle`** — `.interactiveSpring(response: 0.28, dampingFraction: 0.72)` → `.easeOut(duration: 0.15)`. Comment tự thừa nhận vi phạm rule "no spring physics for UI chrome" trong `~/CLAUDE.md`. Match cadence FAB menu / tab-bar transitions.
+- **NEW `Views/Common/EditorSheet.swift`** — gộp 2 struct byte-for-byte identical (`LibraryEditorSheet` trong `RootView` + `ToolsEditorSheet` trong `ToolsTabView`). Cùng `@Environment(\.dismiss) + @Environment(DSToastPresenter.self) + NavigationStack + toolbar + toastHost`. Xoá 2 struct trùng, update 2 call site sang `EditorSheet`.
+- **NEW `Extensions/Binding+MenuAnimation.swift`** — `Binding<Bool>.closeMenuAnimated(reduceMotion:)` với idempotency guard + `withAnimation(.easeOut(0.15))`. Thay `RootView.closeFABMenu()` + `LibraryAddButton.closeMenu()` (2 helper byte-for-byte identical thao tác cùng shared binding `isFABMenuOpen`). 6 call site tất cả — 2 ở RootView (scrim tap + `.onChange(of: selectedTab)`) + 4 ở LibraryAddButton (FAB toggle + 3 menu row action).
+- **`IconBadge` intentional comment** — thêm doc comment giải thích tại sao KHÔNG unify với `DSDocumentTypeBadge` (2 badge intent-specific khác nhau: DSDocumentTypeBadge = flat file-row, IconBadge = dimensional tool-card).
+- **Cosmetic**: 3 comment stale reference `ToolsEditorSheet`/`LibraryEditorSheet` → `EditorSheet` trong `DSToast.swift`, `Word_OfficeApp.swift`, `LibraryAddButton.swift`.
+
+### 🟢 Nhóm 2 — Đợt 1 code-review HIGH fixes (4 finding, tất cả pre-existing S12/S13 bugs)
+
+Fork `/code-review` chạy trên toàn bộ uncommitted S10-S14 diff trả về 15 findings — Đợt 1 focus 4 finding HIGH độc lập, low risk:
+
+- **`#1 PDFKitFormFiller.swift:37`** — `PDFAnnotation.fontColor = .label` (dynamic UIColor bake theo current trait) → `UIColor.black` (fixed dark ink). Fix: dark mode fill form → save → PDF trắng không còn hiện text vô hình khi mở trên Preview / Acrobat / light-mode viewer khác.
+- **`#3 ConvertFlowView.swift:291-310`** — `loadImages` port pattern S13 `ScanFlowView.loadPhotos`: đếm `failedCount` từ `try?` fail, set `viewModel.errorMessage` nếu > 0. Fix: Image→PDF không còn silently mất ảnh iCloud/format lỗi (§7.3 "never silent data loss").
+- **`#4 ScanFlowView.swift`** — `@State private var isSaving = false` local + `performSave() guard + defer` + Save button `.disabled` thêm `|| isSaving`. Fix: double-tap Save không còn tạo file trùng `Scan (2).docx` (nonConflictingURL race).
+- **`#12 ScanFlowView.swift + OCRViewModel.swift`** — ScanFlowView body `.onAppear { viewModel.errorMessage = nil }` + `.onDisappear { viewModel.reset() }`; OCRViewModel thêm method `reset()` với `guard !isProcessing` — reset `results`, `completedPageCount`, `totalPageCount`, `pages`, `errorMessage`. Fix: back-out mid-scan → mở lại không còn dính errorAlert + pages cũ (state-bleed S13 fix miss Scan).
+
+### 🟢 Nhóm 3 — Session 14 code-review scoped findings (2 fix apply)
+
+Fork thứ 2 review scope hẹp CHỈ S14 diff (không lặp lại 15 findings pre-existing), trả 4 finding — apply 2:
+
+- **`#3 premiumButton empty action`** — Button `{ }` empty closure ships as active-looking no-op (tap register nhưng no feedback). Fix: `toaster.show(.info, title: "Premium coming soon")` — thêm `@Environment(DSToastPresenter.self) private var toaster` cho LibraryView.
+- **`#4 TypeTabButton double haptic`** — `.sensoryFeedback(.selection, trigger: isSelected)` không có closure filter → tap chip đổi selection fire 2 haptics (old chip true→false + new false→true = double bump). Fix: `.sensoryFeedback(.selection, trigger: isSelected) { _, newValue in newValue }` — match `PressableCardButtonStyle` guard pattern.
+
+2 finding về section header alignment (#1 + #2) hoãn — verify sau khi user rebuild + eyeball; hiện tại listRowInsets đã đủ tight align (không dùng leading:0 nữa).
+
+### 🟠 Nhóm 4 — LibraryView UI polish massive (15+ vòng iterate)
+
+Session tập trung phần lớn thời gian ở LibraryView theo yêu cầu user "làm cho tôi thật đẹp":
+
+**Crown Premium button (7-8 iterate)**:
+- Iter 1: Option A (outer hairline rim + 2-layer shadow + size 28→30pt + `.buttonBorderShape(.circle)`).
+- Iter 2: `.buttonBorderShape(.circle)` không work trong iOS 26 toolbar auto-glass → thay bằng `.buttonStyle(.plain)` + `.background(.ultraThinMaterial, in: Circle())`.
+- Iter 3: material bg vẫn ovoid → dùng `.glassEffect(.regular, in: .circle)` trên label ZStack + `.buttonStyle(.plain)` — Apple pattern.
+- Iter 4: user chê "trắng ngoài méo, viền OK hơn" → Option A v3: inner shine radial highlight + outer gold rim 0.75pt / 0.7 opacity + top ring 0.8pt + crown bold 15pt.
+- Iter 5: user chê glass "milky white bloom" nặng → strip glass + naked (accept iOS default toolbar wrap).
+- Iter 6: iOS default vẫn ovoid → thử `.glassEffect(.regular.interactive(), in: .circle)` ON BUTTON (Apple docs pattern).
+- Iter 7: vẫn ovoid → refactor bỏ hẳn Button, dùng ZStack + `.onTapGesture` + `.accessibilityAddTraits(.isButton)` (skip toolbar button-auto-wrap path).
+- Iter 8: vẫn ovoid → user complain "vòng bên ngoài chưa tròn" → **giải pháp definitive: move crown OUT of toolbar** vào titleRow trong content area (escape iOS 26 toolbar auto-wrap hoàn toàn).
+- Size iterations: 30 → 32 → 26 → 24 (user "nhỏ lại 1 chút").
+
+**Search + toolbar restructure (5+ iterate)**:
+- Ban đầu `.searchable(text:, placement: .navigationBarDrawer(.always))` + 3 icon (view/filter/premium) trong `.toolbar(.topBarTrailing)`.
+- Move sang inline row `searchAndActionsRow` = custom `TextField` + magnifier + clear ⊗ + 2 icon (view + filter). Bỏ `.searchable` hoàn toàn (2 X trùng — Cancel + in-field clear — làm user confuse).
+- Layout attempts A (icons bên phải search cùng row) → user chọn.
+- Filter menu thêm Section Favourites + badge count top-trailing overlay (`activeFilterCount` 0/1/2, capsule brand primary + ring `dsBackgroundPrimary`).
+- Xoá hoàn toàn `viewControlsRow` (favourite star + view mode + filter menu cũ bên dưới type tabs).
+
+**Hero card redesign (3 iterate)**:
+- Iter 1: `.glassEffect(.regular.tint(dsBrandPrimary.opacity(0.28)))` + top highlight + 2-layer shadow + number gradient — glass tint trên light bg render như flat solid, không thấy khác biệt.
+- Iter 2: bỏ glass → gradient card thật + numberChip 66×66 RoundedRectangle bg gradient TL→BR white "12" heavy 34pt + brand shadow + card gradient paper→brand hint + top highlight + brand-tinted 2-layer shadow.
+- Iter 3: number chip radius `.medium` compile error (không tồn tại) → `.card` (12pt).
+
+**Type chips Liquid Glass**:
+- Selected: `.glassEffect(.regular.tint(Color.dsBrandPrimary.opacity(0.9)).interactive(), in: .capsule)` tinted brand + dsTextOnBrand white + dot white.
+- Unselected: `.glassEffect(.regular.interactive(), in: .capsule)` plain glass + document-family dot color.
+- `GlassEffectContainer(spacing: xs)` wrap ForEach — shared sampling.
+- `.sensoryFeedback(.selection, trigger: isSelected) { _, newValue in newValue }` — chỉ false→true.
+- `.animation(reduceMotion ? nil : .smooth(0.22), value: isSelected)` reduce-motion gated.
+
+**Icon buttons (view + filter) — 5+ iterate cho `RoundIconButtonSurface`**:
+- v1 white flat + hairline stroke.
+- v2 dimensional: bg gradient + top highlight + 2-layer shadow (match `IconBadge`/`ToolCardSurface`).
+- v3 tinted brand: `dsBrandPrimarySubtle` gradient bg + brand-tinted shadow + white-to-brand ring — pop khỏi light bg.
+- v4 ghost per user Option A: quay lại `dsBackgroundElevated` white + hairline (match search field).
+- v5 add shadow back: 2-layer `black 0.05 r=2 y=1` + `black 0.06 r=14 y=6` — match `ToolCardSurface` (Tools tab reference cho user).
+
+**titleRow — "Your Cabinet" + crown inline (giải pháp cuối cho ovoid crown)**:
+- Bỏ `.navigationTitle("Your Cabinet")` + `.toolbar { ToolbarItem { premiumButton } }`.
+- Set `.navigationBarTitleDisplayMode(.inline) + .toolbar(.hidden, for: .navigationBar)` — ẩn navbar entirely.
+- Add `titleRow` computed: HStack `Text("Your Cabinet").font(.largeTitle.bold())` LEADING + Spacer + `premiumButton` TRAILING.
+- Insert vào TOP của `listHeader` VStack (trên searchAndActionsRow).
+- Crown giờ trong content area → escape iOS 26 toolbar auto-Liquid-Glass wrap → circle guaranteed.
+- Spacing tuning: `.padding(.top, sm)` cho gap với status bar + `.padding(.bottom, xs)` cho gap với search row.
+
+**Spacing / alignment saga (8+ iterate)**:
+- ListRowInsets trên listHeader: `(top: sm, leading: md, bottom: sm, trailing: md)` → `(top: sm, leading: 0, bottom: sm, trailing: 0)` → back về `(leading: sm, trailing: sm)` (halved). Cuối: `(top: 0, leading: sm, bottom: sm, trailing: sm)` — top 0 để title sát status bar sau khi navbar hidden.
+- `.contentMargins(.horizontal, sm=12pt)` add → `xs=8pt` reduce → `xs=8pt` giữ để wider.
+- `.contentMargins(.top, 0, for: .scrollContent)` — bỏ default ~30pt insetGrouped top spacing.
+- `.listSectionSpacing(.compact)` — collapse default ~40pt gap giữa listHeader section và document sections (user complain "chip → Previous 7 Days quá xa").
+- List mode `row(for:)` `.listRowInsets(EdgeInsets(top: xs, leading: sm, bottom: xs, trailing: sm))` — match listHeader inset để document cards không lệch với hero card.
+- ToolsTabView `.padding(.horizontal, DSSpacing.md)` → `.sm` → `.lg=20pt` — match Library's effective inset (contentMargins xs=8pt + listRowInsets sm=12pt = 20pt).
+- SettingsView Form `.contentMargins(.horizontal, DSSpacing.xs)` — match Library.
+
+**Search field focus state**:
+- `@FocusState private var isSearchFocused: Bool` + `.focused($isSearchFocused)`.
+- Stroke: `dsBorderSubtle.opacity(0.5) 0.5pt` idle → `dsBrandPrimary.opacity(0.4) 1.2pt` focused.
+- `.animation(reduceMotion ? nil : .easeInOut(0.18), value: isSearchFocused)`.
+
+**Filter menu Favourites section**:
+- Menu content: Section "Favourites" (Show favourites only ↔ Show all) + Section "Status" + button "Clear all filters" khi có 1 trong 2 filter active.
+- Icon: `.line.3.horizontal.decrease.circle` / `.fill` variant khi `isAnyFilterActive`.
+
+### 🟢 Nhóm 5 — `rule.md` #7 (thêm rule mới)
+
+Bổ sung rule #7 vào `rule.md`: **luôn load `/swiftui-expert-skill` khi viết code SwiftUI, không chỉ review sau khi viết**.
+
+Lý do: đã ship nhầm `.interactiveSpring` vi phạm rule "no spring physics for UI chrome" + `.buttonBorderShape(.circle)` không work trên iOS 26 toolbar auto-glass — nếu load skill TRƯỚC khi quyết định pattern, tránh được. Skill portable qua repo (`.agents/skills/swiftui-expert-skill/`, xem rule #4.1).
+
+Ngoại lệ: chỉ sửa 1 dòng thuần logic không đụng API SwiftUI/UIKit (VD `.disabled(x || y)`, đổi tên biến) — không cần load. Đụng đến View builder, modifier, state, animation, layout, gesture, accessibility, focus, sheet, navigation — LUÔN load.
+
+### 🔧 Files impacted — Session 14
+
+**NEW** (2):
+- `Views/Common/EditorSheet.swift` — gộp 2 wrapper editor sheet trùng.
+- `Extensions/Binding+MenuAnimation.swift` — `Binding<Bool>.closeMenuAnimated(reduceMotion:)`.
+
+**EDITED** (~11):
+- `Views/Library/LibraryView.swift` — massive polish (crown, search, hero, chips, icons, filter, titleRow, spacing 10+ iterate).
+- `Views/Tabs/ToolsTabView.swift` — spring→easeOut, IconBadge comment, padding md→sm→lg (match Library inset).
+- `Views/Settings/SettingsView.swift` — contentMargins horizontal xs match Library.
+- `Views/Root/RootView.swift` — xoá `LibraryEditorSheet` + `closeFABMenu()`; 2 call site dùng `closeMenuAnimated`; sheet dùng `EditorSheet`.
+- `Views/Library/LibraryAddButton.swift` — xoá `closeMenu()`; 4 call site dùng shared helper.
+- `Views/PDFTools/PrintFlowView.swift` — `.disabled` thêm `isProcessing`.
+- `Services/Implementations/Native/PDFKitFormFiller.swift:37` — `.label` → `UIColor.black`.
+- `Views/PDFTools/ConvertFlowView.swift:291-310` — `loadImages` failedCount + errorMessage.
+- `Views/OCR/ScanFlowView.swift` — isSaving guard + onAppear/onDisappear reset.
+- `ViewModels/OCRViewModel.swift` — reset() method.
+- `DesignSystem/Components/Feedback/DSToast.swift` + `App/Word_OfficeApp.swift` — 3 comment stale ref rename.
+
+**RULE.md**: rule #7 mới.
+
+### Review state
+
+- 2 fork `/code-review`: 
+  - Fork 1 (S14 diff scoped) — 4 finding, apply 2 (#3 premium toast, #4 haptic filter), hoãn 2 (#1 #2 section header alignment — chờ user verify visual).
+  - Fork 2 (full uncommitted scope) — 15 finding, apply 4 Đợt 1 HIGH (#1 dark mode form, #3 ConvertFlow silent-drop, #4 Scan reentrancy, #12 Scan state-bleed). 11 findings còn lại (rotation, PDFView observation, stale callback race, notification storm, etc.) chưa fix — tracked cho Đợt 2-4.
+- 2 fork `/swiftui-expert-skill`: review clean qua correctness checklist.
+
+### Trạng thái cuối session — vẫn UNCOMMITTED
+
+Cộng dồn với Session 10 chiều / 11 / 12 / 13 (chưa commit từ trước) + toàn bộ Nhóm 1-5 session này — vẫn giữ nguyên "tạm để local, commit sau" theo yêu cầu user đầu Session 12.
+
+**Còn tồn lại** (không phải bug khẩn):
+- **11 findings HIGH/MEDIUM/LOW từ Fork 2** chưa fix — tracked cho Đợt 2 (state races: PDFView observation, shouldDismissAfterPreviewCloses latch, stale callback race), Đợt 3 (rotation, MEDIUM state races), Đợt 4 (perf: notification storm, LibraryView computed properties).
+- **2 findings từ Fork 1** hoãn — section headers "Previous 7 Days" / "Needs Attention" listRowInsets alignment (verify visual sau rebuild).
+- **Section 14 finding #3 pre-existing**: `PressableCardButtonStyle.interactiveSpring` (already fixed) nhưng comment ghi vi phạm rule — done.
+
+### Where we left off
+
+User rebuild sim + xem kết quả 3 nhóm shadow mới apply (search field capsule + RoundIconButtonSurface + TypeTabButton). Nếu OK → tiếp bug/feature khác. Nếu chưa OK → tune shadow value tiếp.
+
+**Rủi ro known**:
+- Section headers "Previous 7 Days" có thể vẫn indent lệch với hero/search — chưa verify visual sau rebuild.
+- `.contentMargins(.top, 0, for: .scrollContent)` + `.padding(.top, sm)` titleRow — combination có thể quá tight/quá spacious tùy user device (iPhone 16e sim vs real device).
+- Tools tab padding lg=20pt match Library — chưa 100% chắc iOS `.contentMargins()` trên insetGrouped List behavior nhất quán với `.padding()` trên ScrollView content.
+
+---
+
+## [Unreleased] — 2026-09-05 (Session 13 — Code-review backlog cleanup + Premium crown icon)
+
+Session tập trung dọn nợ review: Session 12 kết thúc với 1 đợt `/code-review` chưa chạy hết + nhiều bug thật chưa fix. Lần lượt chạy 4 vòng `/code-review medium` trên toàn bộ diff Session 10-12 (không chỉ diff riêng session này) — mỗi vòng verify đợt fix trước sạch, nhưng vì scope là TOÀN BỘ project nên liên tục phát hiện thêm finding pre-existing mới. Đã fix 3 đợt (21 finding), đợt thứ 4 (8 finding) nhận nhưng dừng lại để hỏi ý user thay vì tự ý tiếp tục — xem "Trạng thái cuối session".
+
+### 🟢 Nhóm 1 — Backlog Session 10 (6 finding, fix hết)
+
+- `DSToastPresenter.Item` — bỏ `Equatable` giả (id là `UUID()` random mỗi lần tạo nên `==` luôn `false`, dead code gây hiểu lầm).
+- 3× `@MainActor` thừa (`EditorViewModel.handleAutosaveOutcome`, `RootView.initializeViewModelsIfNeeded`, `Word_OfficeApp.handleScenePhaseChange`) — type đã `@MainActor`/View/App rồi.
+- `ToolResultGalleryView`'s `ShareLink` thêm `preview:` (`SharePreview(Text(url.lastPathComponent))`) — trước đó share file mới tạo (chưa Spotlight-index) hiện icon chung/"N Items".
+- `DocumentPickerExporter` double-dismiss trên iPad — picker tự bubble dismiss lên sheet cha (do `presentingViewController` đi qua containment chain), cộng thêm code cũ CŨNG tự gọi `onDismiss()` → 2 animation dismiss chồng nhau. Fix: bỏ hẳn coordinator/delegate, đổi 2 call site (`LibraryView`, `ToolResultGalleryView`) sang `.sheet(item:onDismiss:)`/`.sheet(isPresented:onDismiss:)` — để duy nhất SwiftUI chịu trách nhiệm dismiss.
+- `ScanFlowView.loadPhotos` — `try?` nuốt lỗi khi 1 ảnh trong Photos picker load fail (iCloud chưa tải/format lạ) → mất ảnh âm thầm. Fix: đếm `failedCount`, báo qua `errorMessage`.
+
+### 🟡 Nhóm 2 — Đợt review thứ 2, full-project scan (8 finding, fix hết)
+
+- **[HIGH] `RootView.swift`** — `TabBarVisualHiddenPreferenceKey` reduce bằng `||` trên cả 3 tab mount song song → 1 destination ẩn tab bar ở tab KHÔNG active vẫn ẩn tab bar app-wide tới khi quay lại pop ra. Fix: `suppressTabBarHiddenPreference(unless:)` mới trong `View+HidesTabBar.swift`, `transformPreference` zero-out contribution của tab không active.
+- `SignaturePlacementView.swift` + `FillFormView.swift` — rect đặt chữ ký/text tap gần mép không clamp vào mediaBox → crop âm thầm khi lưu. Fix: `PDFPage+ClampedRect.swift` mới (`clampedToMediaBox`), áp dụng 4 chỗ (tap + drag, cả 2 file).
+- `DocumentCard.swift` — regression thật: `.sensoryFeedback(.selection, trigger: isFavourite)` bị mất khi gộp nút Favourite vào kebab menu `FileActionsMenu`. Fix: thêm lại.
+- `SignFlowView.swift` / `FillFormView.swift` — `commitSave` gọi `previewPayload = nil` + `dismiss()` cùng lúc → double-dismiss race (sheet đóng + NavigationStack pop chồng animation). Fix: `shouldDismissAfterPreviewCloses` flag, pop chuyển vào `.sheet(onDismiss:)` — chỉ chạy SAU KHI sheet đóng xong hẳn.
+- `DSToastPresenter.swift` — vi phạm `~/CLAUDE.md` Toast Notifications: mọi style auto-dismiss 3s cứng thay vì success=4s/error=persistent/info=6s. Fix: `Style.defaultAutoDismissDuration`. Phần "queue tối đa 3 thay vì replace" — **giữ nguyên hành vi cũ theo quyết định user** (đã hỏi lại, xác nhận replace là chủ đích để tránh toast cũ kẹt khi batch nhiều thao tác).
+- Dedupe `PDFView` wrapper — `PDFPreviewPane` (`EditorPlaceholderView`) và `PreviewPDFPane` (`PreviewConfirmSheet`) giống hệt nhau byte-for-byte, gộp về `Views/Common/ReadOnlyPDFPreviewPane.swift` mới. 2 wrapper tap-interactive (`SignPDFView`/`FillFormPDFView`) giữ riêng vì khác nhau thật (currentPageIndex tracking).
+- `FillFormViewModel.commitPreview` — doc comment nói sai ("staged file left in place để retry") trong khi code xoá ngay khi fail. Sửa comment khớp code.
+
+### 🟠 Nhóm 3 — Premium crown icon (redesign theo yêu cầu user)
+
+- `LibraryView.premiumButton`: `Image(systemName: "sparkles")` → badge tròn gradient `crown.fill` + ring highlight top + shadow màu theo tint.
+- **Vòng 1 dùng `Color.dsStatusWarning`** — user chụp screenshot phản hồi "có phải chuẩn Apple design system không" vì màu ra nâu/đồng (`dsStatusWarning` = `#A75D00` thật, màu "warning" cho status draft, không phải gold).
+- **Vòng 2 sửa đúng**: 2 token mới `dsPremiumGoldStart`/`dsPremiumGoldEnd` (2 colorset mới trong `Assets.xcassets`) lấy đúng hex hệ thống của Apple — `systemYellow`/`systemOrange` (light `FFCC00`→`FF9500`, dark `FFD60A`→`FF9F0A`) — cặp màu Apple dùng cho badge premium/subscription (News+, Podcasts).
+
+### 🔵 Nhóm 4 — Đợt review thứ 3 (8 finding, fix hết)
+
+- `SignFlowView`/`FillFormView.commitSave` — khi `commitPreview()` fail (disk full...), code cũ chỉ `return` mà không đóng `previewPayload` → sheet kẹt vĩnh viễn, `.errorAlert` nằm dưới sheet không hiện được. Fix: đóng sheet (không pop nav, không reset VM) để user thấy lỗi + retry được.
+- `PDFKitSignatureStamper.swift` — chữ ký lưu ra PDF bị stretch méo so với preview (preview aspect-fit trong rect, code stamp cũ `context.draw(cgImage, in: pageRect)` luôn stretch-to-fill). Fix: `aspectFitRect(imageSize:in:)` helper, tính sub-rect đúng tỉ lệ trước khi draw.
+- `MergeSplitCompressView.swift` (Merge + Split) + `ConvertFlowView.swift` — bấm nút hành động 2 lần trên CÙNG 1 selection chưa đổi → tạo file trùng "(2).pdf" âm thầm (file list/ranges/images cố ý giữ lại sau thành công để re-run với input mới — không thể disable cứng). Fix: snapshot input tại thời điểm thành công cuối (`lastMergedSnapshot`/`lastSplitSnapshot`/`ConvertSnapshot`), disable nút chỉ khi input CHƯA đổi so với snapshot đó.
+- `ScanFlowView.swift` — mở từ FAB Library (`onOpenFile`/`onShowGallery` đều nil, khác Tools-tab push) → sau save sheet kẹt lại, Save vẫn bấm được lần 2. Fix: `dismiss()` khi cả 2 callback đều nil.
+- `SignFlowView.swift`/`FillFormView.swift` — `signatureVM`/`fillFormVM` sống suốt vòng đời Tools tab (tạo 1 lần), back giữa chừng không save thì không reset → mở lại dính state cũ. Fix: `.onDisappear { viewModel.reset() }`.
+- `PrintFlowView.swift` + `MergeView`/`SplitView`/`ConvertFlowView.swift` — dùng chung 1 `pdfToolsVM`, lỗi cũ từ tool A còn sót trong `errorMessage` hiện nhầm sang tool B khi chuyển tab. Fix: `.onAppear { viewModel.errorMessage = nil }` ở cả 4 view.
+- `SignFlowView.SignatureDrawSheet` — nút "Clear" xoá chữ ký đang vẽ ngay lập tức, không confirm, không undo — vi phạm rule destructive-action trong `~/CLAUDE.md`. Fix: `.confirmationDialog`.
+- 4 magic number tách rời cho khoảng chừa tab bar (`RootView` 150, `ToolsTabView` 100, `LibraryView`/`SettingsView` 80) không có nguồn chung. Fix: `DesignSystem/Foundations/DSTabBarMetrics.swift` mới gom cả 4 (giữ nguyên giá trị — mỗi cái tune riêng cho loại content khác nhau, chỉ gom thành hằng số có tên).
+
+### 🟣 Nhóm 5 — Đợt review thứ 4 (8 finding): 2 fix, 6 hoãn có lý do
+
+Không tự động fix tiếp cả 8 — dừng lại trình bày lý do cho từng cái trước, vì bắt đầu lấn sang finding cần verify thật (không đọc code suông đoán được) hoặc là quyết định kiến trúc/UX chứ không phải bug cơ học. User xác nhận cách tiếp cận, chỉ 2 cái được fix:
+
+- ✅ **`PDFToolsViewModel.print()` thiếu `isProcessing` guard** — Print giờ share `pdfToolsVM` với Merge/Split/Convert (ghép từ Session 12), thiếu guard này thì lỗi/trạng thái xử lý của Print có thể ghi đè/bị ghi đè bởi 1 trong 3 tool kia nếu chạy chồng lúc chuyển tab. Fix: thêm guard giống hệt 5 method còn lại.
+- ✅ **Animation/spring chưa gate `accessibilityReduceMotion`** — 7 tool card + Scan hero (`PressableCardButtonStyle`), tab-bar slide + FAB menu open/close (`RootView`, `LibraryAddButton`), 3 chỗ toast show/dismiss (`DSToastPresenter`, dùng `UIAccessibility.isReduceMotionEnabled` vì class này không phải View, không có `@Environment`). Fix: `withAnimation(reduceMotion ? nil : ...)` / `.animation(reduceMotion ? nil : ..., value:)` ở tất cả các chỗ trên.
+- ⏸️ **4 cái hoãn vì cần verify thật, không đoán được từ code**: (1) nghi vấn `TabBarVisualHiddenPreferenceKey` có thể vẫn stuck — suy đoán theo tương tự bug cũ, nhưng cơ chế `PreferenceKey` của SwiftUI tính lại theo cây view mỗi render (không phải kiểu event có thể miss), nhiều khả năng KHÔNG phải bug thật, cần test tay mới chắc; (2)+(3) rotation chưa xử lý ở Sign/Fill Form placement — cả tap-placement lẫn PDF write đều dùng API cấp cao PDFKit (`pdfView.convert`, `page.draw`) vốn tự xử lý rotation nhất quán với nhau, nhiều khả năng code hiện tại đã đúng, cần test trên 1 file PDF scan bị xoay thật mới biết chắc.
+- ⏸️ **2 cái hoãn vì là quyết định UX/kiến trúc, không phải bug cơ học**: nút "Print" mất sau khi Merge (tính năng bị rớt khi refactor, cần chốt lại luồng trước khi code theo rule.md #2) và Library full-rescan mỗi lần save (đọc code thấy đây là quyết định có chủ đích từ Session 12 — comment ghi rõ lý do lấy đúng metadata/iCloud state — đổi sang upsert là đánh đổi hiệu năng vs độ chính xác, cần user quyết chứ không tự tiện đổi).
+
+**Gap nhỏ phát hiện thêm khi review scope hẹp đúng 2 fix trên (agent bị dừng giữa chừng theo yêu cầu user, nhưng đã kịp trả về finding)**: guard `isProcessing` mới thêm cho `print()` chặn đúng race, nhưng `PrintFlowView`'s nút Print chỉ `.disabled(sourceURL == nil)`, không tham chiếu `viewModel.isProcessing` — nếu guard thật sự chặn (Merge đang chạy), user bấm Print sẽ thấy nút nhấp nháy mà không có gì xảy ra, không toast/spinner/lỗi báo. Ghi nhận, chưa fix — để dồn cùng đợt sau nếu cần.
+
+### Build & Review state
+
+- Build sạch (`xcodebuild ... BUILD SUCCEEDED`) sau mỗi đợt fix, kể cả đợt Nhóm 5.
+- 4 vòng `/code-review medium` scope toàn project (3 đợt đầu, 21 finding, fix hết) + 1 vòng scope hẹp đúng 5 file Nhóm 5 (dừng theo yêu cầu user giữa chừng, đã kịp trả 5 finding — 1 finding thật liên quan trực tiếp fix vừa làm (note ở trên), 4 finding còn lại là duplication/design-taste pre-existing từ Session 12, không phải regression từ session này).
+- **Chưa test bằng mắt trên simulator** cho toàn bộ session — cài lại app xoá state onboarding (chưa cấp quyền thư mục), không tự động hoá được tap "Skip for now" (thiếu quyền Accessibility trên máy dev, biết từ Session 6). User cần tự bấm qua onboarding rồi test thủ công.
+
+### Trạng thái cuối session — vẫn UNCOMMITTED
+
+Cộng dồn với Session 10 chiều / 11 / 12 (chưa commit từ trước) + toàn bộ Nhóm 1-5 session này — vẫn giữ nguyên "tạm để local, commit sau" theo yêu cầu user đầu Session 12.
+
+**Còn tồn lại cho session sau** (không phải bug khẩn — xem lý do chi tiết ở Nhóm 5): 4 mục cần verify thật trên simulator/device trước khi quyết fix hay không (tab-bar preference stuck nghi vấn, rotation Sign/Fill Form nghi vấn), 2 mục cần user chốt hướng trước khi code (Print shortcut sau Merge, Library rescan-vs-upsert), 1 gap nhỏ mới phát hiện (`PrintFlowView` nút Print không phản ánh `isProcessing`), và 4 finding duplication/design-taste pre-existing (2 cặp code trùng nhau gần như y hệt — `LibraryEditorSheet`/`ToolsEditorSheet`, `RootView.closeFABMenu`/`LibraryAddButton.closeMenu` — + `IconBadge` trùng ý tưởng với `DSDocumentTypeBadge` có sẵn + `PressableCardButtonStyle` dùng `.interactiveSpring` vốn vi phạm thẳng rule "no spring physics for UI chrome" trong `~/CLAUDE.md`, không chỉ vấn đề reduce-motion).
+
+### 🔨 Code Deliverables — Session 13
+
+**NEW** (5): `Extensions/PDFPage+ClampedRect.swift`, `Views/Common/ReadOnlyPDFPreviewPane.swift`, `DesignSystem/Foundations/DSTabBarMetrics.swift`, `Assets.xcassets/PremiumGoldStart.colorset`, `Assets.xcassets/PremiumGoldEnd.colorset`.
+
+**EDITED** (~22): `DesignSystem/Components/Feedback/DSToastPresenter.swift`, `DesignSystem/Foundations/DSColor.swift`, `ViewModels/EditorViewModel.swift`, `Views/Root/RootView.swift`, `App/Word_OfficeApp.swift`, `Views/PDFTools/ToolResultGalleryView.swift`, `Views/Common/DocumentPickerExporter.swift`, `Views/Library/LibraryView.swift`, `Views/Library/LibraryAddButton.swift`, `Views/OCR/ScanFlowView.swift`, `Extensions/View+HidesTabBar.swift`, `Views/Signature/SignaturePlacementView.swift`, `Views/PDFTools/FillFormView.swift`, `Views/Library/DocumentCard.swift`, `Views/PDFTools/SignFlowView.swift`, `Views/PDFTools/PreviewConfirmSheet.swift`, `Views/Editor/EditorPlaceholderView.swift`, `ViewModels/FillFormViewModel.swift`, `ViewModels/PDFToolsViewModel.swift`, `Services/Implementations/Native/PDFKitSignatureStamper.swift`, `Views/PDFTools/MergeSplitCompressView.swift`, `Views/PDFTools/ConvertFlowView.swift`, `Views/PDFTools/PrintFlowView.swift`, `Views/Tabs/ToolsTabView.swift`, `Views/Settings/SettingsView.swift`.
+
+---
+
+## [Unreleased] — 2026-09-04 (Session 12 — Fill & Sign category + Tools redesign)
+
+Session dài nhất từ đầu project. Bắt đầu từ 1 user request nhỏ ("thêm Compress?" — user hủy sau khi tôi flag scope reverse) rồi mở rộng thành: (1) full Fill & Sign category với 3 features (Print + Sign Tier 1 + Fill Form), (2) redesign Tools home thành 2-col card grid, (3) upgrade tab bar Liquid Glass native iOS 26, (4) auto-hide tab bar on scroll, (5) preview + confirm flow trước khi save. Loop 5-6 vòng iterations về spacing dưới do 1 bug root cause bị mãi không tìm ra tới khi `/code-review` chỉ ra ở cuối session.
+
+### 🔴 Nhóm 1 — Fill & Sign category (3 features)
+
+**Trigger**: user hủy Compress ("effect chưa lớn"), yêu cầu "để ở ngoài tính năng print, sign & fill form, gom vào 1 category". Category name chốt **"Fill & Sign"** (Adobe pattern). Mockup `Wireframe/FillAndSign-Mockup-v1.html` — 4 lane (Tools entry + Print + Sign + Fill Form).
+
+- ✅ **Print** — reuse `AirPrintCoordinator` backend Session 6 (`PDFToolsViewModel.print()`). Chỉ thiếu UI entry. NEW `PrintFlowView.swift` giống MergeView pattern (fileImporter PDF + toolbar Print → system AirPrint sheet). **Không toast** post-save (backend collapses cancel/success into same code path — nói dối user nếu cancel).
+- ✅ **Sign Tier 1 (drawing)** — spec §9.1 "làm trước". 6 file replace stub:
+  - `Models/Signature.swift` (real: `id, imageData: Data, createdAt`)
+  - `Services/Protocols/Signature/SignatureStamping.swift` (NEW)
+  - `Services/Implementations/Native/PDFKitSignatureStamper.swift` (NEW) — CGPDFContext re-render approach (KHÔNG PDFAnnotation stamp — subclass appearance stream không persist qua Preview/Acrobat)
+  - `ViewModels/SignatureViewModel.swift` (real, 2-stage: pickPDF → fill với tap-to-place + bottom sheet canvas)
+  - `Views/Signature/SignatureCanvasView.swift` (PKCanvasView UIViewRepresentable)
+  - `Views/Signature/SignaturePlacementView.swift` (SignPDFView + SignPDFCanvas với tap-place + drag reposition)
+  - `Views/PDFTools/SignFlowView.swift` NEW orchestrator + `SignatureDrawSheet` bottom sheet canvas
+- ✅ **Fill Form (Option B — free-text overlay, Adobe Fill & Sign pattern)** — không có trong spec Phase0-v2, user request mới. 5 file new:
+  - `Models/FormFill.swift` (`TextAnnotation: id, pageIndex, pageRect: var, text, fontSize`)
+  - `Services/Protocols/Form/FormFilling.swift` (NEW)
+  - `Services/Implementations/Native/PDFKitFormFiller.swift` — `PDFAnnotation.freeText` + `PDFDocument.write` (persists reliably vì PDFKit tự sinh appearance stream cho freeText)
+  - `ViewModels/FillFormViewModel.swift`
+  - `Views/PDFTools/FillFormView.swift` (FillFormPDFView + FillFormPDFCanvas + TextAnnotationOverlay với drag + long-press remove + FillFormTextEditor sheet)
+- ✅ **Print scope**: PDF only cho MVP (Office → Convert → then Print). Sign scope: Tier 1 only (Tier 2 PKI cert Phase 2 per spec).
+- ✅ **Sign flow refactor** (Session 12 giữa) — user feedback: "flow nên chọn vị trí rồi thực hiện bottom sheet chữ ký thì phù hợp hơn". Refactor từ 3-stage (canvas → placement) sang 2-stage (tap-position-first → sheet canvas), match Fill Form + Adobe pattern.
+- ✅ **Drag gesture** cho Sign signature + Fill Form text annotation — user request "muốn di chuyển chữ ký/text". `.highPriorityGesture(DragGesture)` để không bị PDFView pan cướp; `@GestureState` per-annotation (extract subview để state isolation).
+
+### 🟢 Nhóm 2 — Preview + confirm flow (before save)
+
+**Trigger**: user feedback "nên cho user preview lại rồi confirm 1 lần nữa, sau đó mới hiển thị toast". Two-phase pattern:
+
+- `stagePreview()` — ghi vào `FileManager.default.temporaryDirectory`
+- `commitPreview(_ url: URL)` — move file temp → Documents/, post notification
+- `discardPreview(_ url: URL)` — cleanup temp
+
+NEW `Views/PDFTools/PreviewConfirmSheet.swift` (shared cho Sign + Fill Form) — bottom sheet `.large` detent với PDFPreviewPane + Back / "Save to Home" toolbar buttons.
+
+### 🟦 Nhóm 3 — Auto-refresh Library sau tool save
+
+**Trigger**: user "sau khi save file thì phải lưu lại file cũ trong app chứ nhỉ" — user không biết file đi đâu.
+
+- NEW `Extensions/Notification+DocumentsChanged.swift` — `Notification.Name.documentsDidChange`
+- Post từ 9 tool save actions: FillForm, Sign, Merge, Split, Convert (4 direction), Scan (2 exports)
+- `LibraryViewModel` subscribe qua `addObserver` trong init, cleanup deinit (`nonisolated(unsafe)` observer property vì deinit của MainActor class không thể await)
+- Kết quả: file save từ Tools tab → Library tab auto-appear, không cần pull-to-refresh
+
+### 🟨 Nhóm 4 — Tools home 2-col card grid refactor
+
+**Trigger**: user "tôi muốn gom Organize + Fill & Sign giống Convert, nhưng Convert chuyển hết thành dạng card, spacing 2 card". Rewrite ToolsTabView với unified card grid.
+
+Files: 1 file rewrite `Views/Tabs/ToolsTabView.swift` (~450 lines)
+
+Components mới (all private, fileprivate scope):
+- `ToolCard` — single icon variant (Merge/Split/Fill Form/Sign/Print)
+- `ConvertToolCard` — 2-icon + arrow variant (4 Convert directions)
+- `IconBadge` — shared, gradient fill 18%→10% + top-only white highlight rim (dimensional feel, không flat)
+- `PressableCardButtonStyle` — scale 0.96 + brightness -0.03 + `sensoryFeedback(.selection)` closure filter `{ _, new in new }` (one-shot on press-down)
+- `ToolCardSurface` ViewModifier — shared card shell: layered shadow (tight 2pt + soft 12pt), subtle gradient fill top→bottom, hairline border (0.5pt subtle), radius 16pt, minHeight 120pt
+
+`LazyVGrid` 2 cols × 12pt gap, shared `gridColumns` spec. Fill & Sign 3 items → LazyVGrid natural: 2 top row + 1 bottom-left (bottom-right empty cell — reads OK).
+
+Section header refactor: brand-tinted rounded-square icon 22pt + title (giữa) + count pill (**sau đó user yêu cầu bỏ số 2/3/4**).
+
+### 🟣 Nhóm 5 — Liquid Glass tab bar upgrade (iOS 26 native pattern)
+
+**Trigger**: user "navbar chưa chuẩn nhiều native ios design nhỉ, có liquid glass". Consult `swiftui-expert-skill/references/liquid-glass.md`.
+
+- **Wrap customTabBar trong `GlassEffectContainer(spacing:)`** — per skill: "Glass cannot sample other glass. Container gives grouped elements a shared sampling region." Pill + FAB giờ sample cùng region, glass tone nhất quán.
+- **Tab pill button**: size 76×60 (từ 72×56), icon `.symbolVariant(isSelected ? .fill : .none)` — native pattern (Files, Notes), thêm `.sensoryFeedback(.selection)` khi đổi tab.
+- **FAB (LibraryAddButton)**: replace gradient Circle → `.glassEffect(.regular.tint(Color.dsBrandPrimary).interactive(), in: .circle)`. Interactive glass = built-in press dip (native iOS 26). Diameter 56→60pt. Giữ shadow brand halo mỏng.
+- **Prominent inline title** (`View+ProminentInlineTitle.swift` NEW modifier):
+  - Replace `.navigationTitle(...).navigationBarTitleDisplayMode(...)` cross-app
+  - `.navigationBarTitleDisplayMode(.inline)` + `.toolbar { .principal { Text.font(.title2.bold()) } }` — 22pt bold nav bar title, KHÔNG collapse trên scroll (user "khi scroll text bé quá, tăng size lên bằng size tool ở gốc")
+  - Apply cho 7 tool screens (Tools home, Merge, Split, Convert 4 dirs, Scan, Sign, Fill Form, Print) + Settings
+  - Support cả `LocalizedStringKey` + `String` overloads (ConvertDirection.title/ScanFlowView.navigationTitle là String)
+
+### 🟠 Nhóm 6 — Auto-hide tab bar on scroll
+
+**Trigger**: user "khi scroll thì sẽ ẩn navbar, dừng lại thì hiển thị". Safari/Notes pattern.
+
+NEW `Extensions/View+AutoHideTabBarOnScroll.swift`:
+- `.onScrollGeometryChange(for: CGFloat.self)` (iOS 18+) — track offset delta
+- Debounce Task 350ms — sau 350ms no-offset-change → mark idle
+- Publish qua `TabBarVisualHiddenPreferenceKey`
+- Cleanup: cancel Task on `.onDisappear`
+
+Apply cho 3 tab home (Tools/Library/Settings scroll containers).
+
+### 🔵 Nhóm 7 — Editor auto-shows real PDF (không placeholder)
+
+**Trigger**: user "editor mở ra chỉ hiện placeholder 'coming when SDK licensed', không thấy file". Fix: `EditorPlaceholderView.swift` thêm case `.pdf` dùng `PDFPreviewPane` (PDFKit native UIViewRepresentable) — sidesteps Artifex SDK block cho PDF. Tool outputs (mọi tool sinh PDF) auto-mở editor showing real PDF now.
+
+### 🟩 Nhóm 8 — UX iteration: nav destination flow
+
+**Trigger**: user "đối với Fill & Sign sau khi edit xong hiển thị toast, đưa về màn hình tool và báo thêm toast là đã lưu ở Home".
+
+- Bỏ auto-navigate editor sheet sau save Fill/Sign
+- Add `@Environment(\.dismiss)` — pop NavigationStack về Tools home sau commit
+- Toast fire BEFORE dismiss (app-scoped presenter persist qua transition)
+- Toast copy chuyển "Filled/Signed PDF saved" → **"Saved to Home"** cross-app (Merge/Split/Convert/Scan/Sign/Fill Form)
+
+### 🔀 Nhóm 9 — Spacing saga (5+ iterations, chốt bằng code-review)
+
+User complain overlap giữa content cuối và tab bar **6-7 lần** trên MỌI tab. Tôi loop nhiều approach:
+1. `.padding(.top)` giảm dư top space, bump `safeAreaInset` 84 → 110 → 130 → 150 → 180pt
+2. `.contentMargins(.bottom, X, for: .scrollContent)` — unreliable
+3. Local `.safeAreaInset(edge: .bottom)` chin trên List — vẫn overlap
+4. Hard `.padding(.bottom, 120)` on VStack — quá dư
+5. Dial down 24pt → regress
+6. Explicit `Color.clear.frame(height:)` view cuối VStack — chạy nhưng vẫn tinh chỉnh
+
+**Root cause thật (code-review finding #1)**: dual preference (`TabBarVisualHidden` + `TabBarInsetCollapsed`) mà tôi thiết kế để split "visual hide" vs "layout hide" — `onPreferenceChange` KHÔNG fire reliably khi child unmount trong NavigationStack destination. State `isTabBarInsetCollapsed` stuck true sau khi user pop back từ Sign/Fill Form → safeAreaInset = 0 → content overlap.
+
+**Fix triệt để**: 
+- **Drop `TabBarInsetCollapsedPreferenceKey` entirely** — không còn state để stuck
+- RootView safeAreaInset **CONSTANT 150pt** (never conditional)
+- `.hidesTabBar()` = visual hide + `.ignoresSafeArea(.container, edges: .bottom)` internally (destinations tự reclaim strip)
+- Auto-hide dùng `.hidesTabBarVisually(_ hidden)` — chỉ visual toggle
+- **Explicit `Color.clear.frame(height: 100)` view cuối Tools VStack** + Section spacer 80pt cho Library/Settings — final guaranteed clearance
+
+### 🔧 Code Review (medium) — 3 finding
+
+`/code-review` fork chạy cuối session, scope 20+ file thay đổi Session 12:
+
+1. **HIGH** — TabBarInsetCollapsed stuck (như trên) — FIXED bằng drop preference split
+2. **MEDIUM** — PreviewConfirmSheet swipe-to-dismiss leak temp file — chỉ Back button gọi onCancel, swipe bypass. FIXED: thêm `@State didCommit` + `.onDisappear { if !didCommit { onCancel() } }` — uniform cleanup
+3. **LOW** — `commitPreview` catch failure leaks staged file — FIXED: `discardPreview(stagedURL)` trong catch block
+
+**Verified clean** (9 điểm): LibraryVM observer + nonisolated(unsafe) deinit, Task cancellation, sensor feedback pattern, PDF write persistence Sign/Fill, coord math, ForEach identity, glassEffect API usage, VMs eager-init.
+
+### Build state
+
+Build clean nhiều lần trong session (~15 lần `xcodebuild BUILD SUCCEEDED`). App install + launch iPhone 16e sim (iOS 26.3) sau mỗi lần fix để user test bằng mắt. Final PID 99978.
+
+### Trạng thái cuối session — 3 lô UNCOMMITTED
+
+1. **Session 10 chiều** (2026-09-03) — toast+kebab+7bug — chưa commit
+2. **Session 11** (2026-09-04 morning) — Tool Result Gallery — chưa commit
+3. **Session 12** (2026-09-04 rest of day) — Fill & Sign + Tools card grid + Liquid Glass + spacing saga — chưa commit
+
+User yêu cầu "tạm thời lưu local, commit sau" từ đầu session — vẫn giữ nguyên. Khi resume: option B commit theo timeline (3 commits, mỗi session 1 commit).
+
+### 🔨 Code Deliverables — Session 12
+
+**NEW files** (17):
+- Wireframe: `FillAndSign-Mockup-v1.html`, `Tools-Home-CardGrid-v1.html`
+- Extensions: `Notification+DocumentsChanged.swift`, `View+AutoHideTabBarOnScroll.swift`, `View+HidesTabBar.swift`, `View+ProminentInlineTitle.swift`
+- Models: `FormFill.swift`
+- Services/Protocols: `Form/FormFilling.swift`, `Signature/SignatureStamping.swift`
+- Services/Implementations/Native: `PDFKitFormFiller.swift`, `PDFKitSignatureStamper.swift`
+- ViewModels: `FillFormViewModel.swift`
+- Views/PDFTools: `FillFormView.swift`, `PreviewConfirmSheet.swift`, `PrintFlowView.swift`, `SignFlowView.swift`
+- Views (already listed): stubs replaced with real — `Models/Signature.swift`, `ViewModels/SignatureViewModel.swift`, `Views/Signature/SignatureCanvasView.swift`, `Views/Signature/SignaturePlacementView.swift`
+
+**EDITED files** (~15):
+- `App/DependencyContainer.swift` — signatureStamper + formFiller + 2 factories
+- `Models/PDFToolDestination.swift` — 3 new cases (.fillForm, .sign, .print)
+- `ViewModels/OCRViewModel.swift`, `ViewModels/PDFToolsViewModel.swift` — post documentsDidChange
+- `ViewModels/LibraryViewModel.swift` — subscribe observer + nonisolated(unsafe) deinit
+- `ViewModels/SignatureViewModel.swift` — real impl (was stub) + stage/commit/discard preview + failure discard
+- `ViewModels/FillFormViewModel.swift` — stage/commit/discard preview + failure discard
+- `Views/Editor/EditorPlaceholderView.swift` — PDFPreviewPane for .pdf
+- `Views/Library/LibraryAddButton.swift` — FAB Liquid Glass + interactive + diameter 60pt
+- `Views/Library/LibraryView.swift` — trailing Section spacer + autoHidesTabBarOnScroll
+- `Views/OCR/ScanFlowView.swift` — prominentInlineTitle + toast copy + onShowGallery from Session 11
+- `Views/PDFTools/ConvertFlowView.swift`, `Views/PDFTools/MergeSplitCompressView.swift` — prominentInlineTitle + toast copy
+- `Views/Root/RootView.swift` — dual→single preference simplification, safeAreaInset constant 150pt, GlassEffectContainer around customTabBar, prominent tab bar (76×60 + `.symbolVariant(.fill)` selected + sensor feedback)
+- `Views/Settings/SettingsView.swift` — Section spacer + autoHidesTabBarOnScroll + prominentInlineTitle
+- `Views/Tabs/ToolsTabView.swift` — rewrite full 450 lines (card grid + ToolCard/ConvertToolCard/IconBadge/ToolCardSurface/PressableCardButtonStyle + destinationView hidesTabBar + prominentInlineTitle + explicit 100pt trailing spacer)
+
+**Total**: ~35 file impacted (17 new + ~18 edited).
+
+---
+
+## [Unreleased] — 2026-09-04 (Session 11 — Tool Result Gallery)
+
+Session ngắn: đóng lại **open UX question** từ cuối Session 10 chiều (pdfToImage không auto-navigate, gọi tổng quát "áp dụng hết cho các feature ở tính năng tool"). Chốt phương án **gallery cho mọi output đa file**, dựng mockup HTML, review, code SwiftUI, review lại rồi build clean.
+
+### Chốt UX — Option A + gallery cho multi-output
+
+- **Câu hỏi paused**: 3 interpretation A/B/C (bỏ auto-navigate all / giữ + thêm cho pdfToImage cách khác / cái khác). User trả lời chọn A NHƯNG có navigate → thực chất là interpretation MỚI: **áp dụng navigate cho MỌI tool feature**, kể cả multi-output (pdfToImage sinh N ảnh, Scan both formats sinh 2 file, Split N ranges sinh N PDF).
+- **Follow-up clarify**: multi-output nên navigate đi đâu? 3 option (open first file / gallery view / back to Library filtered). User chọn **gallery** — nhất quán "xem kết quả", không cần view mới cho Library filter.
+
+### Audit toàn bộ tool outputs (không sót case)
+
+| Tool | Output count | Behavior mới |
+|---|---|---|
+| Merge PDFs | 1 | Editor auto-nav (giữ) |
+| Split PDF (N=1) | 1 | Editor auto-nav (giữ) |
+| **Split PDF (N>1)** | N | **Gallery** (đổi từ nav-first) |
+| Convert officeToPDF | 1 | Editor auto-nav (giữ) |
+| Convert pdfToWord | 1 | Editor auto-nav (giữ) |
+| **Convert pdfToImage** | N | **Gallery** (đổi từ toast-only) |
+| Convert imageToPDF | 1 | Editor auto-nav (giữ) |
+| Scan single format | 1 | Editor auto-nav (giữ) |
+| **Scan both formats** | 2 | **Gallery** (đổi từ toast-only) |
+
+3 case đổi behavior, 6 case giữ nguyên.
+
+### Deliverables
+
+**NEW** (2):
+- `Wireframe/Tool-Result-Gallery-v1.html` (mockup 3 lane: pdfToImage grid + Split list + Scan both formats mixed) — dựng theo design language chung với `PDFTools-Mockup-v2.html`, 5 quyết định inline (sheet vs push, grid vs list, Select mode, file storage, count=1 edge case).
+- `Views/PDFTools/ToolResultGalleryView.swift` — bottom sheet `.large` detent, auto-layout (grid nếu all-image, list nếu mixed/docs), action bar Save All (DocumentPickerExporter) + Share All (ShareLink). `ToolCompletion` enum + `ImageExtension` whitelist helper trong cùng file.
+
+**EDITED** (4):
+- `Views/Tabs/ToolsTabView.swift` — thêm `@Environment(DSToastPresenter.self)` + `@State galleryPayload: GalleryPayload?` + `@State pendingEditorURL: URL?`. Two-sheet handoff via `.sheet(item:onDismiss:)` — gallery `onOpenFile` set `pendingEditorURL`, `onDismiss` sau đó gọi `openFile()` để trigger editor sheet. Fileprivate `GalleryPayload: Identifiable` wrapper cho `[URL]`. Preview inject `.environment(DSToastPresenter())` để tránh trap.
+- `Views/PDFTools/MergeSplitCompressView.swift` — `SplitView` thêm `onShowGallery: (([URL]) -> Void)?` param. `performSplit` branch: count==1 → `onOpenFile`, count>1 → `onShowGallery`.
+- `Views/PDFTools/ConvertFlowView.swift` — thêm `onShowGallery` param. `pdfToImage` case luôn `onShowGallery` (không editor destination cho image kể cả single-image export).
+- `Views/OCR/ScanFlowView.swift` — thêm `onShowGallery` param. `urls.count == 1` → `onOpenFile`, else → `onShowGallery`.
+
+### `/code-review` — 3 finding fix hết
+
+1. **CONFIRMED** — `ToolsTabView.swift:376` `#Preview` thiếu `.environment(DSToastPresenter())` sau khi thêm `@Environment` ở line 8 → trap-crash. Same pattern như finding Nhóm 5 session cũ. Fix.
+2. **PLAUSIBLE (perf)** — `fileSizeLabel` sync disk read mỗi lần render body qua `url.resourceValues([.fileSizeKey])`. OK cho 2-6 file, hitch risk khi PDF→Image 20+ trang. Fix: `@State sizeLabels: [URL: String]` precompute qua `.task(id: urls)` off-main. Body render `sizeLabels[url]` sync.
+3. **PLAUSIBLE (memory)** — `AsyncImage(url:)` load full-res PNG. Export 2x scale sinh multi-MB per page → 20 trang ~40 MB memory pressure. Fix: `CGImageSourceCreateThumbnailAtIndex` + `kCGImageSourceThumbnailMaxPixelSize: 600` + `kCGImageSourceShouldCacheImmediately`. Cache trong `@State thumbnails: [URL: UIImage]`. Bounded <1 MB per thumbnail regardless nguồn.
+
+Cả 2 perf fix gộp trong 1 `Task.detached(priority: .utility)` từ `preloadMetadata()` — tránh 2 lần dispatch.
+
+### Build state
+
+- `xcodebuild` clean 3 lần (initial gallery + preview fix + perf fix). App install + launch iPhone 16e sim (iOS 26.3), PID 60037 → 60511 → 60911 sau mỗi rebuild.
+- Fork `/swiftui-expert-skill` review bị kill sớm khi user yêu cầu narrow scope — chưa cover full SwiftUI angle. Có thể relaunch sau nếu bạn muốn cover thêm.
+
+### 🔨 Code Deliverables — Session 11
+
+**NEW** (2):
+- `Wireframe/Tool-Result-Gallery-v1.html`
+- `Word Office/Views/PDFTools/ToolResultGalleryView.swift`
+
+**EDITED** (4):
+- `Word Office/Views/Tabs/ToolsTabView.swift`
+- `Word Office/Views/PDFTools/MergeSplitCompressView.swift`
+- `Word Office/Views/PDFTools/ConvertFlowView.swift`
+- `Word Office/Views/OCR/ScanFlowView.swift`
+
+### Trạng thái cuối session
+
+- ✅ Gallery view code + wire xong 3 case multi-output
+- ✅ Build clean, app relaunch
+- ✅ 3 review finding fix hết (1 confirmed + 2 perf)
+- ⏸️ **CHƯA commit** — user muốn "tạm thời lưu local, commit sau"
+- ⏸️ Chưa test bằng mắt trên simulator (chờ user)
+- ⏳ FAB scan (LibraryAddButton) chưa apply gallery pattern — ngoài scope Tools tab
+
+---
+
+## [Unreleased] — 2026-09-03 (Session 10 continuation — chiều)
+
+Session kéo dài sau khi Session 10 morning batch đã commit. Chủ đề: user test end-to-end 4 tool flows (Merge/Split/Convert/Scan) trên simulator, phát hiện **7 bug + UX gap thật** qua từng lần bấm; mỗi lần fix xong test tiếp phát hiện thêm. Chia làm 5 nhóm fix + 1 refactor lớn (toast system + kebab menu). **Session đóng dở** với 1 câu hỏi UX chưa chốt (auto-navigate consistency across tools) — user "để mai xử lý tiếp".
+
+### Nhóm 1 — Fix nil-VM race Tools destinations (all blank spinner)
+
+- ✅ **Bug user báo**: "tất cả features tool bấm vào vẫn màn hình trắng" — screenshot cho thấy `ProgressView` spinner nhỏ giữa màn hình, không phải render EmptyStateView. Root cause: `ToolsTabView.destinationView(for:)` return `else { ProgressView() }` khi `pdfToolsVM == nil`. VMs được lazy-init trong `.task { if pdfToolsVM == nil { ... = container.makePDFToolsViewModel() } }` — trong pattern `ZStack + opacity 0/1` của Session 9, `.task` KHÔNG fire đúng lúc user tap NavigationLink → destination push với nil VM → ProgressView fallback → không bao giờ re-render vì `.navigationDestination` closure không auto-invalidate khi source state đổi post-push.
+- ✅ **Fix**: eager-init VMs qua `init` (`State(wrappedValue: container.makePDFToolsViewModel())`) trong `ToolsTabView` + `LibraryAddButton`. VMs guaranteed non-nil tại first push. Bỏ `.task { ... init ... }` guard.
+
+### Nhóm 2 — ScanFlowView Cancel duplicate + empty state overflow
+
+- ✅ **Bug user báo**: screenshot Scan & OCR sau khi navigate — thấy Cancel button ở leading (cạnh back chevron `<`) là duplicate, VÀ nút "Scan with Camera" + text "Or choose from Photos / PDF" bị tab bar che khuất phía dưới.
+- ✅ **Fix Cancel**: `ScanFlowView` giờ được dùng ở 2 context (Tools push + FAB sheet). Thêm param `showsExplicitCancel: Bool = false` — Tools push dùng default (không show Cancel vì back chevron có), LibraryAddButton sheet pass `true`.
+- ✅ **Fix layout**: `emptyAddPages` cũ dùng `EmptyStateView` (có `.frame(maxHeight: .infinity)` baked in) + siblings buttons → siblings bị đẩy xuống đáy = bị tab bar che. Refactor bỏ `EmptyStateView`, viết inline layout `VStack { Spacer(); icon; text; Spacer(); button; menu }` để center icon+text và giữ buttons có breathing room.
+- ✅ **Audit thêm 3 view** (MergeView/SplitView/ConvertFlowView) — cũng có `ToolbarItem(placement: .cancellationAction) { Cancel }` duplicate với back chevron. Vì 3 view này chỉ được push-only (không sheet), bỏ hẳn Cancel toolbar item.
+
+### Nhóm 3 — Bug "2 secs" đếm tăng trong DSFileRow (user phát hiện 2 lần)
+
+- ✅ **Bug lần 1**: sau khi pick file trong ConvertFlowView, row hiển thị "2 secs" và đếm tăng lên "5 secs" liên tục. Root cause: `DocumentRef` được init với `modifiedAt: .now` (hardcode) → `Text(date, style: .relative)` render "2 secs ago" và auto-refresh mỗi giây vì `.relative` là SwiftUI live-updating DateStyle.
+- ✅ **Fix step 1**: thêm URL extension `contentModificationDateOrNow: Date` đọc POSIX modification date qua `URLResourceValues`. Update 4 sites picked-file dùng `url.contentModificationDateOrNow` thay `.now`. 4 sites success-created files giữ `.now` (đúng — vừa tạo). Kết quả: row show "6 days ago" (real modify date của file).
+- ✅ **Bug lần 2**: user thấy "6 days, 3 hrs" (không rõ ngữ cảnh — không có "ago" suffix, compound units) rồi "5 secs" trên success screen. Root cause chung: `Text(date, style: .relative)` compound format + live-tick. Fix: đổi `DSFileRow` sang `Text(date, format: .relative(presentation: .named))` — static, natural language ("6 days ago", "yesterday", "now"), 1 dòng change benefit toàn app.
+- ✅ **Audit thêm**: `DocumentCard.swift:27` modifiedAt VÀ `ReminderChip.swift:179` reminder date đều dùng `style: .relative` — cùng bug pattern. Fix 2 chỗ nữa.
+
+### Nhóm 4 — Toast system + kebab menu (3-phase implementation)
+
+User yêu cầu: success screens (Merge/Split/Convert/Scan) chuyển thành **toast** (không phải full-screen), file rows có **kebab menu 3 chấm** với 4 actions (Edit / Save to Files / Share / Favourite).
+
+Clarify với user 5 câu hỏi:
+- (1) Post-success view state: giữ file đã pick
+- (2) Status change menu: giữ ở long-press context menu riêng
+- (3) Edit action: in-app editor Mock (A1)
+- (4) Save action: Files app export (B1)
+- (5) Toast style: icon+text (C2)
+
+**Phase 1 — Toast system**:
+- ✅ NEW `DesignSystem/Components/Feedback/DSToastPresenter.swift` — `@Observable @MainActor` singleton, one toast at a time, `show(_:title:filename:duration:)` cancel previous dismissTask + set current + spawn Task auto-dismiss sau 3s.
+- ✅ NEW `DesignSystem/Components/Feedback/DSToast.swift` — visual card: icon (success/error/info) + title + optional filename (truncationMode `.middle`), capsule `.regularMaterial` bg + border + shadow.
+- ✅ Wire trong `Word_OfficeApp` — `@State toastPresenter = DSToastPresenter()` + `.environment(toastPresenter)` inject vào tree + `.overlay(alignment: .bottom)` render toast.
+
+**Phase 2 — Replace 4 success screens**:
+- ✅ `MergeView`/`SplitView` (`MergeSplitCompressView.swift`) — bỏ `didFinish` flag, xoá `MergeSuccessView` + `SplitSuccessView` structs (~130 dòng). `performMerge/performSplit` fires `toaster.show(.success, title:, filename:)`. User stays at picker.
+- ✅ `ConvertFlowView` — bỏ `didFinish` + `successState` computed. 4 direction case fires toast riêng ("Converted to PDF"/"Converted to Word"/"Exported N images"/"PDF created").
+- ✅ `ScanFlowView` — bỏ `.success` từ Stage enum + `successState` computed + `savedURLs` @State. Toast fires với count/filename, stage stays at `.exportFormat`.
+- ✅ Xoá `SuccessBadge` component (`PDFToolsSharedUI.swift`) — dead sau refactor.
+
+**Phase 3 — Kebab menu (3 chấm) file rows**:
+- ✅ `DocumentCard.swift` — replace `FavouriteToggleButton` sibling với `FileActionsMenu` (new struct). Menu 4 items: Edit / Save to Files / ShareLink / Toggle Favourite (natural iOS Menu, iOS 16+ inline ShareLink). Fix live-tick time cùng lượt.
+- ✅ `DocumentGrid.swift` — DocumentTile cũng dùng FileActionsMenu overlay top-trailing → consistent list/grid UX.
+- ✅ NEW `Views/Common/DocumentPickerExporter.swift` — `UIViewControllerRepresentable` wrap `UIDocumentPickerViewController(forExporting:asCopy:true)` với Coordinator delegate cho Save to Files action.
+- ✅ `LibraryView.swift` — thêm `let onOpenEditor: (DocumentRef) -> Void` init param + `@State exportingRef: DocumentRef?` + `.sheet(item: $exportingRef)` cho DocumentPickerExporter. Wire callbacks trong `row(for:)` + `sectionRows(_:)`.
+- ✅ `RootView.swift` — thêm `@State editingRef: DocumentRef?` + `.sheet(item: $editingRef)` cho `EditorPlaceholderView(container:ref:)` (LibraryView không có container access, nên editor sheet ở RootView).
+
+### Nhóm 5 — Toast top + auto-navigate + fix 6 SwiftUI review findings
+
+User yêu cầu: (1) chuyển toast từ **bottom → top**; (2) sau khi có toast, **auto-navigate sang màn hình file mới** sau xử lý (revert lại choice #1 "giữ file đã pick" ban đầu).
+
+- ✅ **Toast bottom → top**: `.overlay(alignment: .top)` + `.padding(.top, DSSpacing.xs)` + `.transition(.move(edge: .top))`. Nằm dưới status bar/Dynamic Island, slide từ trên xuống.
+- ✅ **Auto-navigate**: mỗi tool view thêm `var onOpenFile: ((URL) -> Void)?`. `ToolsTabView` sở hữu `@State editingRef` + `.sheet(item:)` với `ToolsEditorSheet` wrapper. Single-file outputs (Merge, Convert 3 directions, Scan single, Split first-URL) → navigate. Multi-file (pdfToImage, Scan both formats) → skip navigate.
+
+**6 SwiftUI review findings — chạy `/swiftui-expert-skill` review qua fork, fix hết**:
+1. ✅ `DocumentCard.ReminderChip` VẪN dùng live-tick `Text(date, style: .relative)` — miss ở fix Nhóm 3 → fix nốt.
+2. ✅ Dead `@Environment(\.dismiss)` trong `MergeView`/`SplitView`/`ConvertFlowView` — sau khi bỏ Cancel không còn call site → remove 3 declarations.
+3. ✅ `#Preview("Root — checking")` thiếu `.environment(DSToastPresenter())` — descendants sẽ trap-fatalError trong preview happy-path → thêm.
+4. ✅ `DSToast` dùng `.onTapGesture` (violate core a11y principle "Prefer Button") → wrap content trong `Button(action: onTap) { ... }.buttonStyle(.plain)`.
+5. ✅ Toast không announce với VoiceOver khi appear → `UIAccessibility.post(notification: .announcement, argument: title)` trong `show()`.
+6. ✅ Editor sheet Done button write parent state (violate skill "sheets own actions") → extract `LibraryEditorSheet` + `ToolsEditorSheet` structs với `@Environment(\.dismiss) private var dismiss`.
+
+**+1 CRITICAL regression từ `/code-review` fork** (fix cùng batch):
+- ✅ **Toast fired từ sheet context bị sheet che khuất** — SwiftUI sheets present ABOVE scene-root overlays. Sau khi auto-navigate mở editor sheet, toast ở Word_OfficeApp scene-root sẽ ở dưới sheet → invisible. Fix: extract `toastHost(_:)` modifier + apply ở scene-root VÀ inside `LibraryEditorSheet` + `ToolsEditorSheet` + FAB scan sheet trong `LibraryAddButton`. Mỗi sheet có toast overlay riêng.
+
+### 🚧 Open question — chờ user chốt sáng mai
+
+**Bug/UX gap**: user test PDF→Image, thấy toast "Exported 1 image" ở top + picker view vẫn hiện (Pages to export toggle) — **không navigate**. User comment: *"ô chưa điều hướng sang màn hình mới là màn hình revert file thành công à, áp dụng cho mọi tinsh năng của tools"*.
+
+**Ambiguity**: câu chưa rõ, có 3 interpretation:
+- **A. Bỏ hết auto-navigate**, TẤT CẢ tools chỉ toast + stay at picker (như pdfToImage hiện tại) — undo work Nhóm 5.
+- **B. Giữ auto-navigate**, thêm cho pdfToImage 1 cách khác (VD: gallery view / preview ảnh đầu tiên).
+- **C. Cái khác**.
+
+**Đã ask user chọn 1/2/3** — user reply: *"tạm thời lưu lại vấn đề nhé... mai tôi quay lại xử lý tiếp"*. **PENDING chờ decision sáng mai**.
+
+### Build state
+
+Build clean sau mọi đợt fix (`xcodebuild ... BUILD SUCCEEDED`). App install + relaunch lên iPhone 16e simulator (iOS 26.3) sau mỗi fix để user test bằng mắt. Session cuối relaunch PID 46717.
+
+---
+
+### 🔨 Code Deliverables — Session 10 continuation
+
+**NEW files** (3):
+- `DesignSystem/Components/Feedback/DSToastPresenter.swift`
+- `DesignSystem/Components/Feedback/DSToast.swift` (bao gồm `toastHost(_:)` modifier)
+- `Views/Common/DocumentPickerExporter.swift`
+
+**EDITED files** (13):
+- `App/Word_OfficeApp.swift` — inject toastPresenter env + `.toastHost(toastPresenter)` scene-root.
+- `DesignSystem/Components/File/DSFileRow.swift` — `style:.relative` → `format:.relative(presentation:.named)`.
+- `Extensions/URL+Documents.swift` — thêm `contentModificationDateOrNow`.
+- `Views/Library/DocumentCard.swift` — replace FavouriteToggleButton với FileActionsMenu, fix live-tick time modifiedAt + ReminderChip.
+- `Views/Library/DocumentGrid.swift` — DocumentTile dùng FileActionsMenu overlay.
+- `Views/Library/LibraryAddButton.swift` — eager-init ocrVM, `showsExplicitCancel: true` cho scan sheet, add `.toastHost(toaster)` inside scan sheet.
+- `Views/Library/LibraryView.swift` — thêm `onOpenEditor` param + `exportingRef` sheet.
+- `Views/OCR/ScanFlowView.swift` — bỏ `.success` stage, add `showsExplicitCancel` + `onOpenFile` params, restructure `emptyAddPages` inline, toast trigger.
+- `Views/PDFTools/ConvertFlowView.swift` — bỏ `didFinish` + `successState`, bỏ Cancel + dead dismiss env, add `onOpenFile`, toast trigger cho 4 direction, `.contentModificationDateOrNow` cho picked file.
+- `Views/PDFTools/MergeSplitCompressView.swift` — bỏ `didFinish` + MergeSuccessView + SplitSuccessView + dead dismiss, add `onOpenFile`, toast trigger, `.contentModificationDateOrNow`.
+- `Views/PDFTools/PDFToolsSharedUI.swift` — xoá `SuccessBadge`.
+- `Views/Root/RootView.swift` — add `editingRef` + `LibraryEditorSheet` wrapper, pass `onOpenEditor` to LibraryView, thêm toastPresenter env vào Preview.
+- `Views/Tabs/ToolsTabView.swift` — eager-init pdfToolsVM+ocrVM, add `editingRef` + `ToolsEditorSheet` wrapper + `openFile(_:)` helper thread `onOpenFile` xuống child views (Merge/Split/Convert/Scan).
+
+---
+
 ## [Unreleased] — 2026-09-03 (Session 10)
 
 Session ngắn — chủ đề duy nhất là **đóng lại các đợt review dở dang từ Session 9** (user "hold" cuối session trước) + fix 1 bug user tự phát hiện trên simulator (FAB "+" menu tràn ra ngoài cạnh phải màn hình). Trong quá trình fix bug cũng đồng thời upgrade tab bar pill lên **Liquid Glass** (iOS 26 native) qua tư vấn `/swiftui-expert-skill` để nhất quán màu tab bar giữa các tab. Sau đó chạy đủ 2 review skill theo `rule.md` #4 (`/code-review` + `/swiftui-expert-skill`) trên diff, bắt tổng 8 finding, fix hết.

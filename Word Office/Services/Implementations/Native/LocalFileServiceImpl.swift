@@ -6,7 +6,7 @@ import Foundation
 ///
 /// NSFileCoordinator wrapping arrives Sprint 0.3 when Files Provider extension
 /// is added (needed for cross-process safety).
-final class LocalFileServiceImpl: DocumentListing, DocumentCreating {
+final class LocalFileServiceImpl: DocumentListing, DocumentCreating, DocumentRenaming {
     let documentsURL: URL
     private let fileManager = FileManager.default
 
@@ -43,9 +43,24 @@ final class LocalFileServiceImpl: DocumentListing, DocumentCreating {
         try fileManager.removeItem(at: ref.url)
     }
 
+    /// `DocumentListing.rename` — legacy signature (`DocumentRef` + Void
+    /// return) kept for the Sprint 0.1 DocumentListView flow. New callers
+    /// use `DocumentRenaming.rename` (URL + URL return) below.
     func rename(_ ref: DocumentRef, to newName: String) async throws {
-        let destination = ref.url.deletingLastPathComponent().appendingPathComponent(newName)
-        try fileManager.moveItem(at: ref.url, to: destination)
+        _ = try await rename(ref.url, to: newName)
+    }
+
+    // MARK: - DocumentRenaming
+
+    /// Sibling move — same directory as `url`, new `newFilename`. Callers
+    /// re-attach the original extension before calling (see kebab-menu
+    /// stem-only rename in `LibraryView`). Collision surfaces as the raw
+    /// `FileManager` error — `LibraryViewModel.rename` translates it into
+    /// a user-facing toast.
+    func rename(_ url: URL, to newFilename: String) async throws -> URL {
+        let destination = url.deletingLastPathComponent().appendingPathComponent(newFilename)
+        try fileManager.moveItem(at: url, to: destination)
+        return destination
     }
 
     // MARK: - DocumentCreating

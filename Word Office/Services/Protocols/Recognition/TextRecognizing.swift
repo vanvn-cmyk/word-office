@@ -2,7 +2,7 @@ import CoreGraphics
 import Foundation
 
 /// Wraps Vision's `VNRecognizeTextRequest` — 100% on-device, no network call (§6.5),
-/// unlike the AI features in Phụ lục A/B which both require a cloud call.
+/// unlike the AI features in Appendix A/B which both require a cloud call.
 /// See Phase0-Implementation-Logic-v2.md §6.
 protocol TextRecognizing: Sendable {
     /// Recognize text in `image`, tagged with `pageIndex` for multi-page scans.

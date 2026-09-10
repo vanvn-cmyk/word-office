@@ -2,6 +2,12 @@ import SwiftUI
 
 /// Sprint 0.1 editor placeholder. Sprint 0.2 replaces with SDKEditorHostView
 /// (`UIViewControllerRepresentable` wrapping the Artifex editor) — see arch v2.1 §5.
+///
+/// Session 12 (2026-09-04) — PDFs get real preview via `ReadOnlyPDFPreviewPane`
+/// (PDFKit native), not the placeholder. Tool outputs (Merge/Split/Convert/
+/// Sign/Fill Form) are all PDFs, so the auto-open editor after a tool save
+/// showing "coming when SDK licensed" was misleading — the file WAS saved,
+/// just not viewable. PDFView side-steps the Artifex block entirely.
 struct EditorPlaceholderView: View {
     let container: DependencyContainer
     let ref: DocumentRef
@@ -9,6 +15,18 @@ struct EditorPlaceholderView: View {
     @State private var editorVM: EditorViewModel?
 
     var body: some View {
+        // Office formats (DOCX, XLSX, PPTX, DOC, XLS, PPT) → ONLYOFFICE offline editor
+        // Runs x2t.wasm + virtual document server in WKWebView — no server needed.
+        if ref.kind.isOfficeFormat {
+            OfficeEditorView(ref: ref)
+        } else {
+            nativeEditorView
+        }
+    }
+
+    // PDF + plain text formats use native rendering
+    @ViewBuilder
+    private var nativeEditorView: some View {
         Group {
             if let vm = editorVM {
                 content(for: vm)
@@ -24,11 +42,6 @@ struct EditorPlaceholderView: View {
         .navigationTitle(ref.name)
         .navigationBarTitleDisplayMode(.inline)
         .onDisappear {
-            // Best-effort: flush any pending edit, then stop the autosave
-            // scheduler's recurring hard-interval save for this document —
-            // see `EditorViewModel.stopAutosaving()`. Fires after the view is
-            // already gone (standard for cleanup on disappear), so this is
-            // fire-and-forget rather than something the view can await.
             guard let vm = editorVM else { return }
             Task {
                 await vm.flushIfNeeded()
@@ -67,6 +80,12 @@ struct EditorPlaceholderView: View {
                 .font(DSFont.body)
                 .padding(DSSpacing.md)
                 .background(Color.dsDocumentPage)
+
+            case .pdf:
+                // PDFKit native preview — read-only, zoomable, scrollable.
+                // Every tool in the Tools tab produces a PDF, so this is
+                // what the auto-navigate-after-save flow actually shows.
+                ReadOnlyPDFPreviewPane(url: ref.url)
 
             default:
                 EmptyStateView(

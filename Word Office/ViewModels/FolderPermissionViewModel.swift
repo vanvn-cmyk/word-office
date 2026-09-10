@@ -27,17 +27,33 @@ final class FolderPermissionViewModel {
     /// Called from RootView.task on first appear — moves store out of `.checking`.
     /// A saved bookmark that fails to resolve is `.revoked` (surfaces CTA),
     /// never silent empty (Library-Architecture.md §7 trap #4).
+    ///
+    /// Session 19 — added "auto-grant to app's Documents/" fallback. When
+    /// no user bookmark is saved BUT the first-launch sample-file seeder
+    /// has already run (`SampleFileSeeder.didSeedDefaultsKey == true`),
+    /// treat the app's own `Documents/` folder as the granted library
+    /// source. Skips the folder-permission onboarding entirely on first
+    /// launch; the user opens the app and finds Word Office
+    /// pre-populated with three tour files instead of a "Choose Folder"
+    /// gate. `LibraryViewModel.loadLibrary` picks up the same
+    /// no-bookmark + granted state and scans `documentsURL` directly.
     func checkExistingPermission() async {
-        guard let saved = bookmarkStore.loadSaved() else {
-            store.folderPermissionState = .notGranted
+        if let saved = bookmarkStore.loadSaved() {
+            do {
+                _ = try bookmarkStore.resolve(saved)
+                store.folderPermissionState = .granted
+            } catch {
+                store.folderPermissionState = .revoked
+            }
             return
         }
-        do {
-            _ = try bookmarkStore.resolve(saved)
+
+        if UserDefaults.standard.bool(forKey: SampleFileSeeder.didSeedDefaultsKey) {
             store.folderPermissionState = .granted
-        } catch {
-            store.folderPermissionState = .revoked
+            return
         }
+
+        store.folderPermissionState = .notGranted
     }
 
     /// User taps "Choose folder" (onboarding) or "Re-grant access" (reauth CTA).

@@ -33,6 +33,10 @@ extension DocumentKind {
         case type.identifier == "com.microsoft.excel.xls":                        return .xls
         case type.identifier == "com.microsoft.powerpoint.ppt":                   return .ppt
         case type.conforms(to: .pdf):                                             return .pdf
+        // `.zip` LAST so OOXML formats (docx/xlsx/pptx — all zip archives
+        // internally) hit their specific cases above first. Reaching this
+        // branch means the archive isn't a recognized office container.
+        case type.conforms(to: .zip):                                             return .zip
         default:                                                                  return nil
         }
     }

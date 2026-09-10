@@ -1,0 +1,401 @@
+<meta charset="utf-8">
+<title>Tools Home — Card Grid v1</title>
+<style>
+  :root {
+    --bg-page: #EEF0F4;
+    --bg-page-grid: #E4E7EE;
+    --ink-page: #171A21;
+    --ink-page-muted: #6A7180;
+    --sf: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+
+    --BrandPrimary: #3267E3;
+    --BrandPrimarySubtle: #F2F6FF;
+
+    --BackgroundPrimary: #FFFFFF;
+    --BackgroundSecondary: #F7F8FA;
+    --BackgroundElevated: #FFFFFF;
+
+    --TextPrimary: #17191D;
+    --TextSecondary: #5D636D;
+    --TextTertiary: #777E89;
+    --TextOnBrand: #FFFFFF;
+
+    --BorderSubtle: #ECEEF1;
+    --BorderDefault: #DADDE2;
+
+    --DocWord: #2F64D6;
+    --DocSpreadsheet: #18864B;
+    --DocPresentation: #D86724;
+    --DocPDF: #D63C35;
+    --DocImage: #8B5CF6;
+    --DocSign: #7C3AED;
+    --DocPrint: #0284C7;
+
+    --shadow-frame: 0 30px 60px -20px rgba(20, 24, 34, 0.35), 0 4px 12px rgba(20, 24, 34, 0.08);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg-page: #0B0C10; --bg-page-grid: #131620; --ink-page: #F2F3F5; --ink-page-muted: #8B919B;
+      --BrandPrimary: #5B8CFF; --BrandPrimarySubtle: #172544;
+      --BackgroundPrimary: #111317; --BackgroundSecondary: #181B20; --BackgroundElevated: #262A31;
+      --TextPrimary: #F5F6F7; --TextSecondary: #B8BDC5; --TextTertiary: #8B919B; --TextOnBrand: #081226;
+      --BorderSubtle: #292D33; --BorderDefault: #373B43;
+      --DocWord: #6392FF; --DocSpreadsheet: #4BC67A; --DocPresentation: #FFA463; --DocPDF: #FF706A;
+      --DocImage: #A78BFA; --DocSign: #A78BFA; --DocPrint: #38BDF8;
+      --shadow-frame: 0 30px 60px -20px rgba(0, 0, 0, 0.6), 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg-page: #0B0C10; --bg-page-grid: #131620; --ink-page: #F2F3F5; --ink-page-muted: #8B919B;
+    --BrandPrimary: #5B8CFF; --BrandPrimarySubtle: #172544;
+    --BackgroundPrimary: #111317; --BackgroundSecondary: #181B20; --BackgroundElevated: #262A31;
+    --TextPrimary: #F5F6F7; --TextSecondary: #B8BDC5; --TextTertiary: #8B919B; --TextOnBrand: #081226;
+    --BorderSubtle: #292D33; --BorderDefault: #373B43;
+    --DocWord: #6392FF; --DocSpreadsheet: #4BC67A; --DocPresentation: #FFA463; --DocPDF: #FF706A;
+    --DocImage: #A78BFA; --DocSign: #A78BFA; --DocPrint: #38BDF8;
+    --shadow-frame: 0 30px 60px -20px rgba(0, 0, 0, 0.6), 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg-page);
+    background-image:
+      linear-gradient(var(--bg-page-grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--bg-page-grid) 1px, transparent 1px);
+    background-size: 32px 32px;
+    color: var(--ink-page);
+    font-family: var(--sf);
+    padding: 40px 24px 80px;
+    min-height: 100vh;
+    margin: 0;
+  }
+
+  .page-head { max-width: 1100px; margin: 0 auto 36px; display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+  .page-head h1 { font: 700 28px/1.15 var(--sf); letter-spacing: -0.01em; margin: 0 0 6px; }
+  .page-head p { font: 400 14px/1.5 var(--sf); color: var(--ink-page-muted); margin: 0; max-width: 74ch; }
+  .eyebrow { font: 600 11px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--BrandPrimary); margin: 0 0 10px; }
+
+  .theme-toggle { display: inline-flex; align-items: center; gap: 6px; background: var(--BackgroundPrimary); border: 1px solid var(--BorderDefault); border-radius: 999px; padding: 4px; font: 600 12px/1 var(--mono); }
+  .theme-toggle button { border: none; background: transparent; color: var(--ink-page-muted); padding: 7px 12px; border-radius: 999px; cursor: pointer; font: inherit; }
+  .theme-toggle button.active { background: var(--BrandPrimary); color: var(--TextOnBrand); }
+
+  .frame-row { display: flex; gap: 32px; overflow-x: auto; padding: 6px 6px 20px; scroll-snap-type: x proximity; max-width: 1100px; margin: 0 auto; }
+  .frame-card { flex: 0 0 auto; scroll-snap-align: start; }
+  .frame-caption { font: 500 12px/1.45 var(--sf); color: var(--ink-page-muted); margin: 12px 2px 0; max-width: 300px; }
+  .frame-caption b { color: var(--ink-page); }
+
+  .note-card { max-width: 1100px; margin: 0 auto 40px; display: flex; gap: 12px; background: var(--BackgroundPrimary); border: 1px solid var(--BorderDefault); border-radius: 14px; padding: 16px 18px; }
+  .note-card svg { flex: 0 0 auto; color: var(--BrandPrimary); margin-top: 2px; }
+  .note-card p { margin: 0 0 4px; font: 400 13px/1.6 var(--sf); color: var(--ink-page); max-width: 850px; }
+  .note-card p:last-child { margin-bottom: 0; }
+  .note-card code { font-family: var(--mono); font-size: 12px; background: var(--bg-page-grid); padding: 1px 4px; border-radius: 4px; }
+
+  /* Phone shell */
+  .phone { width: 300px; height: 649px; border-radius: 46px; padding: 12px; background: linear-gradient(160deg, #3a3d45, #1c1e23); box-shadow: var(--shadow-frame); }
+  .phone-screen { width: 100%; height: 100%; border-radius: 36px; background: var(--BackgroundSecondary); overflow: hidden; position: relative; display: flex; flex-direction: column; }
+  .status-bar { height: 46px; flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 0 22px; font: 600 13px/1 var(--sf); color: var(--TextPrimary); position: relative; z-index: 3; }
+  .island { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); width: 90px; height: 24px; border-radius: 14px; background: #000; z-index: 4; }
+  .home-indicator { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: 120px; height: 4px; border-radius: 3px; background: var(--TextPrimary); opacity: 0.35; z-index: 6; }
+  .screen-body { flex: 1 1 auto; overflow: hidden; position: relative; display: flex; flex-direction: column; }
+
+  /* Tab bar mock */
+  .tabbar-mock { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); height: 56px; padding: 6px; background: rgba(255,255,255,0.75); backdrop-filter: blur(20px); border-radius: 32px; display: flex; align-items: center; gap: 8px; }
+  .tabbar-mock .tab { padding: 8px 12px; font: 600 10px/1 var(--sf); color: var(--TextTertiary); display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  .tabbar-mock .tab.active { color: var(--BrandPrimary); }
+  .tabbar-mock .fab { width: 44px; height: 44px; border-radius: 50%; background: var(--BrandPrimary); color: white; display: inline-flex; align-items: center; justify-content: center; font-size: 22px; margin-left: 8px; }
+
+  /* Nav large title */
+  .nav-large { padding: 6px 20px 8px; }
+  .nav-large h1 { font: 700 28px/1.15 var(--sf); margin: 0; letter-spacing: -0.01em; }
+
+  .scroll { flex: 1 1 auto; overflow-y: auto; padding-bottom: 100px; }
+
+  /* Section header */
+  .section-h {
+    display: flex; align-items: center; gap: 6px;
+    padding: 14px 20px 6px;
+    font: 600 14px/1.2 var(--sf); color: var(--TextPrimary);
+  }
+  .section-h svg { color: var(--BrandPrimary); }
+  .section-h .count { font: 500 11px/1 var(--mono); color: var(--TextTertiary); margin-left: 4px; }
+
+  /* Scan hero */
+  .hero {
+    margin: 6px 16px 0; padding: 14px;
+    background: linear-gradient(135deg, var(--BrandPrimarySubtle), var(--BackgroundElevated));
+    border: 1px solid var(--BorderSubtle); border-radius: 16px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .hero-icon { width: 50px; height: 50px; border-radius: 12px; background: linear-gradient(135deg, var(--BrandPrimary), color-mix(in srgb, var(--BrandPrimary) 70%, black)); color: white; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+  .hero-body { flex: 1 1 auto; min-width: 0; }
+  .hero-body .t { font: 600 14px/1.2 var(--sf); color: var(--TextPrimary); display: flex; align-items: center; gap: 6px; }
+  .hero-body .t::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: #218739; display: inline-block; }
+  .hero-body .s { font: 400 11px/1.35 var(--sf); color: var(--TextSecondary); margin-top: 2px; }
+  .hero-chev { color: var(--TextTertiary); flex: 0 0 auto; }
+
+  /* Card grid — 2 cols, 12pt spacing */
+  .grid {
+    padding: 0 16px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .tool-card {
+    background: var(--BackgroundElevated);
+    border: 1px solid var(--BorderSubtle);
+    border-radius: 14px;
+    padding: 14px 14px 16px;
+    min-height: 116px;
+    display: flex; flex-direction: column;
+    cursor: pointer;
+    transition: transform 0.1s, box-shadow 0.1s;
+    position: relative;
+  }
+  .tool-card:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(20,24,34,0.06); }
+  .tool-card .head { display: flex; align-items: center; gap: 6px; margin-bottom: auto; }
+  .tool-card .badge { width: 32px; height: 32px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+  .tool-card .badge svg { width: 16px; height: 16px; }
+  .tool-card .arrow-mini { font-size: 10px; color: var(--TextTertiary); font-weight: 700; }
+  .tool-card .t { font: 600 13px/1.25 var(--sf); color: var(--TextPrimary); margin-top: 10px; }
+  .tool-card .s { font: 400 11px/1.35 var(--sf); color: var(--TextTertiary); margin-top: 2px; }
+
+  /* Icon color variants */
+  .badge.word { background: color-mix(in srgb, var(--DocWord) 12%, transparent); color: var(--DocWord); }
+  .badge.spreadsheet { background: color-mix(in srgb, var(--DocSpreadsheet) 12%, transparent); color: var(--DocSpreadsheet); }
+  .badge.presentation { background: color-mix(in srgb, var(--DocPresentation) 12%, transparent); color: var(--DocPresentation); }
+  .badge.pdf { background: color-mix(in srgb, var(--DocPDF) 12%, transparent); color: var(--DocPDF); }
+  .badge.image { background: color-mix(in srgb, var(--DocImage) 12%, transparent); color: var(--DocImage); }
+  .badge.sign { background: color-mix(in srgb, var(--DocSign) 12%, transparent); color: var(--DocSign); }
+  .badge.print { background: color-mix(in srgb, var(--DocPrint) 12%, transparent); color: var(--DocPrint); }
+  .badge.brand { background: color-mix(in srgb, var(--BrandPrimary) 12%, transparent); color: var(--BrandPrimary); }
+</style>
+
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Session 12 · Tools Home Redesign</p>
+    <h1>Tools Home — 2-column Card Grid</h1>
+    <p>Unify Organize + Fill&nbsp;&amp; Sign + Convert into one card component pattern. 2 cards per row, 12pt spacing, ~116pt min-height. Convert keeps its direction indicator (2 badges + arrow). Others use single-icon variant. Scan hero stays as-is (attention grabber).</p>
+  </div>
+  <div class="theme-toggle" role="tablist" aria-label="Theme">
+    <button class="active" data-theme="light">Light</button>
+    <button data-theme="dark">Dark</button>
+    <button data-theme="system">System</button>
+  </div>
+</div>
+
+<div class="note-card">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>
+  <div>
+    <p><b>Card component:</b> shared across all 3 sections. Icon badge top-left (32×32, 8pt radius, 12% tint bg). Title (SF 13pt semibold), subtitle (SF 11pt tertiary). Padding 14pt. Card radius 14pt, subtle 1pt border. Min-height 116pt for consistent row heights.</p>
+    <p><b>Grid math:</b> 2 columns × 12pt gap. On a 393pt iPhone screen with 16pt side padding, each card = <code>(393 − 32 − 12) / 2 = 174.5pt</code> wide × ~116pt tall. Comfortable tap target, 4-word title fits on 2 lines max.</p>
+    <p><b>Convert direction indicator:</b> 2 mini-badges (28×28) + arrow between them at the top of Convert cards. Preserves the "from → to" info that's the KEY piece of data for choosing a Convert direction. Non-Convert cards just have 1 icon.</p>
+    <p><b>Section counts:</b> Convert 4 cards (2×2) · Organize 2 cards (1 row) · Fill &amp; Sign 3 cards (2 + 1). The Fill&nbsp;&amp;&nbsp;Sign 3-card odd count leaves one grid cell empty in the second row (Print sits left-aligned) — LazyVGrid natural behavior, doesn't look broken.</p>
+  </div>
+</div>
+
+<section class="frame-row">
+  <!-- Frame 1 — full Tools home -->
+  <div class="frame-card">
+    <div class="phone">
+      <div class="phone-screen">
+        <div class="island"></div>
+        <div class="status-bar"><span>9:41</span><span>●●●</span></div>
+        <div class="screen-body">
+          <div class="nav-large"><h1>Tools</h1></div>
+          <div class="scroll">
+            <!-- Scan hero -->
+            <div class="hero">
+              <div class="hero-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/></svg></div>
+              <div class="hero-body">
+                <div class="t">Scan &amp; OCR</div>
+                <div class="s">Camera, photos, or PDF → editable</div>
+              </div>
+              <svg class="hero-chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </div>
+
+            <!-- Convert section -->
+            <div class="section-h">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M17 3l4 4-4 4M3 7h18"/></svg>
+              Convert <span class="count">4</span>
+            </div>
+            <div class="grid">
+              <div class="tool-card">
+                <div class="head">
+                  <div class="badge word"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg></div>
+                  <span class="arrow-mini">→</span>
+                  <div class="badge pdf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg></div>
+                </div>
+                <div class="t">Office → PDF</div>
+                <div class="s">Word, Excel, PowerPoint</div>
+              </div>
+              <div class="tool-card">
+                <div class="head">
+                  <div class="badge pdf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg></div>
+                  <span class="arrow-mini">→</span>
+                  <div class="badge word"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg></div>
+                </div>
+                <div class="t">PDF → Word</div>
+                <div class="s">Text only, no formatting</div>
+              </div>
+              <div class="tool-card">
+                <div class="head">
+                  <div class="badge pdf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg></div>
+                  <span class="arrow-mini">→</span>
+                  <div class="badge image"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></div>
+                </div>
+                <div class="t">PDF → Image</div>
+                <div class="s">Export pages as PNG</div>
+              </div>
+              <div class="tool-card">
+                <div class="head">
+                  <div class="badge image"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></div>
+                  <span class="arrow-mini">→</span>
+                  <div class="badge pdf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg></div>
+                </div>
+                <div class="t">Image → PDF</div>
+                <div class="s">Combine photos</div>
+              </div>
+            </div>
+
+            <!-- Organize section -->
+            <div class="section-h">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/></svg>
+              Organize <span class="count">2</span>
+            </div>
+            <div class="grid">
+              <div class="tool-card">
+                <div class="head">
+                  <div class="badge pdf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg></div>
+                </div>
+                <div class="t">Merge PDFs</div>
+                <div class="s">Combine 2 or more files into one</div>
+              </div>
+              <div class="tool-card">
+                <div class="head">
+                  <div class="badge pdf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="12" y1="4" x2="12" y2="20"/></svg></div>
+                </div>
+                <div class="t">Split PDF</div>
+                <div class="s">Break one file into page ranges</div>
+              </div>
+            </div>
+
+            <!-- Fill & Sign section -->
+            <div class="section-h" style="color: var(--DocSign);">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z"/><line x1="16" y1="8" x2="2" y2="22"/></svg>
+              Fill &amp; Sign <span class="count" style="color: var(--TextTertiary);">3</span>
+            </div>
+            <div class="grid">
+              <div class="tool-card">
+                <div class="head">
+                  <div class="badge brand"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4z"/></svg></div>
+                </div>
+                <div class="t">Fill Form</div>
+                <div class="s">Type text on any PDF</div>
+              </div>
+              <div class="tool-card">
+                <div class="head">
+                  <div class="badge sign"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z"/><line x1="16" y1="8" x2="2" y2="22"/></svg></div>
+                </div>
+                <div class="t">Sign</div>
+                <div class="s">Draw signature, place on PDF</div>
+              </div>
+              <div class="tool-card">
+                <div class="head">
+                  <div class="badge print"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg></div>
+                </div>
+                <div class="t">Print</div>
+                <div class="s">Send to AirPrint printer</div>
+              </div>
+              <!-- Empty grid cell — 3rd item in 2-col grid leaves last cell blank naturally -->
+            </div>
+          </div>
+          <div class="tabbar-mock">
+            <div class="tab">📁<br>Library</div>
+            <div class="tab active">🔧<br>Tools</div>
+            <div class="tab">⚙️<br>Settings</div>
+            <div class="fab">+</div>
+          </div>
+        </div>
+        <div class="home-indicator"></div>
+      </div>
+    </div>
+    <div class="frame-caption"><b>Full Tools home.</b> Scan hero unchanged. 3 sections all use the same card grid. Convert 2×2, Organize 1×2, Fill&nbsp;&amp; Sign 2×2 with 1 empty cell.</div>
+  </div>
+
+  <!-- Frame 2 — card variants zoom -->
+  <div class="frame-card">
+    <div style="width: 340px; background: var(--BackgroundSecondary); border-radius: 20px; padding: 20px; box-shadow: var(--shadow-frame);">
+      <div style="font: 600 12px/1 var(--mono); color: var(--BrandPrimary); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 12px;">Card variants</div>
+
+      <div style="font: 500 11px/1 var(--mono); color: var(--TextSecondary); margin: 14px 0 8px;">Convert card (2 icons + arrow)</div>
+      <div class="grid" style="padding: 0;">
+        <div class="tool-card">
+          <div class="head">
+            <div class="badge word"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg></div>
+            <span class="arrow-mini">→</span>
+            <div class="badge pdf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg></div>
+          </div>
+          <div class="t">Office → PDF</div>
+          <div class="s">Word, Excel, PowerPoint</div>
+        </div>
+        <div class="tool-card">
+          <div class="head">
+            <div class="badge pdf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg></div>
+            <span class="arrow-mini">→</span>
+            <div class="badge image"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></div>
+          </div>
+          <div class="t">PDF → Image</div>
+          <div class="s">Export pages as PNG</div>
+        </div>
+      </div>
+
+      <div style="font: 500 11px/1 var(--mono); color: var(--TextSecondary); margin: 20px 0 8px;">Single-icon card (Organize / Fill&nbsp;&amp;&nbsp;Sign)</div>
+      <div class="grid" style="padding: 0;">
+        <div class="tool-card">
+          <div class="head">
+            <div class="badge pdf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg></div>
+          </div>
+          <div class="t">Merge PDFs</div>
+          <div class="s">Combine 2 or more files into one</div>
+        </div>
+        <div class="tool-card">
+          <div class="head">
+            <div class="badge sign"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z"/><line x1="16" y1="8" x2="2" y2="22"/></svg></div>
+          </div>
+          <div class="t">Sign</div>
+          <div class="s">Draw signature, place on PDF</div>
+        </div>
+      </div>
+
+      <div style="font: 400 11px/1.4 var(--sf); color: var(--TextSecondary); margin-top: 16px; padding: 10px; background: var(--BackgroundElevated); border-radius: 8px; border: 1px solid var(--BorderSubtle);">
+        <b>Spec:</b> card 14pt radius · 14pt padding · 1pt border (dsBorderSubtle) · min-height 116pt · icon badge 32pt / 8pt radius / 12% tint bg · title 13pt semibold · subtitle 11pt tertiary · grid 12pt gap · 2 columns
+      </div>
+    </div>
+    <div class="frame-caption"><b>Card variants zoom.</b> Two shapes: direction-indicator (Convert) and single-icon (others). Same padding, min-height, typography.</div>
+  </div>
+</section>
+
+<div class="note-card">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="M12 18v4"/><path d="m4.93 4.93 2.83 2.83"/><path d="m16.24 16.24 2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/></svg>
+  <div>
+    <p><b>Decisions baked in (override any):</b></p>
+    <p><b>1. Scan hero stays</b> — full-width card at top. Different visual weight from the grid below intentional (spec §6, primary attention grabber).</p>
+    <p><b>2. Section headers</b> — moved from small icon+text to slightly bigger (SF 14pt semibold) with count badge on right. Better visual hierarchy for scan.</p>
+    <p><b>3. Card color</b> — icon tint per document type (Word blue / PDF red / Image purple / Sign purple / Print blue), background neutral (dsBackgroundElevated). Card body doesn't compete with icon.</p>
+    <p><b>4. Convert direction indicator</b> — kept 2-badge + arrow at top of Convert cards. The direction IS the key info for that tool; hiding it would force users to read titles more carefully.</p>
+    <p><b>5. Fill &amp; Sign empty cell</b> — LazyVGrid natural behavior: 3 items in 2-col = 2 top, 1 bottom-left, empty bottom-right. Doesn't look broken. If bothers user, alternative: 3-column row for Fill&nbsp;&amp;&nbsp;Sign (cards narrower ~110pt wide) — call out.</p>
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll('.theme-toggle button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.theme-toggle button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const theme = btn.dataset.theme;
+      if (theme === 'system') document.documentElement.removeAttribute('data-theme');
+      else document.documentElement.setAttribute('data-theme', theme);
+    });
+  });
+</script>

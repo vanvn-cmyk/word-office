@@ -9,7 +9,20 @@ import UniformTypeIdentifiers
 struct ConvertFlowView: View {
     @Bindable var viewModel: PDFToolsViewModel
     let direction: ConvertDirection
-    @Environment(\.dismiss) private var dismiss
+    @Environment(DSToastPresenter.self) private var toaster
+    /// Fires after a successful conversion that produces a single output
+    /// file — parent uses it to open the result in the editor. Fires for
+    /// `officeToPDF`, `pdfToWord`, and `imageToPDF`; the `pdfToImage`
+    /// case always uses `onShowGallery` regardless of image count because
+    /// images have no in-app editor destination.
+    var initialSource: FilePickerSource? = nil
+    var onOpenFile: ((URL) -> Void)? = nil
+    /// Fires for `pdfToImage` with any output — parent presents
+    /// `ToolResultGalleryView` (thumbnail grid) so the user can review
+    /// each page, save-all, share-all, or open any single image via
+    /// QuickLook. Session 10 gap fix (2026-09-04) — the previous "toast
+    /// + stay at picker" behaviour orphaned the export result.
+    var onShowGallery: (([URL]) -> Void)? = nil
 
     // Office→PDF / PDF→Word
     @State private var singleFileURL: URL?
@@ -34,37 +47,98 @@ struct ConvertFlowView: View {
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var images: [SelectedImage] = []
 
+    @Environment(LibraryStore.self) private var store
+
     @State private var isPickerPresented = false
-    @State private var didFinish = false
+    @State private var isLibraryPickerPresented = false
+    @State private var isSourcePickerPresented = false
+    @State private var didAutoPresent = false
+
+    /// Identifies exactly what a successful convert ran on, so re-tapping
+    /// "Convert" on that same unchanged input can be disabled — the picker
+    /// deliberately stays populated after success (see `stateContent`'s
+    /// comment) so the user can re-convert with different options without
+    /// re-navigating, but tapping it again with NOTHING changed used to
+    /// silently write a second, distinctly-named output file.
+    private enum ConvertSnapshot: Equatable {
+        case singleFile(URL)
+        case pdfToImageRange(URL, ClosedRange<Int>?)
+        case images([UUID])
+    }
+    @State private var lastConvertedSnapshot: ConvertSnapshot?
+
+    private var currentSnapshot: ConvertSnapshot? {
+        switch direction {
+        case .officeToPDF, .pdfToWord:
+            guard let singleFileURL else { return nil }
+            return .singleFile(singleFileURL)
+        case .pdfToImage:
+            guard let singleFileURL else { return nil }
+            let range: ClosedRange<Int>? = pageRangeAll ? nil : (min(fromPage, toPage) - 1)...(max(fromPage, toPage) - 1)
+            return .pdfToImageRange(singleFileURL, range)
+        case .imageToPDF:
+            return images.isEmpty ? nil : .images(images.map(\.id))
+        }
+    }
 
     var body: some View {
         stateContent
-            .navigationTitle(direction.title)
-            .navigationBarTitleDisplayMode(.inline)
+            .prominentInlineTitle(direction.title)
             .toolbar { toolbarContent }
             .fileImporter(isPresented: $isPickerPresented, allowedContentTypes: fileImporterTypes, onCompletion: handleFilePicked)
+            .sheet(isPresented: $isLibraryPickerPresented) {
+                LibraryFilePicker(
+                    entries: store.entries,
+                    filter: libraryFilter,
+                    allowsMultipleSelection: false,
+                    emptyTitle: libraryEmptyTitle,
+                    emptyMessage: libraryEmptyMessage
+                ) { urls in
+                    guard let url = urls.first else { return }
+                    handleFilePicked(.success(url))
+                }
+            }
+            .fileSourcePicker(isPresented: $isSourcePickerPresented,
+                              onLibrary: { isLibraryPickerPresented = true },
+                              onBrowse: { isPickerPresented = true })
+            .task {
+                // `initialSource` is set by ToolsTabView before navigating here
+                // (user already chose Library or Browse from the Tools tab sheet).
+                // Open the appropriate picker directly — no intermediate sheet.
+                guard !didAutoPresent, let source = initialSource, singleFileURL == nil else { return }
+                didAutoPresent = true
+                switch source {
+                case .library: isLibraryPickerPresented = true
+                case .browse:  isPickerPresented = true
+                }
+            }
             .onChange(of: photoItems) { _, items in
                 Task { await loadImages(items) }
             }
             .overlay { processingOverlay }
             .errorAlert($viewModel.errorMessage)
+            // `viewModel` (`pdfToolsVM`) is shared across Merge/Split/
+            // Convert (all 4 directions)/Print — a failure left over from
+            // whichever the user visited last otherwise pops up here as if
+            // it were this direction's error.
+            .onAppear { viewModel.errorMessage = nil }
     }
 
     // Split out of `body` — the type-checker was timing out trying to solve the
     // branching content together with the long modifier chain in one expression.
+    // No `didFinish` branch: success is a toast (see `performConvert`) and the
+    // picker stays visible with the file still selected so the user can
+    // re-convert with different options or pick a new file without navigating
+    // back and re-tapping the tool card.
     @ViewBuilder
     private var stateContent: some View {
-        if didFinish {
-            successState
-        } else {
-            switch direction {
-            case .officeToPDF, .pdfToWord:
-                singleFileState
-            case .pdfToImage:
-                pdfToImageState
-            case .imageToPDF:
-                imageToPDFState
-            }
+        switch direction {
+        case .officeToPDF, .pdfToWord:
+            singleFileState
+        case .pdfToImage:
+            pdfToImageState
+        case .imageToPDF:
+            imageToPDFState
         }
     }
 
@@ -85,19 +159,17 @@ struct ConvertFlowView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        if !didFinish {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") { dismiss() }
-            }
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Convert") { Task { await performConvert() } }
-                    .fontWeight(.semibold)
-                    .disabled(!canConvert || viewModel.isProcessing)
-            }
-        } else {
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Done") { dismiss() }.fontWeight(.semibold)
-            }
+        // No explicit Cancel — this view is only reached via `NavigationLink`
+        // push from `ToolsTabView`, so the system back chevron already covers
+        // dismissal. Adding a leading Cancel next to it reads as a duplicate.
+        //
+        // No "Done" branch either — success shows a toast (see `performConvert`)
+        // and the Convert button stays available for re-convert; the user
+        // navigates back via the system chevron when finished.
+        ToolbarItem(placement: .confirmationAction) {
+            Button("Convert") { Task { await performConvert() } }
+                .fontWeight(.semibold)
+                .disabled(!canConvert || viewModel.isProcessing || currentSnapshot == lastConvertedSnapshot)
         }
     }
 
@@ -108,7 +180,7 @@ struct ConvertFlowView: View {
             if let singleFileURL {
                 List {
                     Section("1 file selected") {
-                        DSFileRow(ref: DocumentRef(name: singleFileURL.lastPathComponent, url: singleFileURL, modifiedAt: .now, kind: direction == .officeToPDF ? .docx : .pdf))
+                        DSFileRow(ref: DocumentRef(name: singleFileURL.lastPathComponent, url: singleFileURL, modifiedAt: singleFileURL.contentModificationDateOrNow, kind: direction == .officeToPDF ? .docx : .pdf))
                     }
                     if direction == .pdfToWord {
                         Section {
@@ -129,7 +201,7 @@ struct ConvertFlowView: View {
                     message: direction == .officeToPDF
                         ? "Pick a Word, Excel, or PowerPoint file to convert to PDF"
                         : "Pick a PDF file to convert to Word",
-                    action: ("Choose a file", { isPickerPresented = true })
+                    action: ("Choose a File", { isSourcePickerPresented = true })
                 )
             }
         }
@@ -142,7 +214,7 @@ struct ConvertFlowView: View {
             if let singleFileURL {
                 Form {
                     Section {
-                        DSFileRow(ref: DocumentRef(name: singleFileURL.lastPathComponent, url: singleFileURL, modifiedAt: .now, kind: .pdf))
+                        DSFileRow(ref: DocumentRef(name: singleFileURL.lastPathComponent, url: singleFileURL, modifiedAt: singleFileURL.contentModificationDateOrNow, kind: .pdf))
                     }
                     Section("Pages to export") {
                         Toggle("All pages", isOn: $pageRangeAll)
@@ -157,7 +229,7 @@ struct ConvertFlowView: View {
                     icon: "doc.badge.arrow.up",
                     title: "Choose a PDF",
                     message: "Pick a file, then choose which pages to export as images",
-                    action: ("Choose a file", { isPickerPresented = true })
+                    action: ("Choose a File", { isSourcePickerPresented = true })
                 )
             }
         }
@@ -250,41 +322,27 @@ struct ConvertFlowView: View {
 
     private func loadImages(_ items: [PhotosPickerItem]) async {
         var loaded: [SelectedImage] = []
+        // §7.3 "never silent data loss" — a picked photo can fail to load
+        // (unsupported format, or an iCloud original that fails to download)
+        // and `try?` alone would drop it with zero trace: `images` just
+        // ends up shorter than what the user picked, no error shown
+        // anywhere. Mirrors the Session 13 fix in `ScanFlowView.loadPhotos`
+        // that this loader was missed by.
+        var failedCount = 0
         for item in items {
             if let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) {
                 loaded.append(SelectedImage(image: image))
+            } else {
+                failedCount += 1
             }
         }
         images.append(contentsOf: loaded)
         photoItems = []
-    }
-
-    // MARK: - Success
-
-    private var successState: some View {
-        VStack(spacing: DSSpacing.lg) {
-            switch direction {
-            case .officeToPDF, .pdfToWord, .imageToPDF:
-                if let url = viewModel.lastConvertedURL {
-                    SuccessBadge(title: "Converted successfully", subtitle: "Saved to your Documents — it'll show up in Library too")
-                    DSFileRow(ref: DocumentRef(name: url.lastPathComponent, url: url, modifiedAt: .now, kind: direction == .pdfToWord ? .docx : .pdf))
-                        .padding(DSSpacing.sm)
-                        .background(Color.dsBackgroundElevated, in: RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous))
-                }
-            case .pdfToImage:
-                SuccessBadge(title: "Exported \(viewModel.lastImageExportURLs.count) images", subtitle: "Saved to your Documents")
-                List {
-                    ForEach(viewModel.lastImageExportURLs, id: \.self) { url in
-                        Text(url.lastPathComponent).font(DSFont.subheadline)
-                    }
-                }
-                .listStyle(.plain)
-            }
-            Spacer()
+        if failedCount > 0 {
+            viewModel.errorMessage = failedCount == 1
+                ? "1 photo couldn't be loaded and was skipped"
+                : "\(failedCount) photos couldn't be loaded and were skipped"
         }
-        .padding(.top, DSSpacing.md)
-        .padding(.horizontal, DSSpacing.md)
-        .navigationBarBackButtonHidden()
     }
 
     // MARK: - Actions
@@ -297,23 +355,44 @@ struct ConvertFlowView: View {
     }
 
     private func performConvert() async {
+        let snapshot = currentSnapshot
         switch direction {
         case .officeToPDF:
             guard let singleFileURL else { return }
             await viewModel.convertToPDF(singleFileURL)
-            if viewModel.lastConvertedURL != nil { didFinish = true }
+            if let url = viewModel.lastConvertedURL {
+                lastConvertedSnapshot = snapshot
+                toaster.show(.success, title: "Your document was saved to your Library", filename: url.lastPathComponent)
+                onOpenFile?(url)
+            }
         case .pdfToWord:
             guard let singleFileURL else { return }
             await viewModel.convertPDFToWord(singleFileURL)
-            if viewModel.lastConvertedURL != nil { didFinish = true }
+            if let url = viewModel.lastConvertedURL {
+                lastConvertedSnapshot = snapshot
+                toaster.show(.success, title: "Your document was saved to your Library", filename: url.lastPathComponent)
+                onOpenFile?(url)
+            }
         case .pdfToImage:
             guard let singleFileURL else { return }
             let range: ClosedRange<Int>? = pageRangeAll ? nil : (min(fromPage, toPage) - 1)...(max(fromPage, toPage) - 1)
             await viewModel.convertPDFToImages(singleFileURL, pageRange: range)
-            if !viewModel.lastImageExportURLs.isEmpty { didFinish = true }
+            let outputs = viewModel.lastImageExportURLs
+            guard !outputs.isEmpty else { return }
+            lastConvertedSnapshot = snapshot
+            let count = outputs.count
+            toaster.show(.success, title: "\(count) image\(count == 1 ? "" : "s") saved to your Library")
+            // Always gallery for images — no editor destination even for
+            // a single image, and the thumbnail grid is the natural way
+            // to review a page-by-page export.
+            onShowGallery?(outputs)
         case .imageToPDF:
             await viewModel.convertImagesToPDF(images.map(\.image))
-            if viewModel.lastConvertedURL != nil { didFinish = true }
+            if let url = viewModel.lastConvertedURL {
+                lastConvertedSnapshot = snapshot
+                toaster.show(.success, title: "Your document was saved to your Library", filename: url.lastPathComponent)
+                onOpenFile?(url)
+            }
         }
     }
 
@@ -322,6 +401,30 @@ struct ConvertFlowView: View {
         case .officeToPDF: AddFileMenu.supportedTypes.filter { $0 != .pdf }
         case .pdfToWord, .pdfToImage: [.pdf]
         case .imageToPDF: []
+        }
+    }
+
+    private var libraryFilter: (LibraryEntry) -> Bool {
+        switch direction {
+        case .officeToPDF: return { $0.document.kind != .pdf }
+        case .pdfToWord, .pdfToImage: return { $0.document.kind == .pdf }
+        case .imageToPDF: return { _ in false }
+        }
+    }
+
+    private var libraryEmptyTitle: String {
+        switch direction {
+        case .officeToPDF: return "No Office documents in Library"
+        case .pdfToWord, .pdfToImage: return "No PDFs in Library"
+        case .imageToPDF: return "No files in Library"
+        }
+    }
+
+    private var libraryEmptyMessage: String {
+        switch direction {
+        case .officeToPDF: return "Import Word, Excel, or PowerPoint files first."
+        case .pdfToWord, .pdfToImage: return "Import PDF files first, then come back."
+        case .imageToPDF: return "Import files first, then come back."
         }
     }
 }

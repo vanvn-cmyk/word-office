@@ -12,6 +12,16 @@ import Observation
 final class LibraryStore {
     var entries: [LibraryEntry] = []
     var folderPermissionState: FolderPermissionState = .checking
+    /// True once the user has completed a real folder-picker grant
+    /// (`FolderPermissionViewModel.requestPermission()` → a bookmark
+    /// saved). False while the library is still just the Session 19
+    /// auto-seeded sample files in the app's own sandbox `Documents/`
+    /// — i.e. no bookmark saved yet, `.granted` only via the
+    /// `SampleFileSeeder` fallback. Set by `LibraryViewModel.loadLibrary()`
+    /// (the one place that already computes this to decide which
+    /// folder to scan) — drives `LibraryView`'s "these are sample
+    /// files" banner.
+    var hasExternalFolder: Bool = false
 
     /// Set when the user taps "Skip for now" on the permission onboarding screen.
     /// In-memory only (never persisted) — a fresh cold launch re-shows onboarding

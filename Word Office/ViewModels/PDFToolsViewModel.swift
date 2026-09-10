@@ -67,6 +67,7 @@ final class PDFToolsViewModel {
             try await merger.merge(urls, into: destination)
             lastMergedURL = destination
             errorMessage = nil
+            NotificationCenter.default.post(name: .documentsDidChange, object: nil)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -82,6 +83,7 @@ final class PDFToolsViewModel {
         do {
             lastSplitURLs = try await splitter.split(url, ranges: ranges, into: documentsURL)
             errorMessage = nil
+            NotificationCenter.default.post(name: .documentsDidChange, object: nil)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -90,9 +92,19 @@ final class PDFToolsViewModel {
     /// Presents the AirPrint sheet. Failure surfaces via `errorMessage` like the
     /// other actions here — cancellation (`DocumentPrinting`'s success case) is not
     /// treated as an error.
+    ///
+    /// Same `isProcessing` reentrancy guard as every other method here — Print
+    /// shares this view model instance with Merge/Split/Convert (`ToolsTabView`
+    /// wires all 4 destinations to one `pdfToolsVM`), so without this guard a
+    /// concurrent Merge/Split/Convert `await` in flight could race this method's
+    /// `errorMessage` write against that other operation's own.
     func print(_ url: URL, jobName: String) async {
+        guard !isProcessing else { return }
+        isProcessing = true
+        defer { isProcessing = false }
         do {
             try await printer.print(url, jobName: jobName)
+            errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -113,6 +125,7 @@ final class PDFToolsViewModel {
             try await exporter.exportPDF(from: url, to: destination)
             lastConvertedURL = destination
             errorMessage = nil
+            NotificationCenter.default.post(name: .documentsDidChange, object: nil)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -145,6 +158,7 @@ final class PDFToolsViewModel {
             }.value
             lastConvertedURL = destination
             errorMessage = nil
+            NotificationCenter.default.post(name: .documentsDidChange, object: nil)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -159,6 +173,7 @@ final class PDFToolsViewModel {
         do {
             lastImageExportURLs = try await imageExporter.exportImages(from: url, pageRange: pageRange, into: documentsURL)
             errorMessage = nil
+            NotificationCenter.default.post(name: .documentsDidChange, object: nil)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -175,6 +190,7 @@ final class PDFToolsViewModel {
             try await pdfFromImages.exportPDF(from: images, to: destination)
             lastConvertedURL = destination
             errorMessage = nil
+            NotificationCenter.default.post(name: .documentsDidChange, object: nil)
         } catch {
             errorMessage = error.localizedDescription
         }

@@ -1,0 +1,536 @@
+<meta charset="utf-8">
+<title>Tool Result Gallery — Mockup v1</title>
+<style>
+  :root {
+    --bg-page: #EEF0F4;
+    --bg-page-grid: #E4E7EE;
+    --ink-page: #171A21;
+    --ink-page-muted: #6A7180;
+    --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+    --sf: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+
+    --BrandPrimary: #3267E3;
+    --BrandPrimaryPressed: #2858C9;
+    --BrandPrimarySubtle: #F2F6FF;
+
+    --BackgroundPrimary: #FFFFFF;
+    --BackgroundSecondary: #F7F8FA;
+    --BackgroundElevated: #FFFFFF;
+
+    --TextPrimary: #17191D;
+    --TextSecondary: #5D636D;
+    --TextTertiary: #777E89;
+    --TextOnBrand: #FFFFFF;
+
+    --BorderSubtle: #ECEEF1;
+    --BorderDefault: #DADDE2;
+
+    --StatusSuccess: #218739;
+    --StatusSuccessBackground: #EDF8EF;
+
+    --DocWord: #2F64D6;
+    --DocPDF: #D63C35;
+    --DocImage: #8B5CF6;
+
+    --shadow-frame: 0 30px 60px -20px rgba(20, 24, 34, 0.35), 0 4px 12px rgba(20, 24, 34, 0.08);
+    --shadow-toast: 0 12px 32px -8px rgba(20, 24, 34, 0.28), 0 2px 6px rgba(20, 24, 34, 0.08);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg-page: #0B0C10; --bg-page-grid: #131620; --ink-page: #F2F3F5; --ink-page-muted: #8B919B;
+      --BrandPrimary: #5B8CFF; --BrandPrimaryPressed: #719DFF; --BrandPrimarySubtle: #172544;
+      --BackgroundPrimary: #111317; --BackgroundSecondary: #181B20; --BackgroundElevated: #262A31;
+      --TextPrimary: #F5F6F7; --TextSecondary: #B8BDC5; --TextTertiary: #8B919B; --TextOnBrand: #081226;
+      --BorderSubtle: #292D33; --BorderDefault: #373B43;
+      --StatusSuccess: #4BD166; --StatusSuccessBackground: #14351C;
+      --DocWord: #6392FF; --DocPDF: #FF706A; --DocImage: #A78BFA;
+      --shadow-frame: 0 30px 60px -20px rgba(0, 0, 0, 0.6), 0 4px 12px rgba(0, 0, 0, 0.3);
+      --shadow-toast: 0 12px 32px -8px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.25);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg-page: #0B0C10; --bg-page-grid: #131620; --ink-page: #F2F3F5; --ink-page-muted: #8B919B;
+    --BrandPrimary: #5B8CFF; --BrandPrimaryPressed: #719DFF; --BrandPrimarySubtle: #172544;
+    --BackgroundPrimary: #111317; --BackgroundSecondary: #181B20; --BackgroundElevated: #262A31;
+    --TextPrimary: #F5F6F7; --TextSecondary: #B8BDC5; --TextTertiary: #8B919B; --TextOnBrand: #081226;
+    --BorderSubtle: #292D33; --BorderDefault: #373B43;
+    --StatusSuccess: #4BD166; --StatusSuccessBackground: #14351C;
+    --DocWord: #6392FF; --DocPDF: #FF706A; --DocImage: #A78BFA;
+    --shadow-frame: 0 30px 60px -20px rgba(0, 0, 0, 0.6), 0 4px 12px rgba(0, 0, 0, 0.3);
+    --shadow-toast: 0 12px 32px -8px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.25);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg-page);
+    background-image:
+      linear-gradient(var(--bg-page-grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--bg-page-grid) 1px, transparent 1px);
+    background-size: 32px 32px;
+    color: var(--ink-page);
+    font-family: var(--sf);
+    padding: 40px 24px 80px;
+    min-height: 100vh;
+    margin: 0;
+  }
+
+  .page-head { max-width: 1200px; margin: 0 auto 36px; display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+  .page-head h1 { font: 700 28px/1.15 var(--sf); letter-spacing: -0.01em; margin: 0 0 6px; }
+  .page-head p { font: 400 14px/1.5 var(--sf); color: var(--ink-page-muted); margin: 0; max-width: 74ch; }
+  .eyebrow { font: 600 11px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--BrandPrimary); margin: 0 0 10px; }
+
+  .theme-toggle { display: inline-flex; align-items: center; gap: 6px; background: var(--BackgroundPrimary); border: 1px solid var(--BorderDefault); border-radius: 999px; padding: 4px; font: 600 12px/1 var(--mono); }
+  .theme-toggle button { border: none; background: transparent; color: var(--ink-page-muted); padding: 7px 12px; border-radius: 999px; cursor: pointer; font: inherit; }
+  .theme-toggle button.active { background: var(--BrandPrimary); color: var(--TextOnBrand); }
+
+  .lane { max-width: 1200px; margin: 0 auto 56px; }
+  .lane-label { display: flex; align-items: baseline; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
+  .lane-label .n { font: 600 12px/1 var(--mono); color: var(--BrandPrimary); }
+  .lane-label h2 { font: 600 15px/1 var(--sf); margin: 0; }
+  .lane-label .src { font: 400 11px/1 var(--mono); color: var(--ink-page-muted); }
+
+  .frame-row { display: flex; gap: 28px; overflow-x: auto; padding: 6px 6px 20px; scroll-snap-type: x proximity; }
+  .frame-card { flex: 0 0 auto; scroll-snap-align: start; max-width: 300px; }
+  .frame-caption { font: 500 12px/1.45 var(--sf); color: var(--ink-page-muted); margin: 12px 2px 0; }
+  .frame-caption b { color: var(--ink-page); }
+
+  .note-card { max-width: 1200px; margin: 0 auto 40px; display: flex; gap: 12px; background: var(--BackgroundPrimary); border: 1px solid var(--BorderDefault); border-radius: 14px; padding: 16px 18px; }
+  .note-card svg { flex: 0 0 auto; color: var(--BrandPrimary); margin-top: 2px; }
+  .note-card p { margin: 0 0 4px; font: 400 13px/1.6 var(--sf); color: var(--ink-page); max-width: 900px; }
+  .note-card p:last-child { margin-bottom: 0; }
+  .note-card code { font-family: var(--mono); font-size: 12px; background: var(--bg-page-grid); padding: 1px 4px; border-radius: 4px; }
+
+  /* ---------------- Phone shell ---------------- */
+  .phone { width: 300px; height: 649px; border-radius: 46px; padding: 12px; background: linear-gradient(160deg, #3a3d45, #1c1e23); box-shadow: var(--shadow-frame); }
+  .phone-screen { width: 100%; height: 100%; border-radius: 36px; background: var(--BackgroundSecondary); overflow: hidden; position: relative; display: flex; flex-direction: column; }
+  .status-bar { height: 46px; flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 0 22px; font: 600 13px/1 var(--sf); color: var(--TextPrimary); position: relative; z-index: 3; }
+  .island { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); width: 90px; height: 24px; border-radius: 14px; background: #000; z-index: 4; }
+  .home-indicator { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: 120px; height: 4px; border-radius: 3px; background: var(--TextPrimary); opacity: 0.35; z-index: 6; }
+  .screen-body { flex: 1 1 auto; overflow: hidden; position: relative; display: flex; flex-direction: column; }
+
+  /* ---------------- Toast (top overlay) ---------------- */
+  .toast {
+    position: absolute; top: 52px; left: 50%; transform: translateX(-50%);
+    display: inline-flex; align-items: center; gap: 10px;
+    background: var(--BackgroundElevated); border: 1px solid var(--BorderDefault);
+    border-radius: 999px; padding: 10px 16px 10px 12px;
+    box-shadow: var(--shadow-toast);
+    z-index: 10;
+    max-width: calc(100% - 32px);
+  }
+  .toast .dot { width: 20px; height: 20px; border-radius: 50%; background: var(--StatusSuccessBackground); color: var(--StatusSuccess); display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+  .toast .txt { font: 600 12px/1.2 var(--sf); color: var(--TextPrimary); }
+  .toast .txt .sub { display: block; font: 500 10.5px/1.2 var(--sf); color: var(--TextSecondary); margin-top: 2px; }
+
+  /* ---------------- Sheet (result gallery presentation) ---------------- */
+  .sheet-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.35); z-index: 5; }
+  .sheet {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    background: var(--BackgroundSecondary);
+    border-top-left-radius: 16px; border-top-right-radius: 16px;
+    z-index: 6;
+    display: flex; flex-direction: column;
+    height: calc(100% - 60px);
+    overflow: hidden;
+  }
+  .sheet-grabber { width: 36px; height: 5px; border-radius: 3px; background: var(--BorderDefault); margin: 6px auto 0; flex: 0 0 auto; }
+
+  .nav {
+    height: 44px; flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 0 12px;
+    background: var(--BackgroundSecondary);
+    border-bottom: 1px solid var(--BorderSubtle);
+  }
+  .nav-title { font: 600 15px/1.2 var(--sf); color: var(--TextPrimary); text-align: center; }
+  .nav-btn { font: 500 15px/1.2 var(--sf); color: var(--BrandPrimary); background: none; border: none; padding: 6px 8px; cursor: pointer; }
+  .nav-btn.strong { font-weight: 600; }
+
+  .large-title { padding: 8px 20px 12px; }
+  .large-title h1 { font: 700 24px/1.2 var(--sf); margin: 0 0 2px; letter-spacing: -0.01em; }
+  .large-title p { font: 400 13px/1.4 var(--sf); color: var(--TextSecondary); margin: 0; }
+
+  .scroll { flex: 1 1 auto; overflow-y: auto; }
+
+  /* Image grid */
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 8px 16px 16px; }
+  .tile {
+    background: var(--BackgroundElevated); border: 1px solid var(--BorderSubtle); border-radius: 12px;
+    overflow: hidden; display: flex; flex-direction: column;
+  }
+  .tile .thumb {
+    aspect-ratio: 3 / 4;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.05)),
+      repeating-linear-gradient(0deg, var(--BackgroundSecondary) 0px, var(--BackgroundSecondary) 6px, var(--BackgroundPrimary) 6px, var(--BackgroundPrimary) 12px);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--TextTertiary);
+    font: 500 10px/1 var(--mono);
+    position: relative;
+  }
+  .tile .thumb::after {
+    content: ''; position: absolute; inset: 12px; border: 1px dashed var(--BorderDefault); border-radius: 6px;
+  }
+  .tile .thumb .page-num {
+    position: relative; z-index: 1;
+    background: var(--BackgroundElevated); border: 1px solid var(--BorderSubtle); border-radius: 999px;
+    padding: 3px 8px; font: 600 9px/1 var(--mono); color: var(--TextSecondary);
+  }
+  .tile .meta { padding: 6px 8px 8px; display: flex; flex-direction: column; gap: 1px; }
+  .tile .meta .name { font: 500 11px/1.3 var(--sf); color: var(--TextPrimary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tile .meta .size { font: 400 10px/1.3 var(--sf); color: var(--TextTertiary); }
+
+  /* File list */
+  .file-list { padding: 4px 12px 16px; display: flex; flex-direction: column; gap: 6px; }
+  .file-row {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--BackgroundElevated); border: 1px solid var(--BorderSubtle); border-radius: 12px;
+    padding: 10px 12px;
+  }
+  .file-icon {
+    width: 36px; height: 36px; border-radius: 8px; flex: 0 0 auto;
+    display: inline-flex; align-items: center; justify-content: center;
+    font: 700 10px/1 var(--sf); color: var(--TextOnBrand);
+  }
+  .file-icon.pdf { background: var(--DocPDF); }
+  .file-icon.doc { background: var(--DocWord); }
+  .file-icon.img { background: var(--DocImage); }
+  .file-meta { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .file-meta .name { font: 500 13px/1.25 var(--sf); color: var(--TextPrimary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-meta .sub { font: 400 11px/1.25 var(--sf); color: var(--TextTertiary); }
+  .file-kebab {
+    width: 32px; height: 32px; border-radius: 8px; flex: 0 0 auto;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--TextSecondary); background: transparent; border: none; cursor: pointer;
+  }
+  .chevron { color: var(--TextTertiary); }
+
+  /* Bottom action bar (glass) */
+  .action-bar {
+    flex: 0 0 auto;
+    padding: 10px 16px 20px;
+    background: var(--BackgroundSecondary);
+    border-top: 1px solid var(--BorderSubtle);
+    display: flex; gap: 10px;
+  }
+  .btn {
+    flex: 1 1 auto; height: 44px; border-radius: 12px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    font: 600 14px/1 var(--sf); border: none; cursor: pointer;
+  }
+  .btn.primary { background: var(--BrandPrimary); color: var(--TextOnBrand); }
+  .btn.secondary { background: var(--BackgroundElevated); color: var(--TextPrimary); border: 1px solid var(--BorderDefault); }
+  .btn svg { flex: 0 0 auto; }
+
+  /* Section header inline */
+  .section-h {
+    padding: 12px 20px 6px;
+    font: 500 12px/1.2 var(--sf); text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--TextTertiary);
+  }
+</style>
+
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Session 10 · UX Gap fix</p>
+    <h1>Tool Result Gallery — v1</h1>
+    <p>Every tool operation ends at a destination — no more "toast + stay at picker". Single-file outputs auto-navigate to the editor (unchanged). Multi-file outputs (Split N&gt;1, PDF→Image, Scan both formats) present a bottom sheet gallery for review, batch save, and per-file open.</p>
+  </div>
+  <div class="theme-toggle" role="tablist" aria-label="Theme">
+    <button class="active" data-theme="light">Light</button>
+    <button data-theme="dark">Dark</button>
+    <button data-theme="system">System</button>
+  </div>
+</div>
+
+<div class="note-card">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>
+  <div>
+    <p><b>Rule of destination:</b> after processing, ALL tools show a toast at top, then navigate. Single-output → in-app editor (Merge, Convert 3 directions, Scan single, Split N=1). Multi-output → this gallery sheet (Split N&gt;1, PDF→Image, Scan PDF+DOCX).</p>
+    <p><b>Component:</b> <code>ToolResultGalleryView</code> — bottom sheet at <code>.large</code> detent. Grid layout for images (2 cols, aspect 3:4). List rows for documents (icon · name · size). Bottom action bar: <code>Save All to Files</code> + <code>Share All</code>. Tap a tile/row → open (editor for PDF/DOCX, QuickLook for images).</p>
+  </div>
+</div>
+
+<!-- ============ Lane 1 — PDF → Image ============ -->
+<section class="lane">
+  <div class="lane-label">
+    <span class="n">01</span>
+    <h2>PDF → Image (N pages exported)</h2>
+    <span class="src">ConvertFlowView · direction: .pdfToImage · viewModel.lastImageExportURLs.count &gt; 0</span>
+  </div>
+  <div class="frame-row">
+
+    <!-- Frame 1.1 — right after tap Convert, toast + sheet slides up -->
+    <div class="frame-card">
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="island"></div>
+          <div class="status-bar"><span>9:41</span><span>●●●</span></div>
+          <div class="screen-body">
+            <!-- Toast at top -->
+            <div class="toast">
+              <div class="dot">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              </div>
+              <div class="txt">Exported 6 images</div>
+            </div>
+            <div class="sheet-backdrop"></div>
+            <div class="sheet">
+              <div class="sheet-grabber"></div>
+              <div class="nav">
+                <button class="nav-btn">Done</button>
+                <div class="nav-title">6 images</div>
+                <button class="nav-btn strong">Select</button>
+              </div>
+              <div class="large-title">
+                <h1>Results</h1>
+                <p>From report-Q3.pdf · PNG, 2x scale</p>
+              </div>
+              <div class="scroll">
+                <div class="grid">
+                  <div class="tile"><div class="thumb"><span class="page-num">PAGE 1</span></div><div class="meta"><div class="name">report-Q3-p1.png</div><div class="size">248 KB</div></div></div>
+                  <div class="tile"><div class="thumb"><span class="page-num">PAGE 2</span></div><div class="meta"><div class="name">report-Q3-p2.png</div><div class="size">312 KB</div></div></div>
+                  <div class="tile"><div class="thumb"><span class="page-num">PAGE 3</span></div><div class="meta"><div class="name">report-Q3-p3.png</div><div class="size">198 KB</div></div></div>
+                  <div class="tile"><div class="thumb"><span class="page-num">PAGE 4</span></div><div class="meta"><div class="name">report-Q3-p4.png</div><div class="size">277 KB</div></div></div>
+                  <div class="tile"><div class="thumb"><span class="page-num">PAGE 5</span></div><div class="meta"><div class="name">report-Q3-p5.png</div><div class="size">301 KB</div></div></div>
+                  <div class="tile"><div class="thumb"><span class="page-num">PAGE 6</span></div><div class="meta"><div class="name">report-Q3-p6.png</div><div class="size">254 KB</div></div></div>
+                </div>
+              </div>
+              <div class="action-bar">
+                <button class="btn secondary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                  Save All
+                </button>
+                <button class="btn primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+                  Share All
+                </button>
+              </div>
+            </div>
+            <div class="home-indicator"></div>
+          </div>
+        </div>
+      </div>
+      <div class="frame-caption"><b>1.1 · Sheet appears with toast.</b> Grid 2 cols · aspect 3:4. Tap tile → QuickLook preview. Bottom bar: Save All to Files (secondary) · Share All (primary).</div>
+    </div>
+
+    <!-- Frame 1.2 — user tapped Share All -->
+    <div class="frame-card">
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="island"></div>
+          <div class="status-bar"><span>9:41</span><span>●●●</span></div>
+          <div class="screen-body">
+            <div class="sheet-backdrop"></div>
+            <div class="sheet">
+              <div class="sheet-grabber"></div>
+              <div class="nav">
+                <button class="nav-btn">Done</button>
+                <div class="nav-title">6 images</div>
+                <button class="nav-btn strong">Select</button>
+              </div>
+              <div class="large-title">
+                <h1>Results</h1>
+                <p>From report-Q3.pdf · PNG, 2x scale</p>
+              </div>
+              <div class="scroll" style="opacity:0.5;">
+                <div class="grid">
+                  <div class="tile"><div class="thumb"><span class="page-num">PAGE 1</span></div><div class="meta"><div class="name">report-Q3-p1.png</div><div class="size">248 KB</div></div></div>
+                  <div class="tile"><div class="thumb"><span class="page-num">PAGE 2</span></div><div class="meta"><div class="name">report-Q3-p2.png</div><div class="size">312 KB</div></div></div>
+                </div>
+              </div>
+              <!-- Share sheet mockup overlay -->
+              <div style="position:absolute; left:8px; right:8px; bottom:70px; background: var(--BackgroundElevated); border: 1px solid var(--BorderDefault); border-radius: 16px; padding: 14px; box-shadow: var(--shadow-toast); z-index: 20;">
+                <div style="font: 700 15px/1 var(--sf); color: var(--TextPrimary);">6 images selected</div>
+                <div style="font: 400 12px/1.4 var(--sf); color: var(--TextSecondary); margin-top: 4px;">PNG · 1.5 MB total</div>
+                <div style="display:flex; gap:10px; margin-top: 14px;">
+                  <div style="flex:1; height:56px; border-radius:12px; background: var(--BackgroundSecondary); display:flex; align-items:center; justify-content:center; font: 500 11px/1 var(--sf); color: var(--TextSecondary);">AirDrop</div>
+                  <div style="flex:1; height:56px; border-radius:12px; background: var(--BackgroundSecondary); display:flex; align-items:center; justify-content:center; font: 500 11px/1 var(--sf); color: var(--TextSecondary);">Messages</div>
+                  <div style="flex:1; height:56px; border-radius:12px; background: var(--BackgroundSecondary); display:flex; align-items:center; justify-content:center; font: 500 11px/1 var(--sf); color: var(--TextSecondary);">Mail</div>
+                </div>
+              </div>
+              <div class="action-bar">
+                <button class="btn secondary">Save All</button>
+                <button class="btn primary">Share All</button>
+              </div>
+            </div>
+            <div class="home-indicator"></div>
+          </div>
+        </div>
+      </div>
+      <div class="frame-caption"><b>1.2 · Share All tapped.</b> Native <code>ShareLink(items:)</code> — no per-item selection needed. User can pick recipient in 1 tap.</div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============ Lane 2 — Split PDF ============ -->
+<section class="lane">
+  <div class="lane-label">
+    <span class="n">02</span>
+    <h2>Split PDF (N ranges, N&gt;1)</h2>
+    <span class="src">MergeSplitCompressView / SplitView · viewModel.lastSplitURLs.count &gt; 1</span>
+  </div>
+  <div class="frame-row">
+
+    <div class="frame-card">
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="island"></div>
+          <div class="status-bar"><span>9:41</span><span>●●●</span></div>
+          <div class="screen-body">
+            <div class="toast">
+              <div class="dot">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              </div>
+              <div class="txt">Split into 3 files</div>
+            </div>
+            <div class="sheet-backdrop"></div>
+            <div class="sheet">
+              <div class="sheet-grabber"></div>
+              <div class="nav">
+                <button class="nav-btn">Done</button>
+                <div class="nav-title">3 files</div>
+                <span style="width:56px;"></span>
+              </div>
+              <div class="large-title">
+                <h1>Results</h1>
+                <p>From contract-final.pdf · 3 ranges</p>
+              </div>
+              <div class="scroll">
+                <div class="file-list">
+                  <div class="file-row">
+                    <div class="file-icon pdf">PDF</div>
+                    <div class="file-meta">
+                      <div class="name">contract-final (1-5).pdf</div>
+                      <div class="sub">5 pages · 412 KB</div>
+                    </div>
+                    <svg class="chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+                  </div>
+                  <div class="file-row">
+                    <div class="file-icon pdf">PDF</div>
+                    <div class="file-meta">
+                      <div class="name">contract-final (6-12).pdf</div>
+                      <div class="sub">7 pages · 588 KB</div>
+                    </div>
+                    <svg class="chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+                  </div>
+                  <div class="file-row">
+                    <div class="file-icon pdf">PDF</div>
+                    <div class="file-meta">
+                      <div class="name">contract-final (13-18).pdf</div>
+                      <div class="sub">6 pages · 501 KB</div>
+                    </div>
+                    <svg class="chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+                  </div>
+                </div>
+              </div>
+              <div class="action-bar">
+                <button class="btn secondary">Save All</button>
+                <button class="btn primary">Share All</button>
+              </div>
+            </div>
+            <div class="home-indicator"></div>
+          </div>
+        </div>
+      </div>
+      <div class="frame-caption"><b>2.1 · List rows for PDFs.</b> Icon · filename · page count + size. Tap row → editor. Same action bar as image grid.</div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============ Lane 3 — Scan both formats ============ -->
+<section class="lane">
+  <div class="lane-label">
+    <span class="n">03</span>
+    <h2>Scan &amp; OCR — export both formats (PDF + DOCX)</h2>
+    <span class="src">ScanFlowView · exportSearchablePDF && exportEditableWord · urls.count == 2</span>
+  </div>
+  <div class="frame-row">
+
+    <div class="frame-card">
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="island"></div>
+          <div class="status-bar"><span>9:41</span><span>●●●</span></div>
+          <div class="screen-body">
+            <div class="toast">
+              <div class="dot">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              </div>
+              <div class="txt">Saved 2 files</div>
+            </div>
+            <div class="sheet-backdrop"></div>
+            <div class="sheet">
+              <div class="sheet-grabber"></div>
+              <div class="nav">
+                <button class="nav-btn">Done</button>
+                <div class="nav-title">2 files</div>
+                <span style="width:56px;"></span>
+              </div>
+              <div class="large-title">
+                <h1>Results</h1>
+                <p>Scanned Sep 4 · 8 pages recognized</p>
+              </div>
+              <div class="scroll">
+                <div class="file-list">
+                  <div class="file-row">
+                    <div class="file-icon doc">DOC</div>
+                    <div class="file-meta">
+                      <div class="name">Scan 2026-09-04.docx</div>
+                      <div class="sub">Editable · 34 KB</div>
+                    </div>
+                    <svg class="chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+                  </div>
+                  <div class="file-row">
+                    <div class="file-icon pdf">PDF</div>
+                    <div class="file-meta">
+                      <div class="name">Scan 2026-09-04.pdf</div>
+                      <div class="sub">Searchable · 1.2 MB</div>
+                    </div>
+                    <svg class="chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+                  </div>
+                </div>
+                <div class="section-h">What's the difference?</div>
+                <div style="padding: 0 20px 16px; font: 400 12px/1.5 var(--sf); color: var(--TextSecondary);">
+                  Editable Word opens in the in-app editor for revision. Searchable PDF preserves the original scan appearance but lets you copy text.
+                </div>
+              </div>
+              <div class="action-bar">
+                <button class="btn secondary">Save All</button>
+                <button class="btn primary">Share All</button>
+              </div>
+            </div>
+            <div class="home-indicator"></div>
+          </div>
+        </div>
+      </div>
+      <div class="frame-caption"><b>3.1 · Mixed types (DOCX + PDF).</b> DOCX first (editable — user's likely primary intent). Inline explainer for format difference. Tap row → correct editor.</div>
+    </div>
+
+  </div>
+</section>
+
+<div class="note-card">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="M12 18v4"/><path d="m4.93 4.93 2.83 2.83"/><path d="m16.24 16.24 2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="m4.93 19.07 2.83-2.83"/><path d="m16.24 7.76 2.83-2.83"/></svg>
+  <div>
+    <p><b>Decisions to confirm:</b></p>
+    <p>1. <b>Sheet vs push?</b> Bottom sheet at <code>.large</code> detent — dismissable via Done or swipe-down. Alternative: NavigationLink push. Sheet feels more "result inspection", push feels more "next step". <b>Recommend sheet.</b></p>
+    <p>2. <b>Grid vs list?</b> Images = grid (visual matters). PDFs/DOCX = list rows (metadata matters). Split shown as list even though homogeneous — page count + size differentiate them.</p>
+    <p>3. <b>Select mode?</b> "Select" nav button (top-right) for future per-item batch actions (delete some, share some). <b>V1 can skip Select</b>, just Save All + Share All. Add later if user asks.</p>
+    <p>4. <b>Where do files live on disk?</b> Currently all outputs land in <code>FileManager.default.temporaryDirectory</code> or app <code>Documents/</code>. Verify: if Documents/, Library scanner picks them up automatically after gallery dismisses. If temp, "Save All" is the ONLY way user keeps them.</p>
+    <p>5. <b>Empty case?</b> Gallery only appears when count &gt; 0 (guarded already). Count == 1 special-case: skip gallery, auto-navigate directly (matches Merge/Convert single).</p>
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll('.theme-toggle button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.theme-toggle button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const theme = btn.dataset.theme;
+      if (theme === 'system') document.documentElement.removeAttribute('data-theme');
+      else document.documentElement.setAttribute('data-theme', theme);
+    });
+  });
+</script>

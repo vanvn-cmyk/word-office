@@ -43,6 +43,24 @@ final class DependencyContainer {
     let imagePDFExporter: UIGraphicsImagePDFExporter
     let searchablePDFRenderer: CGSearchablePDFRenderer
 
+    // MARK: - Fill & Sign (Session 12 — spec §9.1 Sign Tier 1 + new Fill Form)
+
+    let signatureStamper: PDFKitSignatureStamper
+    let formFiller: PDFKitFormFiller
+
+    // MARK: - Rename + Zip (Session 18 — kebab menu file operations)
+
+    let documentZipper: NSFileCoordinatorZipper
+
+    // MARK: - Preview commit (Session 19 — safety plumbing extracted from
+    // SignatureViewModel / FillFormViewModel per code-review finding #6)
+
+    let previewCommitter: LocalPreviewCommitter
+
+    // MARK: - ONLYOFFICE editor (web-based, Sprint 0.2 — replaces Artifex mock for Office formats)
+
+    let onlyofficeAPIClient: ONLYOFFICEAPIClient
+
     init() {
         let docsURL = URL.documentsDirectory
         self.localFileService = LocalFileServiceImpl(documentsURL: docsURL)
@@ -82,6 +100,23 @@ final class DependencyContainer {
         self.pdfImageExporter = PDFKitImageExporter()
         self.imagePDFExporter = UIGraphicsImagePDFExporter()
         self.searchablePDFRenderer = CGSearchablePDFRenderer()
+
+        self.signatureStamper = PDFKitSignatureStamper()
+        self.formFiller = PDFKitFormFiller()
+
+        self.documentZipper = NSFileCoordinatorZipper()
+        self.previewCommitter = LocalPreviewCommitter()
+        self.onlyofficeAPIClient = ONLYOFFICEAPIClient()
+
+        // Session 19 — first-launch seed of 3 "Get Started" tour files
+        // (Word / Excel / PowerPoint) into the app's sandbox
+        // `Documents/`. Runs at most once per install; the seeder's
+        // UserDefaults guard makes repeat launches a fast no-op. Fires
+        // synchronously here (three tiny Office file copies, each
+        // <50 KB) so the Library's first scan already sees them —
+        // saves a "empty state → then files appear" flicker on first
+        // launch.
+        SampleFileSeeder().seedIfNeeded(to: docsURL)
     }
 
     // MARK: - Document session (SDK-backed)
@@ -159,6 +194,22 @@ final class DependencyContainer {
         )
     }
 
+    func makeSignatureViewModel() -> SignatureViewModel {
+        SignatureViewModel(
+            stamper: signatureStamper,
+            previewCommitter: previewCommitter,
+            documentsURL: localFileService.documentsURL
+        )
+    }
+
+    func makeFillFormViewModel() -> FillFormViewModel {
+        FillFormViewModel(
+            filler: formFiller,
+            previewCommitter: previewCommitter,
+            documentsURL: localFileService.documentsURL
+        )
+    }
+
     /// System language(s) first, English guaranteed as a fallback — never
     /// hardcode English alone (§6.3). `Locale.preferredLanguages` already
     /// yields well-formed BCP-47 tags (e.g. "vi-VN") that Vision accepts as-is.
@@ -181,6 +232,8 @@ final class DependencyContainer {
             reminders: remindScheduler,
             importer: documentImporter,
             documentCreator: localFileService,
+            documentRenamer: localFileService,
+            documentZipper: documentZipper,
             documentsURL: localFileService.documentsURL
         )
     }

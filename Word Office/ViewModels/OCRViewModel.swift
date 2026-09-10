@@ -127,11 +127,33 @@ final class OCRViewModel {
         try await Task.detached(priority: .utility) {
             try DOCXCodec.write(AttributedString(text), to: destination)
         }.value
+        NotificationCenter.default.post(name: .documentsDidChange, object: nil)
     }
 
     /// Secondary/optional output — keeps the original scanned image, adds an
     /// invisible searchable text layer at the position Vision recognized it.
     func exportSearchablePDF(to destination: URL) async throws {
         try await searchablePDFRenderer.render(pages: pages, results: results, to: destination)
+        NotificationCenter.default.post(name: .documentsDidChange, object: nil)
+    }
+
+    /// Clears every field that carries results/state from a previous scan
+    /// session — used by `ScanFlowView.onDisappear` so the next push starts
+    /// fresh instead of surfacing stale errors, pages, or recognition
+    /// output. `ocrVM` outlives ScanFlowView (owned by `ToolsTabView` as
+    /// long as the Tools tab is mounted), so nothing else resets it.
+    ///
+    /// Guarded against an in-flight recognition: popping mid-scan should
+    /// let the running task complete rather than orphan its state writes.
+    /// (Task itself is not cancelled by view teardown — it continues on
+    /// its own actor context — so early-return here is the only safe
+    /// treatment.)
+    func reset() {
+        guard !isProcessing else { return }
+        results = []
+        completedPageCount = 0
+        totalPageCount = 0
+        pages = []
+        errorMessage = nil
     }
 }

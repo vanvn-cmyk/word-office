@@ -1,0 +1,806 @@
+<meta charset="utf-8">
+<title>Fill & Sign — Mockup v1</title>
+<style>
+  :root {
+    --bg-page: #EEF0F4;
+    --bg-page-grid: #E4E7EE;
+    --ink-page: #171A21;
+    --ink-page-muted: #6A7180;
+    --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+    --sf: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+
+    --BrandPrimary: #3267E3;
+    --BrandPrimaryPressed: #2858C9;
+    --BrandPrimarySubtle: #F2F6FF;
+
+    --BackgroundPrimary: #FFFFFF;
+    --BackgroundSecondary: #F7F8FA;
+    --BackgroundElevated: #FFFFFF;
+
+    --TextPrimary: #17191D;
+    --TextSecondary: #5D636D;
+    --TextTertiary: #777E89;
+    --TextOnBrand: #FFFFFF;
+
+    --BorderSubtle: #ECEEF1;
+    --BorderDefault: #DADDE2;
+
+    --StatusSuccess: #218739;
+    --StatusSuccessBackground: #EDF8EF;
+
+    --DocPDF: #D63C35;
+    --DocSign: #7C3AED;
+    --DocPrint: #0284C7;
+
+    --shadow-frame: 0 30px 60px -20px rgba(20, 24, 34, 0.35), 0 4px 12px rgba(20, 24, 34, 0.08);
+    --shadow-toast: 0 12px 32px -8px rgba(20, 24, 34, 0.28), 0 2px 6px rgba(20, 24, 34, 0.08);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg-page: #0B0C10; --bg-page-grid: #131620; --ink-page: #F2F3F5; --ink-page-muted: #8B919B;
+      --BrandPrimary: #5B8CFF; --BrandPrimaryPressed: #719DFF; --BrandPrimarySubtle: #172544;
+      --BackgroundPrimary: #111317; --BackgroundSecondary: #181B20; --BackgroundElevated: #262A31;
+      --TextPrimary: #F5F6F7; --TextSecondary: #B8BDC5; --TextTertiary: #8B919B; --TextOnBrand: #081226;
+      --BorderSubtle: #292D33; --BorderDefault: #373B43;
+      --StatusSuccess: #4BD166; --StatusSuccessBackground: #14351C;
+      --DocPDF: #FF706A; --DocSign: #A78BFA; --DocPrint: #38BDF8;
+      --shadow-frame: 0 30px 60px -20px rgba(0, 0, 0, 0.6), 0 4px 12px rgba(0, 0, 0, 0.3);
+      --shadow-toast: 0 12px 32px -8px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.25);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg-page: #0B0C10; --bg-page-grid: #131620; --ink-page: #F2F3F5; --ink-page-muted: #8B919B;
+    --BrandPrimary: #5B8CFF; --BrandPrimaryPressed: #719DFF; --BrandPrimarySubtle: #172544;
+    --BackgroundPrimary: #111317; --BackgroundSecondary: #181B20; --BackgroundElevated: #262A31;
+    --TextPrimary: #F5F6F7; --TextSecondary: #B8BDC5; --TextTertiary: #8B919B; --TextOnBrand: #081226;
+    --BorderSubtle: #292D33; --BorderDefault: #373B43;
+    --StatusSuccess: #4BD166; --StatusSuccessBackground: #14351C;
+    --DocPDF: #FF706A; --DocSign: #A78BFA; --DocPrint: #38BDF8;
+    --shadow-frame: 0 30px 60px -20px rgba(0, 0, 0, 0.6), 0 4px 12px rgba(0, 0, 0, 0.3);
+    --shadow-toast: 0 12px 32px -8px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.25);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg-page);
+    background-image:
+      linear-gradient(var(--bg-page-grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--bg-page-grid) 1px, transparent 1px);
+    background-size: 32px 32px;
+    color: var(--ink-page);
+    font-family: var(--sf);
+    padding: 40px 24px 80px;
+    min-height: 100vh;
+    margin: 0;
+  }
+
+  .page-head { max-width: 1300px; margin: 0 auto 36px; display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+  .page-head h1 { font: 700 28px/1.15 var(--sf); letter-spacing: -0.01em; margin: 0 0 6px; }
+  .page-head p { font: 400 14px/1.5 var(--sf); color: var(--ink-page-muted); margin: 0; max-width: 74ch; }
+  .eyebrow { font: 600 11px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--BrandPrimary); margin: 0 0 10px; }
+
+  .theme-toggle { display: inline-flex; align-items: center; gap: 6px; background: var(--BackgroundPrimary); border: 1px solid var(--BorderDefault); border-radius: 999px; padding: 4px; font: 600 12px/1 var(--mono); }
+  .theme-toggle button { border: none; background: transparent; color: var(--ink-page-muted); padding: 7px 12px; border-radius: 999px; cursor: pointer; font: inherit; }
+  .theme-toggle button.active { background: var(--BrandPrimary); color: var(--TextOnBrand); }
+
+  .lane { max-width: 1300px; margin: 0 auto 56px; }
+  .lane-label { display: flex; align-items: baseline; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
+  .lane-label .n { font: 600 12px/1 var(--mono); color: var(--BrandPrimary); }
+  .lane-label h2 { font: 600 15px/1 var(--sf); margin: 0; }
+  .lane-label .src { font: 400 11px/1 var(--mono); color: var(--ink-page-muted); }
+
+  .frame-row { display: flex; gap: 28px; overflow-x: auto; padding: 6px 6px 20px; scroll-snap-type: x proximity; }
+  .frame-card { flex: 0 0 auto; scroll-snap-align: start; max-width: 300px; }
+  .frame-caption { font: 500 12px/1.45 var(--sf); color: var(--ink-page-muted); margin: 12px 2px 0; }
+  .frame-caption b { color: var(--ink-page); }
+
+  .note-card { max-width: 1300px; margin: 0 auto 40px; display: flex; gap: 12px; background: var(--BackgroundPrimary); border: 1px solid var(--BorderDefault); border-radius: 14px; padding: 16px 18px; }
+  .note-card svg { flex: 0 0 auto; color: var(--BrandPrimary); margin-top: 2px; }
+  .note-card p { margin: 0 0 4px; font: 400 13px/1.6 var(--sf); color: var(--ink-page); max-width: 1000px; }
+  .note-card p:last-child { margin-bottom: 0; }
+  .note-card code { font-family: var(--mono); font-size: 12px; background: var(--bg-page-grid); padding: 1px 4px; border-radius: 4px; }
+
+  /* Phone shell */
+  .phone { width: 300px; height: 649px; border-radius: 46px; padding: 12px; background: linear-gradient(160deg, #3a3d45, #1c1e23); box-shadow: var(--shadow-frame); }
+  .phone-screen { width: 100%; height: 100%; border-radius: 36px; background: var(--BackgroundSecondary); overflow: hidden; position: relative; display: flex; flex-direction: column; }
+  .status-bar { height: 46px; flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 0 22px; font: 600 13px/1 var(--sf); color: var(--TextPrimary); position: relative; z-index: 3; }
+  .island { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); width: 90px; height: 24px; border-radius: 14px; background: #000; z-index: 4; }
+  .home-indicator { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: 120px; height: 4px; border-radius: 3px; background: var(--TextPrimary); opacity: 0.35; z-index: 6; }
+  .screen-body { flex: 1 1 auto; overflow: hidden; position: relative; display: flex; flex-direction: column; }
+
+  /* Nav */
+  .nav-large { padding: 4px 20px 8px; }
+  .nav-large h1 { font: 700 28px/1.15 var(--sf); margin: 0; letter-spacing: -0.01em; color: var(--TextPrimary); }
+  .nav-bar { height: 44px; flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; }
+  .nav-bar .title { font: 600 15px/1.2 var(--sf); color: var(--TextPrimary); }
+  .nav-btn { font: 500 15px/1.2 var(--sf); color: var(--BrandPrimary); background: none; border: none; padding: 6px 8px; cursor: pointer; }
+  .nav-btn.strong { font-weight: 600; }
+  .nav-chevron { display: inline-flex; align-items: center; gap: 4px; font: 500 15px/1.2 var(--sf); color: var(--BrandPrimary); }
+
+  /* Section header */
+  .section-h {
+    display: flex; align-items: center; gap: 8px;
+    padding: 12px 20px 6px;
+    font: 600 15px/1.2 var(--sf); color: var(--TextPrimary);
+  }
+  .section-h svg { color: var(--BrandPrimary); }
+
+  /* Row card (like organizeList) */
+  .row-card {
+    background: var(--BackgroundElevated);
+    border: 1px solid var(--BorderSubtle);
+    border-radius: 12px;
+    margin: 0 16px;
+    overflow: hidden;
+  }
+  .row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 14px;
+    cursor: pointer;
+  }
+  .row + .row { border-top: 1px solid var(--BorderSubtle); margin-left: 60px; }
+  .row-icon {
+    width: 44px; height: 44px; border-radius: 8px;
+    display: inline-flex; align-items: center; justify-content: center;
+    flex: 0 0 auto;
+    font: 600 14px/1 var(--sf); color: var(--TextOnBrand);
+  }
+  .row-icon.sign { background: color-mix(in srgb, var(--DocSign) 14%, transparent); color: var(--DocSign); }
+  .row-icon.fill { background: color-mix(in srgb, var(--BrandPrimary) 14%, transparent); color: var(--BrandPrimary); }
+  .row-icon.print { background: color-mix(in srgb, var(--DocPrint) 14%, transparent); color: var(--DocPrint); }
+  .row-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .row-body .t { font: 500 15px/1.2 var(--sf); color: var(--TextPrimary); }
+  .row-body .s { font: 400 12px/1.3 var(--sf); color: var(--TextTertiary); }
+  .row-chev { color: var(--TextTertiary); }
+
+  /* Sub-scroll body */
+  .scroll { flex: 1 1 auto; overflow-y: auto; }
+
+  /* Toast */
+  .toast {
+    position: absolute; top: 52px; left: 50%; transform: translateX(-50%);
+    display: inline-flex; align-items: center; gap: 10px;
+    background: var(--BackgroundElevated); border: 1px solid var(--BorderDefault);
+    border-radius: 999px; padding: 10px 16px 10px 12px;
+    box-shadow: var(--shadow-toast); z-index: 10;
+  }
+  .toast .dot { width: 20px; height: 20px; border-radius: 50%; background: var(--StatusSuccessBackground); color: var(--StatusSuccess); display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+  .toast .txt { font: 600 12px/1.2 var(--sf); color: var(--TextPrimary); }
+
+  /* File picker card */
+  .file-card {
+    background: var(--BackgroundElevated);
+    border: 1px solid var(--BorderSubtle);
+    border-radius: 12px;
+    margin: 12px 16px 0;
+    padding: 12px 14px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .file-badge { width: 36px; height: 36px; border-radius: 8px; background: color-mix(in srgb, var(--DocPDF) 14%, transparent); color: var(--DocPDF); display: inline-flex; align-items: center; justify-content: center; font: 700 10px/1 var(--sf); }
+  .file-meta { flex: 1 1 auto; min-width: 0; }
+  .file-meta .n { font: 500 13px/1.2 var(--sf); color: var(--TextPrimary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-meta .s { font: 400 11px/1.2 var(--sf); color: var(--TextTertiary); }
+
+  /* Empty state */
+  .empty {
+    display: flex; flex-direction: column; align-items: center; gap: 12px;
+    text-align: center; padding: 40px 24px 24px;
+    color: var(--TextSecondary);
+  }
+  .empty .ico { width: 56px; height: 56px; border-radius: 14px; background: var(--BrandPrimarySubtle); color: var(--BrandPrimary); display: inline-flex; align-items: center; justify-content: center; }
+  .empty h3 { font: 600 17px/1.2 var(--sf); margin: 0; color: var(--TextPrimary); }
+  .empty p { font: 400 13px/1.4 var(--sf); margin: 0; max-width: 32ch; }
+
+  /* Primary button */
+  .btn-primary {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    background: var(--BrandPrimary); color: var(--TextOnBrand);
+    border: none; border-radius: 12px;
+    padding: 12px 16px; margin: 0 16px 12px;
+    font: 600 14px/1 var(--sf); cursor: pointer;
+  }
+  .btn-secondary {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    background: var(--BackgroundElevated); color: var(--TextPrimary);
+    border: 1px solid var(--BorderDefault); border-radius: 12px;
+    padding: 12px 16px; margin: 0 16px 12px;
+    font: 600 14px/1 var(--sf); cursor: pointer;
+  }
+
+  /* Sign canvas mock */
+  .sign-canvas {
+    margin: 12px 16px 0;
+    height: 180px;
+    background: var(--BackgroundElevated);
+    border: 1px dashed var(--BorderDefault);
+    border-radius: 12px;
+    position: relative;
+    overflow: hidden;
+  }
+  .sign-canvas .baseline { position: absolute; left: 20px; right: 20px; bottom: 40px; height: 1px; background: var(--BorderSubtle); }
+  .sign-canvas .stroke {
+    position: absolute; left: 30px; bottom: 30px;
+    font: italic 700 40px/1 'Snell Roundhand', 'Brush Script MT', cursive;
+    color: var(--TextPrimary);
+    transform: rotate(-4deg);
+  }
+  .sign-canvas .hint { position: absolute; top: 10px; left: 12px; font: 500 11px/1 var(--mono); color: var(--TextTertiary); }
+
+  .tool-picker {
+    margin: 8px 16px 0; padding: 10px 12px;
+    background: var(--BackgroundElevated); border: 1px solid var(--BorderSubtle); border-radius: 12px;
+    display: flex; gap: 10px; align-items: center;
+  }
+  .tool-picker .tool { width: 32px; height: 32px; border-radius: 8px; background: var(--BackgroundSecondary); display: inline-flex; align-items: center; justify-content: center; color: var(--TextSecondary); }
+  .tool-picker .tool.on { background: var(--BrandPrimary); color: var(--TextOnBrand); }
+  .tool-picker .spacer { flex: 1 1 auto; }
+  .tool-picker .color-dot { width: 20px; height: 20px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px var(--BorderDefault); }
+
+  /* PDF preview mock */
+  .pdf-mock {
+    background: white;
+    margin: 12px 16px 0;
+    height: 340px;
+    border: 1px solid var(--BorderDefault);
+    border-radius: 8px;
+    position: relative;
+    overflow: hidden;
+    background-image:
+      linear-gradient(180deg, transparent 20px, rgba(0,0,0,0.03) 20px, rgba(0,0,0,0.03) 22px, transparent 22px),
+      linear-gradient(180deg, transparent 60px, rgba(0,0,0,0.03) 60px, rgba(0,0,0,0.03) 62px, transparent 62px);
+  }
+  .pdf-mock::before {
+    content: '';
+    position: absolute; top: 30px; left: 24px; right: 24px; height: 5px;
+    background: repeating-linear-gradient(90deg, #333 0 30px, transparent 30px 40px, #333 40px 90px, transparent 90px 100px, #333 100px 160px);
+    opacity: 0.35;
+  }
+  .pdf-mock::after {
+    content: '';
+    position: absolute; top: 45px; left: 24px; right: 40px; height: 4px;
+    background: repeating-linear-gradient(90deg, #666 0 60px, transparent 60px 68px, #666 68px 120px, transparent 120px 130px);
+    opacity: 0.35;
+  }
+  .pdf-lines {
+    position: absolute; top: 70px; left: 24px; right: 24px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .pdf-line { height: 3px; background: color-mix(in srgb, #333 30%, transparent); border-radius: 2px; }
+  .pdf-line.w60 { width: 60%; }
+  .pdf-line.w80 { width: 80%; }
+  .pdf-line.w95 { width: 95%; }
+  .pdf-line.w40 { width: 40%; }
+  .pdf-page-label {
+    position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
+    font: 500 9px/1 var(--mono); color: var(--TextTertiary);
+    background: white; padding: 2px 6px; border-radius: 4px;
+  }
+
+  /* Signature placed on PDF */
+  .sig-on-pdf {
+    position: absolute; right: 28px; bottom: 60px;
+    font: italic 700 22px/1 'Snell Roundhand', 'Brush Script MT', cursive;
+    color: #111;
+    transform: rotate(-4deg);
+    padding: 4px 8px;
+    border: 1.5px dashed var(--BrandPrimary);
+    background: rgba(50, 103, 227, 0.04);
+    cursor: move;
+  }
+  .sig-on-pdf::after {
+    content: ''; position: absolute; right: -6px; bottom: -6px; width: 12px; height: 12px; background: var(--BrandPrimary); border-radius: 50%; border: 2px solid white;
+  }
+
+  /* Free-text annotation on PDF */
+  .text-on-pdf {
+    position: absolute;
+    padding: 3px 6px;
+    border: 1.5px solid var(--BrandPrimary);
+    background: rgba(50, 103, 227, 0.06);
+    font: 500 12px/1.2 var(--sf);
+    color: #111;
+    border-radius: 3px;
+  }
+  .text-on-pdf.saved { border: 1px dashed color-mix(in srgb, var(--BrandPrimary) 40%, transparent); background: transparent; color: #222; }
+  .text-cursor::after { content: ''; display: inline-block; width: 1px; height: 12px; background: var(--BrandPrimary); margin-left: 2px; animation: blink 1s infinite; vertical-align: middle; }
+  @keyframes blink { 0%,50%{opacity:1} 51%,100%{opacity:0} }
+
+  /* AirPrint sheet mock */
+  .air-sheet {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    background: var(--BackgroundElevated);
+    border-top-left-radius: 14px; border-top-right-radius: 14px;
+    box-shadow: 0 -10px 30px rgba(0,0,0,0.15);
+    padding: 12px 16px 20px;
+    max-height: 62%;
+    display: flex; flex-direction: column;
+  }
+  .air-sheet .h {
+    display: flex; align-items: center; justify-content: space-between;
+    padding-bottom: 10px; border-bottom: 1px solid var(--BorderSubtle);
+  }
+  .air-sheet .h .t { font: 600 16px/1.2 var(--sf); color: var(--TextPrimary); }
+  .air-sheet .h .btn { color: var(--BrandPrimary); font: 600 15px/1 var(--sf); }
+  .air-sheet .list { display: flex; flex-direction: column; gap: 0; }
+  .air-sheet .item { display: flex; justify-content: space-between; align-items: center; padding: 12px 4px; border-bottom: 1px solid var(--BorderSubtle); }
+  .air-sheet .item .k { font: 400 14px/1.2 var(--sf); color: var(--TextPrimary); }
+  .air-sheet .item .v { font: 400 14px/1.2 var(--sf); color: var(--TextTertiary); display: inline-flex; align-items: center; gap: 4px; }
+  .print-btn { background: var(--BrandPrimary); color: var(--TextOnBrand); text-align: center; padding: 12px; border-radius: 12px; font: 600 15px/1 var(--sf); margin-top: 12px; }
+</style>
+
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Session 12 · Fill &amp; Sign category</p>
+    <h1>Fill &amp; Sign — Mockup v1</h1>
+    <p>3 new tools grouped under a single Tools tab category: <b>Fill Form</b> (free-text overlay on any PDF), <b>Sign</b> (draw signature with PencilKit → stamp onto PDF), <b>Print</b> (AirPrint system sheet). All 3 native, on-device, no third-party SDK.</p>
+  </div>
+  <div class="theme-toggle" role="tablist" aria-label="Theme">
+    <button class="active" data-theme="light">Light</button>
+    <button data-theme="dark">Dark</button>
+    <button data-theme="system">System</button>
+  </div>
+</div>
+
+<div class="note-card">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>
+  <div>
+    <p><b>Category layout:</b> new "Fill &amp; Sign" section in <code>ToolsTabView</code>, placed after "Organize" (Merge/Split). Same list-row style as <code>organizeList</code>. 3 rows: Fill Form → Sign → Print (ordered by user-value frequency, not implementation order).</p>
+    <p><b>Tech stack:</b> Fill Form &amp; Sign both use <code>PDFView</code> (PDFKit) + <code>PDFAnnotation</code>. Sign adds <code>PKCanvasView</code> (PencilKit). Print reuses <code>UIPrintInteractionController</code> via existing <code>AirPrintCoordinator</code> (Session 6). All native — no ZIPFoundation/GRDB/Artifex needed.</p>
+    <p><b>Post-processing:</b> Sign/Fill Form output = new PDF file written to Documents/ → auto-navigate to editor (single-file, matching Session 11 gallery decision). Print doesn't produce a file — toast "Sent to printer" + stay at picker.</p>
+  </div>
+</div>
+
+<!-- ============ Lane 1 — Tools tab entry ============ -->
+<section class="lane">
+  <div class="lane-label">
+    <span class="n">01</span>
+    <h2>Tools tab — new "Fill &amp; Sign" section</h2>
+    <span class="src">ToolsTabView · after Organize</span>
+  </div>
+  <div class="frame-row">
+
+    <div class="frame-card">
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="island"></div>
+          <div class="status-bar"><span>9:41</span><span>●●●</span></div>
+          <div class="screen-body">
+            <div class="nav-large"><h1>Tools</h1></div>
+            <div class="scroll" style="padding-top:8px;">
+              <!-- Scan hero -->
+              <div style="margin: 4px 16px 0; padding: 14px; background: linear-gradient(135deg, var(--BrandPrimarySubtle), var(--BackgroundElevated)); border: 1px solid var(--BorderSubtle); border-radius: 16px; display: flex; align-items: center; gap: 12px;">
+                <div style="width:50px; height:50px; border-radius: 12px; background: var(--BrandPrimary); color: white; display: inline-flex; align-items: center; justify-content: center;">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/></svg>
+                </div>
+                <div>
+                  <div style="font: 600 14px/1.2 var(--sf); color: var(--TextPrimary);">Scan &amp; OCR</div>
+                  <div style="font: 400 11px/1.3 var(--sf); color: var(--TextSecondary); margin-top: 2px;">Camera, photos, or PDF → editable</div>
+                </div>
+                <div style="flex:1"></div>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--TextTertiary)" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+              </div>
+
+              <div class="section-h">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M17 3l4 4-4 4M3 7h18"/></svg>
+                Convert
+              </div>
+              <div style="margin: 0 16px; padding: 12px; background: var(--BackgroundElevated); border: 1px solid var(--BorderSubtle); border-radius: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                <div style="font: 500 12px/1.2 var(--sf); color: var(--TextPrimary);">Office → PDF</div>
+                <div style="font: 500 12px/1.2 var(--sf); color: var(--TextPrimary);">PDF → Word</div>
+              </div>
+
+              <div class="section-h">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/></svg>
+                Organize
+              </div>
+              <div class="row-card">
+                <div class="row">
+                  <div class="row-icon" style="background: color-mix(in srgb, var(--DocPDF) 14%, transparent); color: var(--DocPDF);">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h10l6 6v10a2 2 0 0 1-2 2H4z" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
+                  </div>
+                  <div class="row-body">
+                    <div class="t">Merge PDFs</div>
+                    <div class="s">Combine 2 or more files into one</div>
+                  </div>
+                  <svg class="row-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                </div>
+                <div class="row">
+                  <div class="row-icon" style="background: color-mix(in srgb, var(--DocPDF) 14%, transparent); color: var(--DocPDF);">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
+                  </div>
+                  <div class="row-body">
+                    <div class="t">Split PDF</div>
+                    <div class="s">Break one file into page ranges</div>
+                  </div>
+                  <svg class="row-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                </div>
+              </div>
+
+              <!-- NEW SECTION -->
+              <div class="section-h" style="color: var(--DocSign);">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z"/><line x1="16" y1="8" x2="2" y2="22"/><line x1="17.5" y1="15" x2="9" y2="15"/></svg>
+                Fill &amp; Sign
+              </div>
+              <div class="row-card">
+                <div class="row">
+                  <div class="row-icon fill">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4z"/></svg>
+                  </div>
+                  <div class="row-body">
+                    <div class="t">Fill Form</div>
+                    <div class="s">Type text on any PDF — forms or scans</div>
+                  </div>
+                  <svg class="row-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                </div>
+                <div class="row">
+                  <div class="row-icon sign">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z"/><line x1="16" y1="8" x2="2" y2="22"/></svg>
+                  </div>
+                  <div class="row-body">
+                    <div class="t">Sign</div>
+                    <div class="s">Draw your signature, place on PDF</div>
+                  </div>
+                  <svg class="row-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                </div>
+                <div class="row">
+                  <div class="row-icon print">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+                  </div>
+                  <div class="row-body">
+                    <div class="t">Print</div>
+                    <div class="s">Send to any AirPrint printer nearby</div>
+                  </div>
+                  <svg class="row-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                </div>
+              </div>
+              <div style="height: 40px;"></div>
+            </div>
+          </div>
+          <div class="home-indicator"></div>
+        </div>
+      </div>
+      <div class="frame-caption"><b>1.1 · Tools home w/ new "Fill &amp; Sign" section.</b> Same list-row style as Organize. 3 rows ordered Fill Form → Sign → Print. Ships in one commit.</div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============ Lane 2 — Print ============ -->
+<section class="lane">
+  <div class="lane-label">
+    <span class="n">02</span>
+    <h2>Print — pick PDF → AirPrint sheet (system)</h2>
+    <span class="src">PrintFlowView · reuses PDFToolsViewModel.print() (Session 6)</span>
+  </div>
+  <div class="frame-row">
+
+    <div class="frame-card">
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="island"></div>
+          <div class="status-bar"><span>9:41</span><span>●●●</span></div>
+          <div class="screen-body">
+            <div class="nav-bar">
+              <span class="nav-chevron">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+                Tools
+              </span>
+              <div class="title">Print</div>
+              <button class="nav-btn strong" style="opacity: 0.4;">Print</button>
+            </div>
+            <div class="empty">
+              <div class="ico">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+              </div>
+              <h3>Choose a PDF to print</h3>
+              <p>Pick one PDF file. Word or Excel? Convert to PDF first via Convert tool.</p>
+            </div>
+            <div style="flex:1"></div>
+            <button class="btn-primary">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              Choose PDF
+            </button>
+          </div>
+          <div class="home-indicator"></div>
+        </div>
+      </div>
+      <div class="frame-caption"><b>2.1 · Empty state.</b> Same pattern as MergeView. PDF-only for MVP (Office → Convert → then Print).</div>
+    </div>
+
+    <div class="frame-card">
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="island"></div>
+          <div class="status-bar"><span>9:41</span><span>●●●</span></div>
+          <div class="screen-body">
+            <div class="nav-bar">
+              <span class="nav-chevron"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg> Tools</span>
+              <div class="title">Print</div>
+              <button class="nav-btn strong">Print</button>
+            </div>
+            <div class="file-card">
+              <div class="file-badge">PDF</div>
+              <div class="file-meta">
+                <div class="n">contract-final.pdf</div>
+                <div class="s">18 pages · 1.5 MB</div>
+              </div>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--TextTertiary)" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+            </div>
+            <div style="padding: 12px 20px; font: 400 12px/1.4 var(--sf); color: var(--TextSecondary);">Tap Print above to open the AirPrint sheet — pick a printer, page range, copies, and options.</div>
+            <div style="flex:1"></div>
+            <button class="btn-secondary" style="margin-bottom:20px;">Replace file</button>
+          </div>
+          <div class="home-indicator"></div>
+        </div>
+      </div>
+      <div class="frame-caption"><b>2.2 · File picked.</b> Print button in toolbar enabled. Row shows filename + page count + size. Kebab menu (Save to Files/Share/Remove) mirrors Library convention.</div>
+    </div>
+
+    <div class="frame-card">
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="island"></div>
+          <div class="status-bar"><span>9:41</span><span>●●●</span></div>
+          <div class="screen-body">
+            <!-- Backdrop dim -->
+            <div style="position:absolute; inset:0; background: rgba(0,0,0,0.35); z-index: 4;"></div>
+            <!-- AirPrint sheet -->
+            <div class="air-sheet" style="z-index: 5;">
+              <div class="h">
+                <div class="btn">Cancel</div>
+                <div class="t">Printer Options</div>
+                <div style="width: 46px;"></div>
+              </div>
+              <div class="list">
+                <div class="item">
+                  <div class="k">Printer</div>
+                  <div class="v">Office LaserJet <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div>
+                </div>
+                <div class="item">
+                  <div class="k">Copies</div>
+                  <div class="v">1 <span style="margin-left: 8px; padding: 2px 8px; border: 1px solid var(--BorderDefault); border-radius: 4px;">−</span> <span style="padding: 2px 8px; border: 1px solid var(--BorderDefault); border-radius: 4px;">+</span></div>
+                </div>
+                <div class="item">
+                  <div class="k">Range</div>
+                  <div class="v">All Pages <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div>
+                </div>
+                <div class="item">
+                  <div class="k">Double-sided</div>
+                  <div class="v"><span style="display: inline-block; width: 40px; height: 24px; background: var(--BrandPrimary); border-radius: 12px; position: relative;"><span style="position: absolute; right: 2px; top: 2px; width: 20px; height: 20px; border-radius: 50%; background: white;"></span></span></div>
+                </div>
+                <div class="item">
+                  <div class="k">Layout</div>
+                  <div class="v">Portrait <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div>
+                </div>
+              </div>
+              <div class="print-btn">Print</div>
+            </div>
+          </div>
+          <div class="home-indicator"></div>
+        </div>
+      </div>
+      <div class="frame-caption"><b>2.3 · AirPrint system sheet.</b> Entirely OS-provided via <code>UIPrintInteractionController</code>. Zero custom UI — Apple pattern users know. Toast "Sent to printer" fires on print, stay at picker (Print doesn't produce a file to open).</div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============ Lane 3 — Sign ============ -->
+<section class="lane">
+  <div class="lane-label">
+    <span class="n">03</span>
+    <h2>Sign — draw signature (PencilKit) → place on PDF</h2>
+    <span class="src">SignatureCanvasView + SignaturePlacementView · Tier 1 drawing (spec §9.1)</span>
+  </div>
+  <div class="frame-row">
+
+    <div class="frame-card">
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="island"></div>
+          <div class="status-bar"><span>9:41</span><span>●●●</span></div>
+          <div class="screen-body">
+            <div class="nav-bar">
+              <span class="nav-chevron"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg> Tools</span>
+              <div class="title">Sign</div>
+              <button class="nav-btn strong" style="opacity: 0.4;">Next</button>
+            </div>
+            <div style="padding: 12px 20px 8px; font: 600 13px/1.2 var(--sf); color: var(--TextPrimary);">Draw your signature</div>
+            <div class="sign-canvas">
+              <div class="hint">Draw here with finger or Apple Pencil</div>
+              <div class="baseline"></div>
+              <div class="stroke">Alex Chen</div>
+            </div>
+            <div class="tool-picker">
+              <div class="tool on"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/></svg></div>
+              <div class="tool"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></div>
+              <div class="tool"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 20a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H8L2 12l6 8h12z"/></svg></div>
+              <div class="spacer"></div>
+              <div class="color-dot" style="background: #111;"></div>
+              <div class="color-dot" style="background: #2f64d6;"></div>
+              <div class="color-dot" style="background: #d63c35;"></div>
+            </div>
+            <div style="padding: 8px 20px; font: 400 11px/1.4 var(--sf); color: var(--TextTertiary);">Signature is stored on this device only — never uploaded.</div>
+            <div style="flex:1"></div>
+            <div style="display: flex; gap: 8px; padding: 0 16px 20px;">
+              <button class="btn-secondary" style="margin: 0; flex: 1;">Clear</button>
+              <button class="btn-primary" style="margin: 0; flex: 2;">Use signature</button>
+            </div>
+          </div>
+          <div class="home-indicator"></div>
+        </div>
+      </div>
+      <div class="frame-caption"><b>3.1 · Draw signature.</b> Native <code>PKCanvasView</code> with Apple Pencil support. Tool picker (pen/marker/pencil) + 3 color swatches. "Clear" resets canvas · "Use signature" → step 2.</div>
+    </div>
+
+    <div class="frame-card">
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="island"></div>
+          <div class="status-bar"><span>9:41</span><span>●●●</span></div>
+          <div class="screen-body">
+            <div class="nav-bar">
+              <button class="nav-btn">Back</button>
+              <div class="title">Place signature</div>
+              <button class="nav-btn strong">Save</button>
+            </div>
+            <div style="padding: 8px 20px; font: 400 12px/1.4 var(--sf); color: var(--TextSecondary);">Tap a page, then drag the signature. Pinch to resize.</div>
+            <div class="pdf-mock">
+              <div class="pdf-lines">
+                <div class="pdf-line w95"></div>
+                <div class="pdf-line w80"></div>
+                <div class="pdf-line w95"></div>
+                <div class="pdf-line w60"></div>
+                <div class="pdf-line w40"></div>
+              </div>
+              <div class="sig-on-pdf">Alex Chen</div>
+              <div class="pdf-page-label">Page 3 of 18</div>
+            </div>
+            <div style="display: flex; align-items: center; justify-content: center; gap: 12px; padding: 12px;">
+              <button style="width: 36px; height: 36px; border-radius: 8px; background: var(--BackgroundElevated); border: 1px solid var(--BorderDefault); display: inline-flex; align-items: center; justify-content: center;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+              </button>
+              <div style="font: 500 13px/1 var(--sf); color: var(--TextPrimary);">Page 3 / 18</div>
+              <button style="width: 36px; height: 36px; border-radius: 8px; background: var(--BackgroundElevated); border: 1px solid var(--BorderDefault); display: inline-flex; align-items: center; justify-content: center;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
+            </div>
+            <div style="flex:1"></div>
+          </div>
+          <div class="home-indicator"></div>
+        </div>
+      </div>
+      <div class="frame-caption"><b>3.2 · Place on PDF page.</b> PDFView. Signature is drag-and-scale via SwiftUI <code>DragGesture</code>+<code>MagnifyGesture</code>. Page nav footer. Save → embed as <code>PDFAnnotation.stamp</code> → auto-navigate editor.</div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============ Lane 4 — Fill Form ============ -->
+<section class="lane">
+  <div class="lane-label">
+    <span class="n">04</span>
+    <h2>Fill Form — tap anywhere on PDF, type text</h2>
+    <span class="src">FillFormView · PDFAnnotation.freeText overlay (Adobe Fill & Sign pattern)</span>
+  </div>
+  <div class="frame-row">
+
+    <div class="frame-card">
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="island"></div>
+          <div class="status-bar"><span>9:41</span><span>●●●</span></div>
+          <div class="screen-body">
+            <div class="nav-bar">
+              <span class="nav-chevron"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg> Tools</span>
+              <div class="title">Fill Form</div>
+              <button class="nav-btn strong" style="opacity: 0.4;">Save</button>
+            </div>
+            <div style="padding: 6px 20px 4px; font: 400 12px/1.4 var(--sf); color: var(--TextSecondary);">Tap any spot on the page to add text. Long-press to move or delete.</div>
+            <div class="pdf-mock">
+              <div class="pdf-lines">
+                <div class="pdf-line w95"></div>
+                <div class="pdf-line w80"></div>
+                <div class="pdf-line w60"></div>
+              </div>
+              <!-- Sample form-like fields -->
+              <div style="position: absolute; left: 24px; top: 130px; font: 500 10px/1.2 var(--sf); color: #555;">Full name:</div>
+              <div style="position: absolute; left: 80px; top: 128px; right: 24px; height: 1px; border-bottom: 1px solid #999;"></div>
+              <div style="position: absolute; left: 24px; top: 160px; font: 500 10px/1.2 var(--sf); color: #555;">Date:</div>
+              <div style="position: absolute; left: 60px; top: 158px; width: 100px; border-bottom: 1px solid #999; height: 1px;"></div>
+              <div style="position: absolute; left: 24px; top: 200px; font: 500 10px/1.2 var(--sf); color: #555;">Signature:</div>
+              <div style="position: absolute; left: 80px; top: 220px; right: 24px; border-bottom: 1px solid #999; height: 1px;"></div>
+              <div class="pdf-page-label">Page 1 of 2</div>
+            </div>
+            <div style="flex:1"></div>
+            <div style="display: flex; gap: 8px; padding: 0 16px 20px;">
+              <button class="btn-secondary" style="margin: 0; flex: 1;">Undo</button>
+              <button class="btn-primary" style="margin: 0; flex: 2;">Save changes</button>
+            </div>
+          </div>
+          <div class="home-indicator"></div>
+        </div>
+      </div>
+      <div class="frame-caption"><b>4.1 · Empty PDF ready to fill.</b> Underlines are just part of the source PDF — app treats any tap as a new text position. Save button disabled until user adds content.</div>
+    </div>
+
+    <div class="frame-card">
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="island"></div>
+          <div class="status-bar"><span>9:41</span><span>●●●</span></div>
+          <div class="screen-body">
+            <div class="nav-bar">
+              <span class="nav-chevron"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg> Tools</span>
+              <div class="title">Fill Form</div>
+              <button class="nav-btn strong">Save</button>
+            </div>
+            <div style="padding: 6px 20px 4px; font: 400 12px/1.4 var(--sf); color: var(--TextSecondary);">Editing — tap outside to commit. Keyboard controls font size.</div>
+            <div class="pdf-mock">
+              <div class="pdf-lines">
+                <div class="pdf-line w95"></div>
+                <div class="pdf-line w80"></div>
+                <div class="pdf-line w60"></div>
+              </div>
+              <div style="position: absolute; left: 24px; top: 130px; font: 500 10px/1.2 var(--sf); color: #555;">Full name:</div>
+              <div style="position: absolute; left: 80px; top: 128px; right: 24px; height: 1px; border-bottom: 1px solid #999;"></div>
+              <div class="text-on-pdf saved" style="left: 82px; top: 118px;">Alex Chen</div>
+
+              <div style="position: absolute; left: 24px; top: 160px; font: 500 10px/1.2 var(--sf); color: #555;">Date:</div>
+              <div style="position: absolute; left: 60px; top: 158px; width: 100px; border-bottom: 1px solid #999; height: 1px;"></div>
+              <div class="text-on-pdf saved" style="left: 62px; top: 148px;">2026-09-04</div>
+
+              <div style="position: absolute; left: 24px; top: 200px; font: 500 10px/1.2 var(--sf); color: #555;">Signature:</div>
+              <div style="position: absolute; left: 80px; top: 220px; right: 24px; border-bottom: 1px solid #999; height: 1px;"></div>
+              <div class="text-on-pdf text-cursor" style="left: 82px; top: 205px;">Alex</div>
+
+              <div class="pdf-page-label">Page 1 of 2</div>
+            </div>
+            <!-- Font size chip -->
+            <div style="display: flex; justify-content: center; padding: 8px;">
+              <div style="background: var(--BackgroundElevated); border: 1px solid var(--BorderDefault); border-radius: 999px; padding: 6px 12px; display: inline-flex; align-items: center; gap: 10px; font: 500 12px/1 var(--sf);">
+                <span style="color: var(--TextTertiary);">A</span>
+                <span style="width:60px; height:2px; background: var(--BorderDefault); position: relative;"><span style="position:absolute; left: 30px; top:-4px; width:10px; height:10px; border-radius:50%; background:var(--BrandPrimary);"></span></span>
+                <span style="color: var(--TextPrimary); font-size: 15px;">A</span>
+              </div>
+            </div>
+            <div style="flex:1"></div>
+            <div style="display: flex; gap: 8px; padding: 0 16px 20px;">
+              <button class="btn-secondary" style="margin: 0; flex: 1;">Undo</button>
+              <button class="btn-primary" style="margin: 0; flex: 2;">Save changes</button>
+            </div>
+          </div>
+          <div class="home-indicator"></div>
+        </div>
+      </div>
+      <div class="frame-caption"><b>4.2 · Filled + editing.</b> 2 committed annotations (dashed) + 1 active edit (solid + cursor). Font-size chip appears above keyboard. Save → embed via <code>PDFAnnotation.freeText</code> → new PDF in Documents → auto-navigate editor.</div>
+    </div>
+
+  </div>
+</section>
+
+<div class="note-card">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="M12 18v4"/><path d="m4.93 4.93 2.83 2.83"/><path d="m16.24 16.24 2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/></svg>
+  <div>
+    <p><b>Decisions baked in (override any):</b></p>
+    <p>1. <b>Ship order:</b> Print first (backend done — session hôm nay), then Sign (session sau), then Fill Form (session sau nữa). Category section shows all 3 rows from day one — Sign/Fill rows are wired but their views show a "Coming soon" placeholder until built.</p>
+    <p>2. <b>Post-processing:</b> Sign/Fill produce PDF files → same auto-navigate-to-editor pattern as Session 11 (single-file → editor, matches Merge/Convert). Print → toast only, stay at picker (no output file to open).</p>
+    <p>3. <b>Sign tier:</b> Tier 1 (drawing image) only. Tier 2 PKI cert-based → Phase 2 per spec §9.1.</p>
+    <p>4. <b>Fill Form scope:</b> Option B (free-text overlay tap-anywhere). Option A (AcroForm auto-detect widget fields) skip for MVP — not in spec Phase0-v2, add later if user asks.</p>
+    <p>5. <b>Print scope:</b> PDF only. Office (DOCX/XLSX/PPTX) must Convert → PDF first via existing Convert tool. Rationale: <code>UIPrintInteractionController</code> accepts image/PDF directly but Office format render needs pipeline we already have.</p>
+    <p>6. <b>Session commit:</b> today's work (Print + category shell + 2 placeholder rows) becomes 1 commit; each of Sign, Fill Form becomes its own commit later.</p>
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll('.theme-toggle button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.theme-toggle button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const theme = btn.dataset.theme;
+      if (theme === 'system') document.documentElement.removeAttribute('data-theme');
+      else document.documentElement.setAttribute('data-theme', theme);
+    });
+  });
+</script>

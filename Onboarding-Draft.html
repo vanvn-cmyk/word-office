@@ -1,0 +1,1256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Word Office · Onboarding Draft v1</title>
+  <style>
+    :root {
+      --brand: #FF6B4A;
+      --brand-strong: #E5522D;
+      --text: #1A1A1F;
+      --text-secondary: #6B6B72;
+      --bg: #F5F5F7;
+      --card: #FFFFFF;
+      --border: rgba(0,0,0,0.06);
+      --shadow-phone: 0 20px 60px rgba(0,0,0,0.10), 0 4px 12px rgba(0,0,0,0.04);
+      --shadow-card: 0 8px 32px rgba(0,0,0,0.06);
+      --radius-phone: 44px;
+      --radius-card: 20px;
+      --radius-btn: 14px;
+      --primary: #1D1D1F;
+      --success: #1F7A3E;
+      --success-bg: rgba(52, 199, 89, 0.10);
+      --word: #2B5CE6;
+      --excel: #217346;
+      --ppt: #D24726;
+      --pdf: #E53935;
+    }
+    * { box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+      margin: 0;
+      background: radial-gradient(1200px 800px at 10% -10%, #FFE5DC 0%, transparent 55%),
+                  radial-gradient(1200px 800px at 100% 10%, #E1EEFF 0%, transparent 60%),
+                  #F5F5F7;
+      color: var(--text);
+      min-height: 100vh;
+      padding: 48px 24px 96px;
+    }
+    header.doc-head {
+      max-width: 1500px;
+      margin: 0 auto 32px;
+    }
+    header.doc-head .tag {
+      display: inline-block;
+      padding: 4px 10px;
+      background: rgba(255,107,74,0.14);
+      color: var(--brand-strong);
+      font-size: 11px;
+      font-weight: 700;
+      border-radius: 6px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-right: 10px;
+      vertical-align: middle;
+    }
+    header.doc-head h1 {
+      font-size: 32px;
+      font-weight: 700;
+      margin: 0 0 8px;
+      letter-spacing: -0.025em;
+    }
+    header.doc-head p {
+      color: var(--text-secondary);
+      font-size: 15px;
+      line-height: 1.5;
+      margin: 0;
+      max-width: 800px;
+    }
+    header.doc-head .meta {
+      margin-top: 14px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    header.doc-head .meta span {
+      font-size: 12px;
+      color: var(--text-secondary);
+      padding: 4px 10px;
+      background: rgba(0,0,0,0.04);
+      border-radius: 6px;
+    }
+
+    .strip {
+      display: flex;
+      gap: 36px;
+      overflow-x: auto;
+      padding: 24px 4px 48px;
+      scroll-snap-type: x mandatory;
+      max-width: 1500px;
+      margin: 0 auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .strip::-webkit-scrollbar { height: 12px; }
+    .strip::-webkit-scrollbar-track { background: transparent; }
+    .strip::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 6px; }
+
+    .frame {
+      flex: 0 0 auto;
+      width: 320px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      scroll-snap-align: start;
+    }
+    .phone {
+      width: 320px;
+      height: 668px;
+      background: var(--card);
+      border-radius: var(--radius-phone);
+      box-shadow: var(--shadow-phone);
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(0,0,0,0.04);
+    }
+    .phone::before {
+      content: "";
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 112px;
+      height: 26px;
+      background: #000;
+      border-radius: 14px;
+      z-index: 10;
+    }
+    .screen {
+      position: absolute;
+      inset: 0;
+      padding: 62px 24px 24px;
+      display: flex;
+      flex-direction: column;
+      background: linear-gradient(180deg, #FFFFFF 0%, #FBFAFB 100%);
+    }
+
+    /* status bar */
+    .status {
+      position: absolute;
+      top: 14px;
+      left: 24px; right: 24px;
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+      z-index: 5;
+    }
+    .status .signal { display: flex; gap: 4px; align-items: center; }
+
+    .progress {
+      display: flex;
+      gap: 6px;
+      justify-content: center;
+      margin: 6px 0 22px;
+    }
+    .progress span {
+      width: 22px;
+      height: 3px;
+      background: rgba(0,0,0,0.08);
+      border-radius: 2px;
+      transition: all 0.3s;
+    }
+    .progress span.active {
+      background: var(--brand);
+      width: 32px;
+    }
+    .progress span.done {
+      background: var(--brand);
+      opacity: 0.35;
+    }
+
+    .hero {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 8px 0 24px;
+      min-height: 180px;
+    }
+    .hero svg { display: block; max-width: 100%; height: auto; }
+
+    .headline {
+      font-size: 24px;
+      font-weight: 700;
+      line-height: 1.15;
+      letter-spacing: -0.02em;
+      text-align: center;
+      margin: 0 0 10px;
+      color: var(--text);
+    }
+    .subhead {
+      font-size: 14.5px;
+      color: var(--text-secondary);
+      line-height: 1.45;
+      text-align: center;
+      margin: 0 0 20px;
+    }
+    .subhead strong { color: var(--text); font-weight: 600; }
+
+    .features { list-style: none; padding: 0; margin: 4px 0 18px; display: flex; flex-direction: column; gap: 14px; }
+    .features li { display: flex; align-items: flex-start; gap: 12px; }
+    .features .icn {
+      flex: 0 0 auto;
+      width: 36px; height: 36px;
+      border-radius: 10px;
+      background: rgba(255,107,74,0.10);
+      display: flex; align-items: center; justify-content: center;
+      color: var(--brand-strong);
+    }
+    .features .icn svg { width: 20px; height: 20px; }
+    .features .txt-t { font-weight: 600; font-size: 14px; line-height: 1.25; margin-bottom: 2px; color: var(--text); }
+    .features .txt-d { color: var(--text-secondary); font-size: 12.5px; line-height: 1.4; }
+
+    .trust {
+      display: flex; align-items: flex-start; gap: 8px;
+      padding: 10px 12px;
+      background: var(--success-bg);
+      border-radius: 10px;
+      font-size: 12px;
+      color: var(--success);
+      margin: 0 0 14px;
+      line-height: 1.4;
+    }
+    .trust svg { flex: 0 0 auto; margin-top: 1px; }
+
+    .spacer { flex: 1; }
+
+    .cta-primary {
+      display: block;
+      width: 100%;
+      padding: 14px 16px;
+      background: var(--primary);
+      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      border-radius: var(--radius-btn);
+      text-align: center;
+      border: none;
+      cursor: pointer;
+      margin-bottom: 6px;
+      letter-spacing: -0.01em;
+    }
+    .cta-primary.brand { background: var(--brand); }
+    .cta-secondary {
+      display: block;
+      width: 100%;
+      padding: 12px 16px;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 14px;
+      font-weight: 500;
+      border-radius: var(--radius-btn);
+      text-align: center;
+      border: none;
+      cursor: pointer;
+    }
+
+    /* Paywall pricing */
+    .pricing { display: flex; flex-direction: column; gap: 8px; margin: 0 0 12px; }
+    .price {
+      border: 2px solid rgba(0,0,0,0.08);
+      border-radius: 12px;
+      padding: 12px 14px;
+      display: flex; justify-content: space-between; align-items: center;
+      background: #fff;
+      position: relative;
+    }
+    .price.selected { border-color: var(--brand); background: rgba(255,107,74,0.05); }
+    .price .lbl { font-size: 13.5px; font-weight: 600; color: var(--text); line-height: 1.2; }
+    .price .sub { font-size: 11.5px; color: var(--text-secondary); margin-top: 2px; }
+    .price .amt { font-size: 14px; font-weight: 700; text-align: right; color: var(--text); }
+    .price .amtsub { font-size: 11px; color: var(--text-secondary); }
+    .price .badge {
+      position: absolute; top: -8px; right: 12px;
+      background: var(--brand); color: #fff;
+      font-size: 9.5px; font-weight: 800;
+      padding: 3px 7px; border-radius: 5px;
+      letter-spacing: 0.04em;
+    }
+    .value-list { list-style: none; padding: 0; margin: 4px 0 14px; display: flex; flex-direction: column; gap: 8px; }
+    .value-list li {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 13px; color: var(--text);
+    }
+    .value-list .chk {
+      flex: 0 0 auto;
+      width: 18px; height: 18px;
+      border-radius: 50%;
+      background: var(--brand);
+      display: flex; align-items: center; justify-content: center;
+      color: #fff;
+    }
+    .fine {
+      font-size: 10.5px; color: var(--text-secondary);
+      text-align: center; line-height: 1.4;
+      margin-top: 6px;
+    }
+    .fine a { color: var(--text-secondary); text-decoration: underline; }
+
+    .caption {
+      text-align: center;
+      font-size: 12.5px;
+      color: var(--text-secondary);
+      margin-top: 12px;
+      font-weight: 500;
+    }
+    .caption strong { color: var(--text); font-weight: 700; }
+
+    /* Notes section */
+    section.notes {
+      max-width: 1500px;
+      margin: 40px auto 0;
+      background: var(--card);
+      border-radius: var(--radius-card);
+      padding: 32px 36px;
+      box-shadow: var(--shadow-card);
+    }
+    section.notes h2 { font-size: 20px; margin: 0 0 8px; letter-spacing: -0.015em; }
+    section.notes > p { font-size: 14px; color: var(--text-secondary); margin: 0 0 24px; }
+    section.notes h3 {
+      font-size: 12px; margin: 24px 0 12px;
+      text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--brand-strong); font-weight: 700;
+    }
+    section.notes p, section.notes li { font-size: 14px; color: #2A2A30; line-height: 1.55; }
+    section.notes ul { padding-left: 22px; margin: 0 0 16px; }
+    section.notes ul li { margin-bottom: 4px; }
+    section.notes code {
+      background: rgba(0,0,0,0.05); padding: 1px 6px; border-radius: 4px;
+      font-family: "SF Mono", ui-monospace, Menlo, monospace;
+      font-size: 12.5px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 16px;
+      margin-top: 12px;
+    }
+    .grid .item {
+      padding: 16px 18px;
+      background: #FAFAFB;
+      border-radius: 12px;
+      border: 1px solid rgba(0,0,0,0.04);
+    }
+    .grid .item .k {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 11px;
+      color: var(--brand-strong);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 700;
+    }
+    .grid .item .v {
+      font-size: 13.5px;
+      color: var(--text);
+      line-height: 1.5;
+    }
+
+    .qa {
+      display: grid; grid-template-columns: 40px 1fr; gap: 8px 14px;
+      align-items: start;
+      padding: 12px 0;
+      border-top: 1px solid rgba(0,0,0,0.06);
+    }
+    .qa:first-of-type { border-top: none; }
+    .qa .q { font-weight: 700; color: var(--brand-strong); font-size: 13px; }
+    .qa .body { font-size: 13.5px; line-height: 1.5; color: var(--text); }
+
+    @media (prefers-color-scheme: dark) {
+      body {
+        background: radial-gradient(1200px 800px at 10% -10%, rgba(255,107,74,0.10) 0%, transparent 55%),
+                    radial-gradient(1200px 800px at 100% 10%, rgba(70,140,255,0.10) 0%, transparent 60%),
+                    #0B0B10;
+        color: #F5F5F7;
+      }
+      header.doc-head h1 { color: #FFF; }
+      header.doc-head p { color: #A0A0A8; }
+      header.doc-head .meta span { background: rgba(255,255,255,0.06); color: #C0C0C8; }
+      .phone { background: #1C1C1E; border-color: rgba(255,255,255,0.06); box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
+      .screen { background: linear-gradient(180deg, #1C1C1E 0%, #17171A 100%); }
+      .status { color: #FFF; }
+      .headline { color: #FFF; }
+      .subhead { color: #A0A0A8; }
+      .subhead strong { color: #FFF; }
+      .progress span { background: rgba(255,255,255,0.12); }
+      .features .txt-t { color: #FFF; }
+      .features .txt-d { color: #A0A0A8; }
+      .features .icn { background: rgba(255,107,74,0.16); }
+      .price { background: #232326; border-color: rgba(255,255,255,0.08); }
+      .price.selected { background: rgba(255,107,74,0.14); }
+      .price .lbl, .price .amt { color: #FFF; }
+      .price .sub, .price .amtsub { color: #9E9EA5; }
+      .value-list li { color: #F5F5F7; }
+      .fine, .caption { color: #9E9EA5; }
+      .caption strong { color: #FFF; }
+      .cta-primary { background: #F5F5F7; color: #000; }
+      .cta-primary.brand { background: var(--brand); color: #FFF; }
+      .cta-secondary { color: #9E9EA5; }
+      .trust { background: rgba(52,199,89,0.14); color: #7FD59E; }
+
+      section.notes { background: #1C1C1E; }
+      section.notes h2 { color: #FFF; }
+      section.notes p, section.notes li, .grid .item .v, .qa .body { color: #E5E5EA; }
+      section.notes > p { color: #9E9EA5; }
+      .grid .item { background: #232326; border-color: rgba(255,255,255,0.06); }
+      .qa { border-color: rgba(255,255,255,0.08); }
+    }
+  </style>
+</head>
+<body>
+
+<header class="doc-head">
+  <h1><span class="tag">Draft v1</span>Word Office · Onboarding Flow</h1>
+  <p>4 onboarding screens + soft paywall. Designed for the 35–44 professional anchor persona, friendly for the 55+ maturity persona. English copy only per project rule. Liquid Glass hint, HIG-native tone.</p>
+  <div class="meta">
+    <span>2026-09-09</span>
+    <span>4 screens · 1 soft paywall</span>
+    <span>iPhone-first, iPad adapts</span>
+    <span>MVVM + SOLID</span>
+    <span>English only</span>
+  </div>
+</header>
+
+<!-- STRIP -->
+<div class="strip">
+
+  <!-- ============================= -->
+  <!-- SCREEN 1 : WELCOME             -->
+  <!-- ============================= -->
+  <div class="frame">
+    <div class="phone">
+      <div class="status">
+        <span>9:41</span>
+        <span class="signal">
+          <svg width="16" height="10" viewBox="0 0 16 10" fill="currentColor"><rect x="0" y="6" width="3" height="4" rx="0.5"/><rect x="4" y="4" width="3" height="6" rx="0.5"/><rect x="8" y="2" width="3" height="8" rx="0.5"/><rect x="12" y="0" width="3" height="10" rx="0.5"/></svg>
+          <svg width="16" height="10" viewBox="0 0 16 10" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="0.5" y="2" width="12" height="6" rx="1.5"/><rect x="13.5" y="4" width="1.5" height="2" rx="0.4" fill="currentColor" stroke="none"/><rect x="2" y="3.5" width="9" height="3" rx="0.5" fill="currentColor" stroke="none"/></svg>
+        </span>
+      </div>
+      <div class="screen">
+        <div class="progress">
+          <span class="active"></span><span></span><span></span><span></span>
+        </div>
+        <div class="hero">
+          <!-- 4 file-type icons arranged -->
+          <svg class="illus" viewBox="0 0 240 200" width="230">
+            <defs>
+              <filter id="s1shadow" x="-20%" y="-20%" width="140%" height="140%">
+                <feDropShadow dx="0" dy="4" stdDeviation="6" flood-opacity="0.15"/>
+              </filter>
+            </defs>
+            <g filter="url(#s1shadow)">
+              <!-- Word (top-left) -->
+              <g transform="translate(30, 20) rotate(-8)">
+                <rect width="70" height="90" rx="10" fill="#2B5CE6"/>
+                <text x="35" y="58" text-anchor="middle" fill="#fff" font-family="-apple-system, SF Pro Display" font-size="30" font-weight="800">W</text>
+                <rect x="14" y="72" width="42" height="4" rx="1.5" fill="rgba(255,255,255,0.5)"/>
+                <rect x="14" y="80" width="30" height="3" rx="1" fill="rgba(255,255,255,0.35)"/>
+              </g>
+              <!-- Excel (top-right) -->
+              <g transform="translate(140, 12) rotate(6)">
+                <rect width="70" height="90" rx="10" fill="#217346"/>
+                <text x="35" y="58" text-anchor="middle" fill="#fff" font-family="-apple-system, SF Pro Display" font-size="30" font-weight="800">X</text>
+                <g transform="translate(14, 72)" stroke="rgba(255,255,255,0.4)" stroke-width="1" fill="none">
+                  <path d="M0 0h42M0 5h42M14 0v10M28 0v10"/>
+                </g>
+              </g>
+              <!-- PowerPoint (bottom-left) -->
+              <g transform="translate(38, 100) rotate(4)">
+                <rect width="70" height="90" rx="10" fill="#D24726"/>
+                <text x="35" y="58" text-anchor="middle" fill="#fff" font-family="-apple-system, SF Pro Display" font-size="30" font-weight="800">P</text>
+                <rect x="14" y="72" width="42" height="6" rx="1.5" fill="rgba(255,255,255,0.4)"/>
+              </g>
+              <!-- PDF (bottom-right) -->
+              <g transform="translate(148, 108) rotate(-6)">
+                <rect width="70" height="90" rx="10" fill="#E53935"/>
+                <text x="35" y="60" text-anchor="middle" fill="#fff" font-family="-apple-system, SF Pro Display" font-size="20" font-weight="800">PDF</text>
+                <rect x="14" y="74" width="42" height="4" rx="1.5" fill="rgba(255,255,255,0.5)"/>
+                <rect x="14" y="82" width="24" height="3" rx="1" fill="rgba(255,255,255,0.35)"/>
+              </g>
+            </g>
+          </svg>
+        </div>
+        <h2 class="headline">Documents,<br>designed for Apple.</h2>
+        <p class="subhead">Word, Excel, PowerPoint and PDF — every screen built for iPhone, iPad and Mac. Not a scaled-up phone app.</p>
+        <div class="spacer"></div>
+        <button class="cta-primary">Get Started</button>
+      </div>
+    </div>
+    <div class="caption"><strong>Screen 1</strong> · Welcome</div>
+  </div>
+
+  <!-- ============================= -->
+  <!-- SCREEN 2 : VALUE PROPS         -->
+  <!-- ============================= -->
+  <div class="frame">
+    <div class="phone">
+      <div class="status">
+        <span>9:41</span>
+        <span class="signal">
+          <svg width="16" height="10" viewBox="0 0 16 10" fill="currentColor"><rect x="0" y="6" width="3" height="4" rx="0.5"/><rect x="4" y="4" width="3" height="6" rx="0.5"/><rect x="8" y="2" width="3" height="8" rx="0.5"/><rect x="12" y="0" width="3" height="10" rx="0.5"/></svg>
+          <svg width="16" height="10" viewBox="0 0 16 10" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="0.5" y="2" width="12" height="6" rx="1.5"/><rect x="13.5" y="4" width="1.5" height="2" rx="0.4" fill="currentColor" stroke="none"/><rect x="2" y="3.5" width="9" height="3" rx="0.5" fill="currentColor" stroke="none"/></svg>
+        </span>
+      </div>
+      <div class="screen">
+        <div class="progress">
+          <span class="done"></span><span class="active"></span><span></span><span></span>
+        </div>
+        <div class="hero" style="min-height:140px">
+          <!-- Workflow: doc → scan → sign -->
+          <svg class="illus" viewBox="0 0 240 140" width="230">
+            <!-- doc -->
+            <g transform="translate(10, 25)">
+              <rect width="56" height="72" rx="8" fill="#F0F0F5" stroke="#D1D1D8" stroke-width="1"/>
+              <rect x="10" y="14" width="36" height="3" rx="1" fill="#B0B0BA"/>
+              <rect x="10" y="22" width="30" height="3" rx="1" fill="#B0B0BA"/>
+              <rect x="10" y="30" width="36" height="3" rx="1" fill="#B0B0BA"/>
+              <rect x="10" y="38" width="24" height="3" rx="1" fill="#B0B0BA"/>
+              <rect x="10" y="52" width="36" height="3" rx="1" fill="#D1D1D8"/>
+              <rect x="10" y="60" width="20" height="3" rx="1" fill="#D1D1D8"/>
+            </g>
+            <!-- arrow -->
+            <path d="M78 60 L92 60 M88 56 L92 60 L88 64" stroke="#B0B0BA" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+            <!-- OCR scan -->
+            <g transform="translate(94, 25)">
+              <rect width="56" height="72" rx="8" fill="#FFFFFF" stroke="#FF6B4A" stroke-width="1.5"/>
+              <!-- corner brackets scan -->
+              <path d="M6 6 L6 14 M6 6 L14 6 M50 6 L50 14 M50 6 L42 6 M6 66 L6 58 M6 66 L14 66 M50 66 L50 58 M50 66 L42 66" stroke="#FF6B4A" stroke-width="2" fill="none" stroke-linecap="round"/>
+              <line x1="10" y1="36" x2="46" y2="36" stroke="#FF6B4A" stroke-width="1.5" opacity="0.7"/>
+              <rect x="14" y="22" width="28" height="2.5" rx="1" fill="#1A1A1F"/>
+              <rect x="14" y="44" width="28" height="2.5" rx="1" fill="#1A1A1F"/>
+              <rect x="14" y="50" width="20" height="2.5" rx="1" fill="#1A1A1F"/>
+            </g>
+            <path d="M162 60 L176 60 M172 56 L176 60 L172 64" stroke="#B0B0BA" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+            <!-- sign -->
+            <g transform="translate(178, 25)">
+              <rect width="56" height="72" rx="8" fill="#F0F0F5" stroke="#D1D1D8" stroke-width="1"/>
+              <rect x="10" y="14" width="36" height="3" rx="1" fill="#B0B0BA"/>
+              <rect x="10" y="22" width="30" height="3" rx="1" fill="#B0B0BA"/>
+              <rect x="10" y="30" width="36" height="3" rx="1" fill="#B0B0BA"/>
+              <!-- signature -->
+              <path d="M10 54 Q18 46 24 54 T38 54 Q42 50 46 56" stroke="#2B5CE6" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+              <rect x="10" y="62" width="18" height="1.5" fill="#B0B0BA"/>
+            </g>
+          </svg>
+        </div>
+        <h2 class="headline">The full document workflow.</h2>
+        <p class="subhead">Everything you shuffle between apps today — under one roof, on your device.</p>
+        <ul class="features">
+          <li>
+            <div class="icn">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h9l3 3v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z" stroke-linejoin="round"/><path d="M13 4v3h3"/><path d="M6 11h8M6 14h5"/></svg>
+            </div>
+            <div><div class="txt-t">Edit Office · view PDF</div><div class="txt-d">Formatting stays intact. Real multi-pane on iPad.</div></div>
+          </li>
+          <li>
+            <div class="icn">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6V4a1 1 0 0 1 1-1h2M14 3h2a1 1 0 0 1 1 1v2M17 14v2a1 1 0 0 1-1 1h-2M6 17H4a1 1 0 0 1-1-1v-2" stroke-linecap="round"/><rect x="6" y="8" width="8" height="4" rx="0.5"/></svg>
+            </div>
+            <div><div class="txt-t">Scan paper to text</div><div class="txt-d">OCR turns receipts, contracts and notes into editable text.</div></div>
+          </li>
+          <li>
+            <div class="icn">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 15c2-4 4-6 6-6s2 4 4 4 3-3 4-5" stroke-linecap="round" stroke-linejoin="round"/><path d="M15 8l2 2M17 6l0 2h-2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div><div class="txt-t">Sign contracts in-app</div><div class="txt-d">Draw a signature once, drop it in any PDF.</div></div>
+          </li>
+        </ul>
+        <div class="spacer"></div>
+        <button class="cta-primary">Continue</button>
+      </div>
+    </div>
+    <div class="caption"><strong>Screen 2</strong> · Value props</div>
+  </div>
+
+  <!-- ============================= -->
+  <!-- SCREEN 3 : FOLDER PERMISSION   -->
+  <!-- ============================= -->
+  <div class="frame">
+    <div class="phone">
+      <div class="status">
+        <span>9:41</span>
+        <span class="signal">
+          <svg width="16" height="10" viewBox="0 0 16 10" fill="currentColor"><rect x="0" y="6" width="3" height="4" rx="0.5"/><rect x="4" y="4" width="3" height="6" rx="0.5"/><rect x="8" y="2" width="3" height="8" rx="0.5"/><rect x="12" y="0" width="3" height="10" rx="0.5"/></svg>
+          <svg width="16" height="10" viewBox="0 0 16 10" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="0.5" y="2" width="12" height="6" rx="1.5"/><rect x="13.5" y="4" width="1.5" height="2" rx="0.4" fill="currentColor" stroke="none"/><rect x="2" y="3.5" width="9" height="3" rx="0.5" fill="currentColor" stroke="none"/></svg>
+        </span>
+      </div>
+      <div class="screen">
+        <div class="progress">
+          <span class="done"></span><span class="done"></span><span class="active"></span><span></span>
+        </div>
+        <div class="hero">
+          <!-- Folder auto-filling animation (static frame) -->
+          <svg class="illus" viewBox="0 0 240 200" width="220">
+            <defs>
+              <filter id="s3shadow" x="-20%" y="-20%" width="140%" height="140%">
+                <feDropShadow dx="0" dy="6" stdDeviation="8" flood-opacity="0.14"/>
+              </filter>
+            </defs>
+            <!-- streaming docs going into folder -->
+            <g opacity="0.85">
+              <g transform="translate(20, 20) rotate(-14)">
+                <rect width="36" height="46" rx="4" fill="#2B5CE6"/>
+                <text x="18" y="30" text-anchor="middle" fill="#fff" font-family="-apple-system" font-size="16" font-weight="800">W</text>
+              </g>
+              <g transform="translate(70, 12) rotate(-6)" opacity="0.9">
+                <rect width="36" height="46" rx="4" fill="#217346"/>
+                <text x="18" y="30" text-anchor="middle" fill="#fff" font-family="-apple-system" font-size="16" font-weight="800">X</text>
+              </g>
+              <g transform="translate(122, 8) rotate(4)">
+                <rect width="36" height="46" rx="4" fill="#D24726"/>
+                <text x="18" y="30" text-anchor="middle" fill="#fff" font-family="-apple-system" font-size="16" font-weight="800">P</text>
+              </g>
+              <g transform="translate(174, 16) rotate(12)">
+                <rect width="36" height="46" rx="4" fill="#E53935"/>
+                <text x="18" y="32" text-anchor="middle" fill="#fff" font-family="-apple-system" font-size="10" font-weight="800">PDF</text>
+              </g>
+            </g>
+            <!-- streaming lines -->
+            <g stroke="#FF6B4A" stroke-width="1.2" stroke-linecap="round" opacity="0.5" fill="none">
+              <path d="M38 78 Q60 90 120 110" stroke-dasharray="2 4"/>
+              <path d="M88 68 Q100 90 120 110" stroke-dasharray="2 4"/>
+              <path d="M140 58 Q135 90 120 110" stroke-dasharray="2 4"/>
+              <path d="M192 68 Q170 90 120 110" stroke-dasharray="2 4"/>
+            </g>
+            <!-- Folder -->
+            <g filter="url(#s3shadow)" transform="translate(60, 100)">
+              <path d="M0 12 Q0 4 8 4 L36 4 L44 12 L112 12 Q120 12 120 20 L120 76 Q120 84 112 84 L8 84 Q0 84 0 76 Z" fill="#FF6B4A"/>
+              <rect x="0" y="20" width="120" height="60" rx="6" fill="#FF8C68"/>
+              <rect x="0" y="20" width="120" height="8" fill="rgba(0,0,0,0.06)"/>
+            </g>
+          </svg>
+        </div>
+        <h2 class="headline">Pick your folder once.<br>We do the rest.</h2>
+        <p class="subhead">Point Word Office at a folder — iCloud Drive, On My iPhone, anywhere. We'll auto-scan and organize your documents. <strong>Files stay in place. Nothing uploaded.</strong></p>
+        <div class="trust">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M7 1 L2 3 v4 c0 3 2 5 5 6 3-1 5-3 5-6 V3 z" stroke-linejoin="round"/><path d="M5 7 L6.5 8.5 L9 5.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>On-device only · Encrypted at rest · Revoke anytime in Settings</span>
+        </div>
+        <button class="cta-primary brand">Choose Folder</button>
+        <button class="cta-secondary">I'll do this later</button>
+      </div>
+    </div>
+    <div class="caption"><strong>Screen 3</strong> · Folder permission — <span style="color:var(--brand-strong)">Aha moment</span></div>
+  </div>
+
+  <!-- ============================= -->
+  <!-- SCREEN 4 : FACE ID             -->
+  <!-- ============================= -->
+  <div class="frame">
+    <div class="phone">
+      <div class="status">
+        <span>9:41</span>
+        <span class="signal">
+          <svg width="16" height="10" viewBox="0 0 16 10" fill="currentColor"><rect x="0" y="6" width="3" height="4" rx="0.5"/><rect x="4" y="4" width="3" height="6" rx="0.5"/><rect x="8" y="2" width="3" height="8" rx="0.5"/><rect x="12" y="0" width="3" height="10" rx="0.5"/></svg>
+          <svg width="16" height="10" viewBox="0 0 16 10" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="0.5" y="2" width="12" height="6" rx="1.5"/><rect x="13.5" y="4" width="1.5" height="2" rx="0.4" fill="currentColor" stroke="none"/><rect x="2" y="3.5" width="9" height="3" rx="0.5" fill="currentColor" stroke="none"/></svg>
+        </span>
+      </div>
+      <div class="screen">
+        <div class="progress">
+          <span class="done"></span><span class="done"></span><span class="done"></span><span class="active"></span>
+        </div>
+        <div class="hero">
+          <svg class="illus" viewBox="0 0 240 200" width="200">
+            <defs>
+              <filter id="s4shadow" x="-20%" y="-20%" width="140%" height="140%">
+                <feDropShadow dx="0" dy="6" stdDeviation="8" flood-opacity="0.12"/>
+              </filter>
+            </defs>
+            <!-- doc behind -->
+            <g filter="url(#s4shadow)" transform="translate(70, 30)">
+              <rect width="100" height="130" rx="10" fill="#FFFFFF" stroke="#EDEDF2" stroke-width="1"/>
+              <rect x="14" y="20" width="72" height="4" rx="1.5" fill="#D1D1D8"/>
+              <rect x="14" y="30" width="60" height="4" rx="1.5" fill="#D1D1D8"/>
+              <rect x="14" y="40" width="72" height="4" rx="1.5" fill="#D1D1D8"/>
+              <rect x="14" y="50" width="48" height="4" rx="1.5" fill="#D1D1D8"/>
+              <rect x="14" y="70" width="72" height="4" rx="1.5" fill="#E7E7EC"/>
+              <rect x="14" y="80" width="52" height="4" rx="1.5" fill="#E7E7EC"/>
+            </g>
+            <!-- Face ID glyph overlay -->
+            <g transform="translate(76, 90)">
+              <rect width="88" height="88" rx="18" fill="rgba(29,29,31,0.94)"/>
+              <g transform="translate(20, 20)" stroke="#FFFFFF" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <!-- corner brackets -->
+                <path d="M0 4 V0 H4"/>
+                <path d="M48 0 H44 M48 0 V4"/>
+                <path d="M0 44 V48 H4"/>
+                <path d="M44 48 H48 V44"/>
+                <!-- eyes -->
+                <circle cx="16" cy="20" r="1.4" fill="#FFFFFF"/>
+                <circle cx="32" cy="20" r="1.4" fill="#FFFFFF"/>
+                <!-- nose -->
+                <path d="M24 22 V28 L22 30"/>
+                <!-- mouth -->
+                <path d="M18 36 Q24 39 30 36"/>
+              </g>
+            </g>
+          </svg>
+        </div>
+        <h2 class="headline">Lock sensitive documents.</h2>
+        <p class="subhead">Face ID keeps contracts and personal files private. Optional — you can enable this later in Settings.</p>
+        <div class="spacer"></div>
+        <button class="cta-primary">Enable Face ID</button>
+        <button class="cta-secondary">Skip for now</button>
+      </div>
+    </div>
+    <div class="caption"><strong>Screen 4</strong> · Face ID (optional)</div>
+  </div>
+
+  <!-- ============================= -->
+  <!-- SCREEN 5 : PAYWALL SOFT        -->
+  <!-- ============================= -->
+  <div class="frame">
+    <div class="phone">
+      <div class="status">
+        <span>9:41</span>
+        <span class="signal">
+          <svg width="16" height="10" viewBox="0 0 16 10" fill="currentColor"><rect x="0" y="6" width="3" height="4" rx="0.5"/><rect x="4" y="4" width="3" height="6" rx="0.5"/><rect x="8" y="2" width="3" height="8" rx="0.5"/><rect x="12" y="0" width="3" height="10" rx="0.5"/></svg>
+          <svg width="16" height="10" viewBox="0 0 16 10" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="0.5" y="2" width="12" height="6" rx="1.5"/><rect x="13.5" y="4" width="1.5" height="2" rx="0.4" fill="currentColor" stroke="none"/><rect x="2" y="3.5" width="9" height="3" rx="0.5" fill="currentColor" stroke="none"/></svg>
+        </span>
+      </div>
+      <div class="screen" style="padding-top: 40px">
+        <!-- Close X -->
+        <div style="position:absolute; top:52px; right:20px; width:28px; height:28px; border-radius:50%; background:rgba(0,0,0,0.06); display:flex; align-items:center; justify-content:center;">
+          <svg width="14" height="14" viewBox="0 0 14 14" stroke="#6B6B72" stroke-width="1.8" fill="none" stroke-linecap="round"><path d="M3 3l8 8M11 3l-8 8"/></svg>
+        </div>
+        <div class="hero" style="min-height:130px; margin-top:20px">
+          <svg class="illus" viewBox="0 0 240 130" width="200">
+            <defs>
+              <linearGradient id="pgold" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#FFB980"/>
+                <stop offset="100%" stop-color="#FF6B4A"/>
+              </linearGradient>
+              <filter id="s5shadow" x="-20%" y="-20%" width="140%" height="140%">
+                <feDropShadow dx="0" dy="6" stdDeviation="10" flood-opacity="0.18"/>
+              </filter>
+            </defs>
+            <!-- premium doc with crown -->
+            <g filter="url(#s5shadow)" transform="translate(80, 20)">
+              <rect width="80" height="100" rx="10" fill="url(#pgold)"/>
+              <rect x="14" y="34" width="52" height="3.5" rx="1.5" fill="rgba(255,255,255,0.85)"/>
+              <rect x="14" y="42" width="42" height="3.5" rx="1.5" fill="rgba(255,255,255,0.7)"/>
+              <rect x="14" y="50" width="52" height="3.5" rx="1.5" fill="rgba(255,255,255,0.7)"/>
+              <rect x="14" y="66" width="52" height="3.5" rx="1.5" fill="rgba(255,255,255,0.55)"/>
+              <rect x="14" y="74" width="30" height="3.5" rx="1.5" fill="rgba(255,255,255,0.55)"/>
+            </g>
+            <!-- crown -->
+            <g transform="translate(96, 8)">
+              <path d="M0 16 L4 4 L12 12 L24 0 L36 12 L44 4 L48 16 Z" fill="#FFC935" stroke="#E5A700" stroke-width="1"/>
+              <circle cx="4" cy="4" r="2" fill="#E5522D"/>
+              <circle cx="24" cy="0" r="2" fill="#E5522D"/>
+              <circle cx="44" cy="4" r="2" fill="#E5522D"/>
+              <rect x="0" y="16" width="48" height="4" rx="1" fill="#E5A700"/>
+            </g>
+            <!-- sparkles -->
+            <g fill="#FFC935" opacity="0.85">
+              <path d="M40 40 L42 34 L44 40 L50 42 L44 44 L42 50 L40 44 L34 42 Z"/>
+              <path d="M198 60 L200 56 L202 60 L206 62 L202 64 L200 68 L198 64 L194 62 Z"/>
+            </g>
+          </svg>
+        </div>
+        <h2 class="headline" style="font-size:22px">Try Word Office Premium free for 7 days.</h2>
+        <ul class="value-list">
+          <li><span class="chk"><svg width="10" height="10" viewBox="0 0 10 10" stroke="#fff" stroke-width="1.8" fill="none"><path d="M2 5 L4 7 L8 3" stroke-linecap="round" stroke-linejoin="round"/></svg></span>Unlimited OCR &amp; conversions</li>
+          <li><span class="chk"><svg width="10" height="10" viewBox="0 0 10 10" stroke="#fff" stroke-width="1.8" fill="none"><path d="M2 5 L4 7 L8 3" stroke-linecap="round" stroke-linejoin="round"/></svg></span>Merge &amp; split without limits</li>
+          <li><span class="chk"><svg width="10" height="10" viewBox="0 0 10 10" stroke="#fff" stroke-width="1.8" fill="none"><path d="M2 5 L4 7 L8 3" stroke-linecap="round" stroke-linejoin="round"/></svg></span>Freelancer template pack</li>
+          <li><span class="chk"><svg width="10" height="10" viewBox="0 0 10 10" stroke="#fff" stroke-width="1.8" fill="none"><path d="M2 5 L4 7 L8 3" stroke-linecap="round" stroke-linejoin="round"/></svg></span>Priority support</li>
+        </ul>
+        <div class="pricing">
+          <div class="price selected">
+            <span class="badge">Save 67%</span>
+            <div>
+              <div class="lbl">Yearly</div>
+              <div class="sub">$3.33 / month</div>
+            </div>
+            <div>
+              <div class="amt">$39.99</div>
+              <div class="amtsub">per year</div>
+            </div>
+          </div>
+          <div class="price">
+            <div>
+              <div class="lbl">Monthly</div>
+              <div class="sub">Billed each month</div>
+            </div>
+            <div>
+              <div class="amt">$9.99</div>
+              <div class="amtsub">per month</div>
+            </div>
+          </div>
+        </div>
+        <button class="cta-primary brand">Start 7-day free trial</button>
+        <button class="cta-secondary">Continue with free features</button>
+        <p class="fine">Auto-renews at $39.99/yr after trial. Cancel in 1 tap in Settings. <a href="#">Terms</a> · <a href="#">Privacy</a></p>
+      </div>
+    </div>
+    <div class="caption"><strong>Screen 5</strong> · Paywall (soft, dismissible)</div>
+  </div>
+
+</div>
+
+<!-- =========== NOTES SECTION =========== -->
+<section class="notes">
+  <h2>Design notes &amp; contracts</h2>
+  <p>What the drawings above assume, and the rails they'd need to ride on. Copy is English-only per project rule.</p>
+
+  <h3>Persona alignment</h3>
+  <div class="grid">
+    <div class="item"><span class="k">Anchor 35–44 pro</span><span class="v">Copy tone is calm, confident, minimal marketing. No exclamation marks. Screen 2 speaks in workflow terms, not features. Screen 3 leads with the payoff ("we do the rest") before the ask.</span></div>
+    <div class="item"><span class="k">Maturity 55+</span><span class="v">Body text ≥14.5pt. Trust badge is green, plain-language ("Encrypted at rest · Revoke anytime"). Paywall shows the cancel path <em>before</em> the purchase button. No dark patterns — the "Continue with free" is a full-width button, not a hidden link.</span></div>
+    <div class="item"><span class="k">Both personas</span><span class="v">Never gate onboarding behind a paid feature. Face ID and folder access can both be skipped. Paywall is dismissible with a real "X" in the corner.</span></div>
+  </div>
+
+  <h3>Flow &amp; state</h3>
+  <ul>
+    <li><strong>Trigger:</strong> <code>@AppStorage("hasCompletedOnboarding")</code> false → present <code>OnboardingContainerView</code> in <code>.fullScreenCover</code> from <code>RootView</code>.</li>
+    <li><strong>Steps</strong> as enum <code>OnboardingStep: Int, CaseIterable</code>: <code>.welcome</code> → <code>.value</code> → <code>.folderPermission</code> → <code>.faceID</code> → <code>.paywall</code>.</li>
+    <li><strong>Skip semantics:</strong> Screen 3 secondary ("I'll do this later") advances to step 4 without asking for folder access; Library will show empty-state with the same CTA on first launch. Screen 4 "Skip" advances to Paywall. Paywall "Continue with free" dismisses onboarding.</li>
+    <li><strong>Non-linear back:</strong> Users can swipe back one step at any point; state is preserved (chosen folder bookmark, Face ID toggle) — never re-prompted in the same session.</li>
+    <li><strong>Resume-safe:</strong> If app killed mid-onboarding, resume from last completed step; do not re-run system permission prompts if already granted.</li>
+  </ul>
+
+  <h3>Aha moment — Screen 3 (folder permission)</h3>
+  <ul>
+    <li>This is <strong>the</strong> pivotal screen. Everything else supports it.</li>
+    <li>Tap "Choose Folder" → present <code>UIDocumentPickerViewController(forOpeningContentTypes:asCopy:false)</code> with <code>allowsMultipleSelection: false</code>, type <code>.folder</code>.</li>
+    <li>Save security-scoped URL bookmark to Keychain (<code>service: com.wordoffice.folderBookmarks</code>) — per <code>project-word-office-mvp-v2</code>.</li>
+    <li>On success, immediately push Screen 4. Kick off <code>FolderAutoScanService.scan(...)</code> in the background so by the time onboarding closes, the Library already has documents. This is the payoff.</li>
+    <li>On failure or cancel from the system sheet, stay on Screen 3 with an inline error ("Couldn't access that folder. Try another?"). Never block progress permanently.</li>
+  </ul>
+
+  <h3>Paywall (Screen 5) integration</h3>
+  <ul>
+    <li>Reuse existing <code>PaywallView</code> + <code>PaywallViewModel</code> shipped in S18. The onboarding paywall passes a distinct <code>PaywallEntryPoint.onboarding</code> so analytics can separate onboarding conversions from mid-app upsells.</li>
+    <li>Screen 5 uses the <em>same</em> layout as the mid-app paywall — one visual identity, one paywall to maintain. Only the entry point tag differs.</li>
+    <li><strong>Soft-paywall rules:</strong> "X" always visible top-right; secondary CTA is a full-width button, never a small text link; no forced trial. Fine print is legible (10.5pt+, not 8pt gray-on-gray).</li>
+    <li>Auto-renew disclosure and links to Terms &amp; Privacy per App Store guideline 3.1.2(a).</li>
+  </ul>
+
+  <h3>MVVM + SOLID sketch</h3>
+  <div class="grid">
+    <div class="item"><span class="k">View</span><span class="v"><code>OnboardingContainerView</code> owns step routing. Each step is its own leaf view: <code>WelcomeStepView</code>, <code>ValuePropsStepView</code>, <code>FolderPermissionStepView</code>, <code>FaceIDStepView</code>. Paywall reuses existing <code>PaywallView</code>.</span></div>
+    <div class="item"><span class="k">ViewModel</span><span class="v"><code>@Observable final class OnboardingViewModel</code> — holds <code>currentStep</code>, <code>didGrantFolder</code>, <code>didEnableFaceID</code>. Exposes <code>advance()</code>, <code>skip()</code>, <code>complete()</code>. No UIKit imports.</span></div>
+    <div class="item"><span class="k">Services (DI)</span><span class="v"><code>FolderPermissionService</code> protocol + prod impl (wraps <code>UIDocumentPicker</code> + Keychain bookmark write). <code>BiometricService</code> protocol + prod impl (<code>LAContext</code>). <code>OnboardingCompletionStore</code> protocol backed by <code>UserDefaults</code>/App Group.</span></div>
+    <div class="item"><span class="k">Tests</span><span class="v">Swift Testing suite: VM step transitions (all forward + skip paths), completion flag write, service protocol double for permission grant/deny. Target: 12–15 tests. No integration with real <code>LAContext</code> in tests.</span></div>
+  </div>
+
+  <h3>Design tokens (existing DS)</h3>
+  <ul>
+    <li>Buttons: <code>DSPrimaryButton</code> at 14pt weight 600, corner radius <code>DSCornerRadius.md</code>. Secondary is <code>PremiumButton</code> variant or ghost.</li>
+    <li>Progress dots: 22×3, spacing 6, active state widens to 32 and uses <code>Color.dsBrandPrimary</code>.</li>
+    <li>Padding: outer 20pt (matches Library/Tools alignment per session 2026-09-08). Vertical rhythm 20/24.</li>
+    <li>Illustrations: SVG in <code>Assets.xcassets</code> as <code>PDF</code> vector, tinted by <code>Color.accent</code> where possible. Ship 5 assets: <code>OnboardWelcomeHero</code>, <code>OnboardValueHero</code>, <code>OnboardFolderHero</code>, <code>OnboardFaceIDHero</code>, reuse <code>PaywallHeroIllustration</code>.</li>
+    <li>Motion: cross-fade + subtle horizontal parallax between steps. Respect <code>reduceMotion</code> — collapse to plain cross-fade.</li>
+  </ul>
+
+  <h3>Accessibility</h3>
+  <ul>
+    <li>All CTAs support Dynamic Type up to <code>.accessibility3</code>. Progress dots have <code>accessibilityLabel</code> "Step 3 of 4".</li>
+    <li>Illustrations get <code>accessibilityHidden(true)</code>; headline+subhead carry meaning for VoiceOver.</li>
+    <li>Color contrast: brand button (#FF6B4A on white) verified ≥ 4.5:1 for text weight 600.</li>
+  </ul>
+
+  <h3>iPad adaptation</h3>
+  <ul>
+    <li>Same 5 steps. On regular width, center a 480pt-wide column; the illustration grows to ~360pt tall.</li>
+    <li>Do <strong>not</strong> use <code>NavigationSplitView</code> here — onboarding is a modal full-cover flow even on iPad.</li>
+    <li>Hardware keyboard: <code>return</code> = primary CTA, <code>esc</code> = secondary/skip.</li>
+  </ul>
+
+  <h3>Open questions — need user decision</h3>
+  <div class="qa">
+    <div class="q">Q1</div>
+    <div class="body"><strong>Face ID step — keep or drop?</strong> Argument to drop: adds friction, most users won't need. Argument to keep: aligned with 55+ persona trust concerns, low-cost tap. Draft assumes <em>keep, with clear Skip</em>.</div>
+  </div>
+  <div class="qa">
+    <div class="q">Q2</div>
+    <div class="body"><strong>Paywall pricing shown ($9.99 / $39.99)?</strong> Placeholder. Real numbers pending competitive positioning research. If we want to be visibly cheaper than Adobe/OfficeSuite, target $2.99/mo or $19.99/yr.</div>
+  </div>
+  <div class="qa">
+    <div class="q">Q3</div>
+    <div class="body"><strong>Trial length — 7 days or 3 days?</strong> Draft uses 7. Some apps use 3 to force decision. Anchor persona is deliberate; 7 fits.</div>
+  </div>
+  <div class="qa">
+    <div class="q">Q4</div>
+    <div class="body"><strong>Screen 2 features — 3 or 4?</strong> Draft shows 3 (Edit, Scan, Sign). Adding "Merge &amp; split PDF" makes it 4. Trade-off: more scannable vs. more feature completeness.</div>
+  </div>
+  <div class="qa">
+    <div class="q">Q5</div>
+    <div class="body"><strong>Name/personalization step?</strong> Some apps ask for user name early. Draft skips this — data isn't used anywhere in MVP, and it's friction. Recommendation: don't add.</div>
+  </div>
+  <div class="qa">
+    <div class="q">Q6</div>
+    <div class="body"><strong>Notifications permission?</strong> MVP does <strong>not</strong> use push (reminders are in-app filter per <code>project-word-office-mvp-v2</code>), so no permission prompt in onboarding. Confirm this is still true.</div>
+  </div>
+  <div class="qa">
+    <div class="q">Q7</div>
+    <div class="body"><strong>Brand color — is #FF6B4A the final choice?</strong> Draft uses warm orange. If the app's <code>Color.dsBrandPrimary</code> is a different hue, all buttons/accents should swap.</div>
+  </div>
+
+  <h3>Out of scope for this draft</h3>
+  <ul>
+    <li>Localization strings — English only per <code>feedback-language-english</code>.</li>
+    <li>A/B test variants — can be added post-MVP once TestFlight has signal.</li>
+    <li>Deep-link into onboarding from settings ("Redo onboarding") — Phase 1.</li>
+    <li>Actual illustrations as PDF assets — this draft uses inline SVG for review; final assets to be exported after copy sign-off.</li>
+  </ul>
+</section>
+
+<!-- ============================================================= -->
+<!--  MVP-SCOPED VARIANT · THE SHIP VERSION                          -->
+<!-- ============================================================= -->
+
+<header class="doc-head" style="margin-top: 96px; padding-top: 48px; border-top: 2px dashed rgba(0,0,0,0.12);">
+  <h1><span class="tag" style="background: rgba(52,199,89,0.14); color: var(--success);">MVP Ship</span>Onboarding · MVP-scoped</h1>
+  <p>The lean version — only what ships in MVP. Aligned with the 12-item scope in <code>project-word-office-mvp-v2</code>: Tủ hồ sơ is the core loop, AI is out, Face ID is Phase 1, paywall is contextual (not onboarding). Copy leads with the Tủ hồ sơ payoff, not with feature breadth.</p>
+  <div class="meta">
+    <span>4 screens</span>
+    <span>No paywall in flow</span>
+    <span>No Face ID step</span>
+    <span>Tủ hồ sơ closes the flow</span>
+    <span>Contextual upsell later</span>
+  </div>
+</header>
+
+<div class="strip">
+
+  <!-- ============================= -->
+  <!-- MVP S1 : EDIT OFFICE           -->
+  <!-- ============================= -->
+  <div class="frame">
+    <div class="phone">
+      <div class="status">
+        <span>9:41</span>
+        <span class="signal">
+          <svg width="16" height="10" viewBox="0 0 16 10" fill="currentColor"><rect x="0" y="6" width="3" height="4" rx="0.5"/><rect x="4" y="4" width="3" height="6" rx="0.5"/><rect x="8" y="2" width="3" height="8" rx="0.5"/><rect x="12" y="0" width="3" height="10" rx="0.5"/></svg>
+          <svg width="16" height="10" viewBox="0 0 16 10" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="0.5" y="2" width="12" height="6" rx="1.5"/><rect x="13.5" y="4" width="1.5" height="2" rx="0.4" fill="currentColor" stroke="none"/><rect x="2" y="3.5" width="9" height="3" rx="0.5" fill="currentColor" stroke="none"/></svg>
+        </span>
+      </div>
+      <div class="screen">
+        <div class="progress">
+          <span class="active"></span><span></span><span></span><span></span>
+        </div>
+        <div class="hero">
+          <svg class="illus" viewBox="0 0 240 200" width="220">
+            <defs>
+              <filter id="mvpEditshadow" x="-20%" y="-20%" width="140%" height="140%">
+                <feDropShadow dx="0" dy="6" stdDeviation="10" flood-opacity="0.16"/>
+              </filter>
+            </defs>
+            <g transform="translate(24, 40) rotate(-8)" opacity="0.6">
+              <rect width="72" height="100" rx="10" fill="#217346" filter="url(#mvpEditshadow)"/>
+              <text x="36" y="60" text-anchor="middle" fill="#fff" font-family="-apple-system" font-size="30" font-weight="800">X</text>
+            </g>
+            <g transform="translate(144, 38) rotate(8)" opacity="0.6">
+              <rect width="72" height="100" rx="10" fill="#D24726" filter="url(#mvpEditshadow)"/>
+              <text x="36" y="60" text-anchor="middle" fill="#fff" font-family="-apple-system" font-size="30" font-weight="800">P</text>
+            </g>
+            <g filter="url(#mvpEditshadow)" transform="translate(76, 14)">
+              <rect width="88" height="170" rx="12" fill="#FFFFFF" stroke="#E5E5EA" stroke-width="1"/>
+              <g transform="translate(12, 12)">
+                <rect width="18" height="18" rx="4" fill="#2B5CE6"/>
+                <text x="9" y="13" text-anchor="middle" font-family="-apple-system" font-size="10" font-weight="800" fill="#fff">W</text>
+              </g>
+              <rect x="34" y="14" width="42" height="4" rx="1.5" fill="#1A1A1F"/>
+              <rect x="34" y="22" width="26" height="3" rx="1" fill="#B0B0BA"/>
+              <rect x="12" y="42" width="64" height="4" rx="1.5" fill="#3A3A3F"/>
+              <rect x="12" y="52" width="58" height="4" rx="1.5" fill="#3A3A3F"/>
+              <rect x="12" y="62" width="60" height="4" rx="1.5" fill="#3A3A3F"/>
+              <rect x="10" y="74" width="68" height="8" rx="2" fill="#FFE5DC" opacity="0.9"/>
+              <rect x="12" y="77" width="50" height="4" rx="1.5" fill="#E5522D"/>
+              <rect x="63" y="75" width="1.5" height="7" fill="#1A1A1F"/>
+              <rect x="12" y="92" width="58" height="4" rx="1.5" fill="#B0B0BA"/>
+              <rect x="12" y="102" width="46" height="4" rx="1.5" fill="#B0B0BA"/>
+              <rect x="12" y="112" width="52" height="4" rx="1.5" fill="#B0B0BA"/>
+              <g transform="translate(12, 130)">
+                <rect width="14" height="14" rx="3" fill="#F0F0F5"/>
+                <text x="7" y="10.5" text-anchor="middle" font-family="-apple-system" font-size="9" font-weight="800" fill="#3A3A3F">B</text>
+                <rect x="18" width="14" height="14" rx="3" fill="#F0F0F5"/>
+                <text x="25" y="10.5" text-anchor="middle" font-family="-apple-system" font-size="9" font-weight="800" font-style="italic" fill="#3A3A3F">I</text>
+                <rect x="36" width="14" height="14" rx="3" fill="#F0F0F5"/>
+                <line x1="40" y1="7" x2="46" y2="7" stroke="#3A3A3F" stroke-width="1.5"/>
+                <line x1="40" y1="10" x2="44" y2="10" stroke="#3A3A3F" stroke-width="1.5"/>
+              </g>
+            </g>
+          </svg>
+        </div>
+        <h2 class="headline">Real Office editing,<br>everywhere you work</h2>
+        <p class="subhead">Open <strong>Word, Excel and PowerPoint</strong> with every table, font and layout exactly where it belongs</p>
+        <div class="spacer"></div>
+        <button class="cta-primary">Get Started</button>
+      </div>
+    </div>
+    <div class="caption"><strong>MVP Screen 1</strong> · Edit Office</div>
+  </div>
+
+  <!-- ============================= -->
+  <!-- MVP S2 : TOOLS BUILT-IN        -->
+  <!-- ============================= -->
+  <div class="frame">
+    <div class="phone">
+      <div class="status">
+        <span>9:41</span>
+        <span class="signal">
+          <svg width="16" height="10" viewBox="0 0 16 10" fill="currentColor"><rect x="0" y="6" width="3" height="4" rx="0.5"/><rect x="4" y="4" width="3" height="6" rx="0.5"/><rect x="8" y="2" width="3" height="8" rx="0.5"/><rect x="12" y="0" width="3" height="10" rx="0.5"/></svg>
+          <svg width="16" height="10" viewBox="0 0 16 10" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="0.5" y="2" width="12" height="6" rx="1.5"/><rect x="13.5" y="4" width="1.5" height="2" rx="0.4" fill="currentColor" stroke="none"/><rect x="2" y="3.5" width="9" height="3" rx="0.5" fill="currentColor" stroke="none"/></svg>
+        </span>
+      </div>
+      <div class="screen">
+        <div class="progress">
+          <span class="done"></span><span class="active"></span><span></span><span></span>
+        </div>
+        <div class="hero">
+          <svg class="illus" viewBox="0 0 240 180" width="220">
+            <defs>
+              <filter id="mvpToolshadow" x="-20%" y="-20%" width="140%" height="140%">
+                <feDropShadow dx="0" dy="6" stdDeviation="10" flood-opacity="0.16"/>
+              </filter>
+            </defs>
+            <g filter="url(#mvpToolshadow)" transform="translate(20, 46) rotate(-8)">
+              <rect width="64" height="94" rx="14" fill="#2B5CE6"/>
+              <g transform="translate(32, 38)" stroke="#FFFFFF" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M-14 -8 L10 -8"/>
+                <path d="M10 -8 L5 -13 M10 -8 L5 -3"/>
+                <path d="M14 8 L-10 8"/>
+                <path d="M-10 8 L-5 3 M-10 8 L-5 13"/>
+              </g>
+              <text x="32" y="76" text-anchor="middle" font-family="-apple-system" font-size="9" font-weight="800" fill="#fff" letter-spacing="0.06em">CONVERT</text>
+            </g>
+            <g filter="url(#mvpToolshadow)" transform="translate(88, 32)">
+              <rect width="64" height="108" rx="14" fill="#FF6B4A"/>
+              <g transform="translate(8, 44)" stroke="#FFFFFF" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M0 10 Q10 -2 20 10 T40 6 Q44 2 48 8"/>
+                <line x1="0" y1="22" x2="48" y2="22" stroke-width="1.5" opacity="0.65"/>
+              </g>
+              <text x="32" y="88" text-anchor="middle" font-family="-apple-system" font-size="10" font-weight="800" fill="#fff" letter-spacing="0.06em">SIGN</text>
+            </g>
+            <g filter="url(#mvpToolshadow)" transform="translate(156, 46) rotate(8)">
+              <rect width="64" height="94" rx="14" fill="#D24726"/>
+              <g transform="translate(32, 38)" stroke="#FFFFFF" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M-14 0 L-4 0"/>
+                <path d="M-4 -4 L0 0 L-4 4"/>
+                <path d="M14 0 L4 0"/>
+                <path d="M4 -4 L0 0 L4 4"/>
+              </g>
+              <text x="32" y="76" text-anchor="middle" font-family="-apple-system" font-size="9" font-weight="800" fill="#fff" letter-spacing="0.06em">COMPRESS</text>
+            </g>
+          </svg>
+        </div>
+        <h2 class="headline">Every tool,<br>one tap away</h2>
+        <p class="subhead">Convert to PDF, sign contracts and compress attachments — <strong>no more app-hopping</strong></p>
+        <div class="spacer"></div>
+        <button class="cta-primary">Continue</button>
+      </div>
+    </div>
+    <div class="caption"><strong>MVP Screen 2</strong> · Tools built-in</div>
+  </div>
+
+  <!-- ============================= -->
+  <!-- MVP S3 : NEVER LOSE TRACK      -->
+  <!-- ============================= -->
+  <div class="frame">
+    <div class="phone">
+      <div class="status">
+        <span>9:41</span>
+        <span class="signal">
+          <svg width="16" height="10" viewBox="0 0 16 10" fill="currentColor"><rect x="0" y="6" width="3" height="4" rx="0.5"/><rect x="4" y="4" width="3" height="6" rx="0.5"/><rect x="8" y="2" width="3" height="8" rx="0.5"/><rect x="12" y="0" width="3" height="10" rx="0.5"/></svg>
+          <svg width="16" height="10" viewBox="0 0 16 10" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="0.5" y="2" width="12" height="6" rx="1.5"/><rect x="13.5" y="4" width="1.5" height="2" rx="0.4" fill="currentColor" stroke="none"/><rect x="2" y="3.5" width="9" height="3" rx="0.5" fill="currentColor" stroke="none"/></svg>
+        </span>
+      </div>
+      <div class="screen">
+        <div class="progress">
+          <span class="done"></span><span class="done"></span><span class="active"></span><span></span>
+        </div>
+        <div class="hero">
+          <svg class="illus" viewBox="0 0 240 200" width="220">
+            <defs>
+              <filter id="mvp1shadow" x="-20%" y="-20%" width="140%" height="140%">
+                <feDropShadow dx="0" dy="6" stdDeviation="8" flood-opacity="0.12"/>
+              </filter>
+            </defs>
+            <g filter="url(#mvp1shadow)" transform="translate(40, 12)">
+              <rect width="160" height="176" rx="14" fill="#FFFFFF" stroke="#E5E5EA" stroke-width="1"/>
+              <rect x="14" y="14" width="52" height="6" rx="2" fill="#1A1A1F"/>
+              <rect x="14" y="24" width="30" height="3" rx="1" fill="#B0B0BA"/>
+              <g transform="translate(12, 40)">
+                <rect width="136" height="40" rx="8" fill="#F5F5F7"/>
+                <rect x="8" y="8" width="24" height="24" rx="5" fill="#2B5CE6"/>
+                <text x="20" y="24" text-anchor="middle" font-family="-apple-system" font-size="11" font-weight="800" fill="#fff">W</text>
+                <rect x="38" y="12" width="60" height="4" rx="1.5" fill="#1A1A1F"/>
+                <rect x="38" y="20" width="40" height="3" rx="1" fill="#B0B0BA"/>
+                <g transform="translate(102, 14)">
+                  <rect width="26" height="12" rx="6" fill="rgba(176,176,186,0.25)"/>
+                  <text x="13" y="9" text-anchor="middle" font-family="-apple-system" font-size="7" font-weight="700" fill="#6B6B72">DRAFT</text>
+                </g>
+              </g>
+              <g transform="translate(12, 86)">
+                <rect width="136" height="40" rx="8" fill="#F5F5F7"/>
+                <rect x="8" y="8" width="24" height="24" rx="5" fill="#217346"/>
+                <text x="20" y="24" text-anchor="middle" font-family="-apple-system" font-size="11" font-weight="800" fill="#fff">X</text>
+                <rect x="38" y="12" width="70" height="4" rx="1.5" fill="#1A1A1F"/>
+                <rect x="38" y="20" width="48" height="3" rx="1" fill="#B0B0BA"/>
+                <g transform="translate(94, 14)">
+                  <rect width="34" height="12" rx="6" fill="rgba(43,92,230,0.15)"/>
+                  <text x="17" y="9" text-anchor="middle" font-family="-apple-system" font-size="7" font-weight="700" fill="#2B5CE6">REVIEWED</text>
+                </g>
+              </g>
+              <g transform="translate(12, 132)">
+                <rect width="136" height="40" rx="8" fill="#F5F5F7"/>
+                <rect x="8" y="8" width="24" height="24" rx="5" fill="#E53935"/>
+                <text x="20" y="24" text-anchor="middle" font-family="-apple-system" font-size="7" font-weight="800" fill="#fff">PDF</text>
+                <rect x="38" y="12" width="58" height="4" rx="1.5" fill="#1A1A1F"/>
+                <rect x="38" y="20" width="36" height="3" rx="1" fill="#B0B0BA"/>
+                <g transform="translate(100, 14)">
+                  <rect width="28" height="12" rx="6" fill="rgba(33,115,70,0.15)"/>
+                  <text x="14" y="9" text-anchor="middle" font-family="-apple-system" font-size="7" font-weight="700" fill="#217346">SIGNED</text>
+                </g>
+              </g>
+            </g>
+          </svg>
+        </div>
+        <h2 class="headline">Never lose track<br>of a document</h2>
+        <p class="subhead">Every file tagged <strong>Draft, Reviewed or Signed</strong> — see what still needs your attention at a glance</p>
+        <div class="spacer"></div>
+        <button class="cta-primary">Continue</button>
+      </div>
+    </div>
+    <div class="caption"><strong>MVP Screen 3</strong> · Never lose track</div>
+  </div>
+
+  <!-- ============================= -->
+  <!-- MVP S4 : FOLDER + READY MERGED -->
+  <!-- ============================= -->
+  <div class="frame">
+    <div class="phone">
+      <div class="status">
+        <span>9:41</span>
+        <span class="signal">
+          <svg width="16" height="10" viewBox="0 0 16 10" fill="currentColor"><rect x="0" y="6" width="3" height="4" rx="0.5"/><rect x="4" y="4" width="3" height="6" rx="0.5"/><rect x="8" y="2" width="3" height="8" rx="0.5"/><rect x="12" y="0" width="3" height="10" rx="0.5"/></svg>
+          <svg width="16" height="10" viewBox="0 0 16 10" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="0.5" y="2" width="12" height="6" rx="1.5"/><rect x="13.5" y="4" width="1.5" height="2" rx="0.4" fill="currentColor" stroke="none"/><rect x="2" y="3.5" width="9" height="3" rx="0.5" fill="currentColor" stroke="none"/></svg>
+        </span>
+      </div>
+      <div class="screen">
+        <div class="progress">
+          <span class="done"></span><span class="done"></span><span class="done"></span><span class="active"></span>
+        </div>
+        <div class="hero">
+          <svg class="illus" viewBox="0 0 240 200" width="220">
+            <defs>
+              <filter id="mvpFolderShadow" x="-20%" y="-20%" width="140%" height="140%">
+                <feDropShadow dx="0" dy="6" stdDeviation="8" flood-opacity="0.14"/>
+              </filter>
+            </defs>
+            <g opacity="0.85">
+              <g transform="translate(20, 20) rotate(-14)">
+                <rect width="36" height="46" rx="4" fill="#2B5CE6"/>
+                <text x="18" y="30" text-anchor="middle" fill="#fff" font-family="-apple-system" font-size="16" font-weight="800">W</text>
+              </g>
+              <g transform="translate(70, 12) rotate(-6)">
+                <rect width="36" height="46" rx="4" fill="#217346"/>
+                <text x="18" y="30" text-anchor="middle" fill="#fff" font-family="-apple-system" font-size="16" font-weight="800">X</text>
+              </g>
+              <g transform="translate(122, 8) rotate(4)">
+                <rect width="36" height="46" rx="4" fill="#D24726"/>
+                <text x="18" y="30" text-anchor="middle" fill="#fff" font-family="-apple-system" font-size="16" font-weight="800">P</text>
+              </g>
+              <g transform="translate(174, 16) rotate(12)">
+                <rect width="36" height="46" rx="4" fill="#E53935"/>
+                <text x="18" y="32" text-anchor="middle" fill="#fff" font-family="-apple-system" font-size="10" font-weight="800">PDF</text>
+              </g>
+            </g>
+            <g stroke="#FF6B4A" stroke-width="1.2" stroke-linecap="round" opacity="0.5" fill="none">
+              <path d="M38 78 Q60 90 120 110" stroke-dasharray="2 4"/>
+              <path d="M88 68 Q100 90 120 110" stroke-dasharray="2 4"/>
+              <path d="M140 58 Q135 90 120 110" stroke-dasharray="2 4"/>
+              <path d="M192 68 Q170 90 120 110" stroke-dasharray="2 4"/>
+            </g>
+            <g filter="url(#mvpFolderShadow)" transform="translate(60, 100)">
+              <path d="M0 12 Q0 4 8 4 L36 4 L44 12 L112 12 Q120 12 120 20 L120 76 Q120 84 112 84 L8 84 Q0 84 0 76 Z" fill="#FF6B4A"/>
+              <rect x="0" y="20" width="120" height="60" rx="6" fill="#FF8C68"/>
+              <rect x="0" y="20" width="120" height="8" fill="rgba(0,0,0,0.06)"/>
+            </g>
+          </svg>
+        </div>
+        <h2 class="headline">Pick a folder —<br>your library, ready</h2>
+        <p class="subhead">Grant access once and Word Office finds and organizes what you already have — <strong>right where your files live, nothing uploaded</strong></p>
+        <div class="trust">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M7 1 L2 3 v4 c0 3 2 5 5 6 3-1 5-3 5-6 V3 z" stroke-linejoin="round"/><path d="M5 7 L6.5 8.5 L9 5.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>On-device only · Encrypted at rest · Revoke anytime in Settings</span>
+        </div>
+        <button class="cta-primary brand">Choose Folder</button>
+        <button class="cta-secondary">I'll do this later</button>
+      </div>
+    </div>
+    <div class="caption"><strong>MVP Screen 4</strong> · Folder + Ready (merged) — <span style="color:var(--brand-strong)">Aha moment</span></div>
+  </div>
+
+</div>
+
+<section class="notes">
+  <h2>MVP variant · what changed &amp; why</h2>
+  <p>The lean flow reflects the 12-item MVP scope. Anything not in scope was cut here so the flow doesn't promise features that aren't shipping.</p>
+
+  <h3>Delta from the full 5-screen version</h3>
+  <div class="grid">
+    <div class="item"><span class="k">Split · Each feature = its own screen</span><span class="v">Per your ask, features are 3 separate screens with Never lose track at the end: <strong>S1 Edit Office natively</strong> (Word · Excel · PowerPoint), <strong>S2 Tools built-in</strong> (Convert · Sign · Compress), <strong>S3 Never lose track</strong> (Tủ hồ sơ status tags — closes the feature sequence). ⚠ <strong>Compress currently sits in Phase 1</strong> per <code>project-word-office-mvp-v2</code> — this copy promises it, so either pull Compress into MVP or hold onboarding launch until Compress ships.</span></div>
+    <div class="item"><span class="k">Merged · S4 Folder + Ready</span><span class="v">Folder permission and the Ready payoff are now <strong>one screen</strong>. After user taps Choose Folder → iOS picker → onboarding closes directly into the populated Library. No separate "Ready" screen: the library itself is the reward, and it lives outside onboarding. Headline "<em>Pick your folder. Your library, ready.</em>" bridges both concepts in one screen.</span></div>
+    <div class="item"><span class="k">Cut · Face ID (S4)</span><span class="v">Not in the 12-item MVP scope. Deferred to Phase 1 with the rest of the app-lock feature. Users who want it can enable it later from Settings — but we don't promise it in onboarding.</span></div>
+    <div class="item"><span class="k">Cut · Paywall (S5)</span><span class="v">Moved to <strong>contextual</strong> trigger: first time the user taps a Premium-gated action (e.g. OCR beyond N pages, or bulk merge). Onboarding paywall adds friction before the Aha moment has landed — dangerous while we're still validating the core loop.</span></div>
+    <div class="item"><span class="k">Added · S3 Ready</span><span class="v">Shows a small preview of what the Library will look like after auto-scan lands. Confirms the payoff visually before the user swipes into the app. Reinforces Tủ hồ sơ (status chips visible on doc rows).</span></div>
+    <div class="item"><span class="k">Copy shift</span><span class="v">Welcome headline no longer says "designed for Apple" — that's a design USP for App Store, not onboarding. Leads with the pain ("never lose track") + the mechanism ("organized by status"). This is the Zeigarnik hook stated plainly.</span></div>
+    <div class="item"><span class="k">Progress dots</span><span class="v">4 dots: Edit → Tools → Never lose track → Folder+Ready. Each feature has its own screen; Tủ hồ sơ closes the feature sequence before the folder Aha moment.</span></div>
+  </div>
+
+  <h3>Contextual paywall — where it fires instead</h3>
+  <ul>
+    <li><strong>OCR:</strong> first free scan is unlimited; 2nd time user triggers OCR, show paywall with "Unlimited scans" as the top value.</li>
+    <li><strong>Merge/Split:</strong> allow one operation free per launch; 2nd operation shows paywall.</li>
+    <li><strong>E-signature:</strong> free — no gate. Sign is the highest-intent action of the freelancer/SMB persona; gating it destroys trust for the anchor segment.</li>
+    <li><strong>Convert-to-ZIP:</strong> free.</li>
+    <li>All contextual paywalls reuse the same <code>PaywallView</code>. Track <code>PaywallEntryPoint.contextualOCR</code> / <code>.contextualMerge</code> / etc. to measure which surface converts.</li>
+  </ul>
+
+  <h3>Skip semantics (MVP)</h3>
+  <ul>
+    <li><strong>S2 skip ("I'll do this later")</strong> → advance to S3, but S3 shows an empty-state preview instead of the populated Library (headline shifts to "Add your first document"), and CTA becomes "Grant folder access" reopening the picker. Never leave user on a dead-end.</li>
+    <li><strong>No skip on S3.</strong> There's nothing to skip — it's the "you're in" moment.</li>
+    <li><strong>Onboarding rerun:</strong> Settings → "Redo onboarding" hidden switch for QA and support. Not in main Settings UI for MVP.</li>
+  </ul>
+
+  <h3>State machine (simplified)</h3>
+  <ul>
+    <li><code>OnboardingStep</code> enum: <code>.editOffice</code> → <code>.tools</code> → <code>.neverLoseTrack</code> → <code>.folderAndReady</code>. Complete on <code>.folderAndReady</code> (whether folder granted or skipped) → set <code>@AppStorage("hasCompletedOnboarding") = true</code>.</li>
+    <li>If folder was skipped: still complete onboarding, but flag <code>@AppStorage("librarySeeded") = false</code> so Library shows empty-state CTA.</li>
+    <li>If auto-scan is still running when S3 appears: show a shimmer skeleton for doc rows; the SVG preview above is a placeholder for that state.</li>
+  </ul>
+
+  <h3>Ship metrics to watch on TestFlight</h3>
+  <ul>
+    <li><strong>Onboarding completion:</strong> target ≥ 85%. Below 75% → something on S1/S2 is off.</li>
+    <li><strong>Folder grant rate on S2:</strong> target ≥ 60%. Below 40% → trust badge or copy needs work, or move Aha earlier.</li>
+    <li><strong>Time-to-first-open-doc from S3:</strong> target ≤ 20s. Above 60s means the Library isn't obviously the payoff.</li>
+    <li><strong>Contextual paywall conversion:</strong> track separately per surface. If onboarding-free flow underperforms full-flow paywall on total ARPU, revisit including paywall in onboarding.</li>
+  </ul>
+
+  <h3>Not answered here — still open</h3>
+  <ul>
+    <li><strong>Scope decision needed — Compress.</strong> S2 and S4 copy promise "Convert · Sign · Compress" per your ask. Compress currently lives in Phase 1 per MVP v2 scope. Two ways forward: (a) pull Compress from Phase 1 into MVP (update <code>project_word_office_mvp_v2</code> memory), or (b) hold onboarding launch until Compress ships. Merge/Split and OCR are MVP-shipped but no longer featured in onboarding — users discover them through the Tools tab.</li>
+    <li>Reminder onboarding — Tủ hồ sơ has <code>remindAt</code>. Do we mention reminders in S1 copy or leave that for in-app discovery? Draft leaves it out to keep the promise focused.</li>
+    <li>iCloud Drive default suggestion — should S2 default to <code>iCloud Drive/Documents</code> or start with a blank picker? Blank picker respects user choice; default reduces friction. Recommend blank.</li>
+    <li>First-launch vs "returning user with no folder yet" — same flow? Draft says yes.</li>
+  </ul>
+</section>
+
+</body>
+</html>

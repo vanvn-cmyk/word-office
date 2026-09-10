@@ -74,4 +74,14 @@ extension Color {
     // MARK: - Button disabled
     static let dsButtonDisabledBackground = Color("ButtonDisabledBackground")
     static let dsButtonDisabledText       = Color("ButtonDisabledText")
+
+    // MARK: - Premium
+    // Apple's own systemYellow → systemOrange pair (light: FFCC00 → FF9500,
+    // dark: FFD60A → FF9F0A) — the gold/amber gradient Apple's first-party
+    // apps use for subscription/premium badges. `dsStatusWarning` looked
+    // like the reused "warning brown" it actually is (A75D00) when tried
+    // here instead; this is its own token so Premium never drifts if
+    // Warning's hex changes.
+    static let dsPremiumGoldStart = Color("PremiumGoldStart")
+    static let dsPremiumGoldEnd   = Color("PremiumGoldEnd")
 }

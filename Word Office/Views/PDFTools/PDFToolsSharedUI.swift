@@ -32,31 +32,6 @@ struct ProcessingOverlay: View {
     }
 }
 
-/// Shared success-state header — checkmark + title + subtitle.
-struct SuccessBadge: View {
-    let title: String
-    let subtitle: String
-
-    var body: some View {
-        VStack(spacing: DSSpacing.sm) {
-            ZStack {
-                Circle().fill(Color.dsStatusSuccessBackground)
-                Image(systemName: "checkmark")
-                    .font(.system(size: 26, weight: .semibold))
-                    .foregroundStyle(Color.dsStatusSuccess)
-            }
-            .frame(width: 64, height: 64)
-
-            Text(title).font(DSFont.title3).foregroundStyle(Color.dsTextPrimary)
-            Text(subtitle)
-                .font(DSFont.subheadline)
-                .foregroundStyle(Color.dsTextSecondary)
-                .multilineTextAlignment(.center)
-        }
-        .padding(.top, DSSpacing.lg)
-    }
-}
-
 extension View {
     /// Binds a `String?` error message to a standard dismissible alert — the same
     /// pattern `LibraryView` already uses, factored out since Merge/Split/Convert/

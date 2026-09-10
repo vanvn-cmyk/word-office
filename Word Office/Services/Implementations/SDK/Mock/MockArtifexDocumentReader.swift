@@ -35,7 +35,7 @@ final class MockArtifexDocumentReader: DocumentReading {
             }.value
             return DocumentContent(attributedText: text, kind: kind)
 
-        case .xlsx, .pptx, .pdf, .doc, .xls, .ppt, .hwp, .hwpx:
+        case .xlsx, .pptx, .pdf, .doc, .xls, .ppt, .hwp, .hwpx, .zip:
             let placeholder = AttributedString(
                 "[Mock SDK] \(kind.displayName) preview will load when Artifex license is enabled (Sprint 0.2)"
             )

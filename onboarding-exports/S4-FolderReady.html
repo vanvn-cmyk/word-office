@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<title>Folder + Ready · Onboarding S4</title>
+<style>
+    :root {
+      --brand: #FF6B4A;
+      --brand-strong: #E5522D;
+      --text: #1A1A1F;
+      --text-secondary: #6B6B72;
+      --bg: #F5F5F7;
+      --card: #FFFFFF;
+      --border: rgba(0,0,0,0.06);
+      --shadow-phone: 0 20px 60px rgba(0,0,0,0.10), 0 4px 12px rgba(0,0,0,0.04);
+      --shadow-card: 0 8px 32px rgba(0,0,0,0.06);
+      --radius-phone: 44px;
+      --radius-card: 20px;
+      --radius-btn: 14px;
+      --primary: #1D1D1F;
+      --success: #1F7A3E;
+      --success-bg: rgba(52, 199, 89, 0.10);
+      --word: #2B5CE6;
+      --excel: #217346;
+      --ppt: #D24726;
+      --pdf: #E53935;
+    }
+    * { box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+      margin: 0;
+      background: radial-gradient(1200px 800px at 10% -10%, #FFE5DC 0%, transparent 55%),
+                  radial-gradient(1200px 800px at 100% 10%, #E1EEFF 0%, transparent 60%),
+                  #F5F5F7;
+      color: var(--text);
+      min-height: 100vh;
+      padding: 48px 24px 96px;
+    }
+    header.doc-head {
+      max-width: 1500px;
+      margin: 0 auto 32px;
+    }
+    header.doc-head .tag {
+      display: inline-block;
+      padding: 4px 10px;
+      background: rgba(255,107,74,0.14);
+      color: var(--brand-strong);
+      font-size: 11px;
+      font-weight: 700;
+      border-radius: 6px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-right: 10px;
+      vertical-align: middle;
+    }
+    header.doc-head h1 {
+      font-size: 32px;
+      font-weight: 700;
+      margin: 0 0 8px;
+      letter-spacing: -0.025em;
+    }
+    header.doc-head p {
+      color: var(--text-secondary);
+      font-size: 15px;
+      line-height: 1.5;
+      margin: 0;
+      max-width: 800px;
+    }
+    header.doc-head .meta {
+      margin-top: 14px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    header.doc-head .meta span {
+      font-size: 12px;
+      color: var(--text-secondary);
+      padding: 4px 10px;
+      background: rgba(0,0,0,0.04);
+      border-radius: 6px;
+    }
+
+    .strip {
+      display: flex;
+      gap: 36px;
+      overflow-x: auto;
+      padding: 24px 4px 48px;
+      scroll-snap-type: x mandatory;
+      max-width: 1500px;
+      margin: 0 auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .strip::-webkit-scrollbar { height: 12px; }
+    .strip::-webkit-scrollbar-track { background: transparent; }
+    .strip::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 6px; }
+
+    .frame {
+      flex: 0 0 auto;
+      width: 320px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      scroll-snap-align: start;
+    }
+    .phone {
+      width: 320px;
+      height: 668px;
+      background: var(--card);
+      border-radius: var(--radius-phone);
+      box-shadow: var(--shadow-phone);
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(0,0,0,0.04);
+    }
+    .phone::before {
+      content: "";
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 112px;
+      height: 26px;
+      background: #000;
+      border-radius: 14px;
+      z-index: 10;
+    }
+    .screen {
+      position: absolute;
+      inset: 0;
+      padding: 62px 24px 24px;
+      display: flex;
+      flex-direction: column;
+      background: linear-gradient(180deg, #FFFFFF 0%, #FBFAFB 100%);
+    }
+
+    /* status bar */
+    .status {
+      position: absolute;
+      top: 14px;
+      left: 24px; right: 24px;
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+      z-index: 5;
+    }
+    .status .signal { display: flex; gap: 4px; align-items: center; }
+
+    .progress {
+      display: flex;
+      gap: 6px;
+      justify-content: center;
+      margin: 6px 0 22px;
+    }
+    .progress span {
+      width: 22px;
+      height: 3px;
+      background: rgba(0,0,0,0.08);
+      border-radius: 2px;
+      transition: all 0.3s;
+    }
+    .progress span.active {
+      background: var(--brand);
+      width: 32px;
+    }
+    .progress span.done {
+      background: var(--brand);
+      opacity: 0.35;
+    }
+
+    .hero {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 8px 0 24px;
+      min-height: 180px;
+    }
+    .hero svg { display: block; max-width: 100%; height: auto; }
+
+    .headline {
+      font-size: 24px;
+      font-weight: 700;
+      line-height: 1.15;
+      letter-spacing: -0.02em;
+      text-align: center;
+      margin: 0 0 10px;
+      color: var(--text);
+    }
+    .subhead {
+      font-size: 14.5px;
+      color: var(--text-secondary);
+      line-height: 1.45;
+      text-align: center;
+      margin: 0 0 20px;
+    }
+    .subhead strong { color: var(--text); font-weight: 600; }
+
+    .features { list-style: none; padding: 0; margin: 4px 0 18px; display: flex; flex-direction: column; gap: 14px; }
+    .features li { display: flex; align-items: flex-start; gap: 12px; }
+    .features .icn {
+      flex: 0 0 auto;
+      width: 36px; height: 36px;
+      border-radius: 10px;
+      background: rgba(255,107,74,0.10);
+      display: flex; align-items: center; justify-content: center;
+      color: var(--brand-strong);
+    }
+    .features .icn svg { width: 20px; height: 20px; }
+    .features .txt-t { font-weight: 600; font-size: 14px; line-height: 1.25; margin-bottom: 2px; color: var(--text); }
+    .features .txt-d { color: var(--text-secondary); font-size: 12.5px; line-height: 1.4; }
+
+    .trust {
+      display: flex; align-items: flex-start; gap: 8px;
+      padding: 10px 12px;
+      background: var(--success-bg);
+      border-radius: 10px;
+      font-size: 12px;
+      color: var(--success);
+      margin: 0 0 14px;
+      line-height: 1.4;
+    }
+    .trust svg { flex: 0 0 auto; margin-top: 1px; }
+
+    .spacer { flex: 1; }
+
+    .cta-primary {
+      display: block;
+      width: 100%;
+      padding: 14px 16px;
+      background: var(--primary);
+      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      border-radius: var(--radius-btn);
+      text-align: center;
+      border: none;
+      cursor: pointer;
+      margin-bottom: 6px;
+      letter-spacing: -0.01em;
+    }
+    .cta-primary.brand { background: var(--brand); }
+    .cta-secondary {
+      display: block;
+      width: 100%;
+      padding: 12px 16px;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 14px;
+      font-weight: 500;
+      border-radius: var(--radius-btn);
+      text-align: center;
+      border: none;
+      cursor: pointer;
+    }
+
+    /* Paywall pricing */
+    .pricing { display: flex; flex-direction: column; gap: 8px; margin: 0 0 12px; }
+    .price {
+      border: 2px solid rgba(0,0,0,0.08);
+      border-radius: 12px;
+      padding: 12px 14px;
+      display: flex; justify-content: space-between; align-items: center;
+      background: #fff;
+      position: relative;
+    }
+    .price.selected { border-color: var(--brand); background: rgba(255,107,74,0.05); }
+    .price .lbl { font-size: 13.5px; font-weight: 600; color: var(--text); line-height: 1.2; }
+    .price .sub { font-size: 11.5px; color: var(--text-secondary); margin-top: 2px; }
+    .price .amt { font-size: 14px; font-weight: 700; text-align: right; color: var(--text); }
+    .price .amtsub { font-size: 11px; color: var(--text-secondary); }
+    .price .badge {
+      position: absolute; top: -8px; right: 12px;
+      background: var(--brand); color: #fff;
+      font-size: 9.5px; font-weight: 800;
+      padding: 3px 7px; border-radius: 5px;
+      letter-spacing: 0.04em;
+    }
+    .value-list { list-style: none; padding: 0; margin: 4px 0 14px; display: flex; flex-direction: column; gap: 8px; }
+    .value-list li {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 13px; color: var(--text);
+    }
+    .value-list .chk {
+      flex: 0 0 auto;
+      width: 18px; height: 18px;
+      border-radius: 50%;
+      background: var(--brand);
+      display: flex; align-items: center; justify-content: center;
+      color: #fff;
+    }
+    .fine {
+      font-size: 10.5px; color: var(--text-secondary);
+      text-align: center; line-height: 1.4;
+      margin-top: 6px;
+    }
+    .fine a { color: var(--text-secondary); text-decoration: underline; }
+
+    .caption {
+      text-align: center;
+      font-size: 12.5px;
+      color: var(--text-secondary);
+      margin-top: 12px;
+      font-weight: 500;
+    }
+    .caption strong { color: var(--text); font-weight: 700; }
+
+    /* Notes section */
+    section.notes {
+      max-width: 1500px;
+      margin: 40px auto 0;
+      background: var(--card);
+      border-radius: var(--radius-card);
+      padding: 32px 36px;
+      box-shadow: var(--shadow-card);
+    }
+    section.notes h2 { font-size: 20px; margin: 0 0 8px; letter-spacing: -0.015em; }
+    section.notes > p { font-size: 14px; color: var(--text-secondary); margin: 0 0 24px; }
+    section.notes h3 {
+      font-size: 12px; margin: 24px 0 12px;
+      text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--brand-strong); font-weight: 700;
+    }
+    section.notes p, section.notes li { font-size: 14px; color: #2A2A30; line-height: 1.55; }
+    section.notes ul { padding-left: 22px; margin: 0 0 16px; }
+    section.notes ul li { margin-bottom: 4px; }
+    section.notes code {
+      background: rgba(0,0,0,0.05); padding: 1px 6px; border-radius: 4px;
+      font-family: "SF Mono", ui-monospace, Menlo, monospace;
+      font-size: 12.5px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 16px;
+      margin-top: 12px;
+    }
+    .grid .item {
+      padding: 16px 18px;
+      background: #FAFAFB;
+      border-radius: 12px;
+      border: 1px solid rgba(0,0,0,0.04);
+    }
+    .grid .item .k {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 11px;
+      color: var(--brand-strong);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 700;
+    }
+    .grid .item .v {
+      font-size: 13.5px;
+      color: var(--text);
+      line-height: 1.5;
+    }
+
+    .qa {
+      display: grid; grid-template-columns: 40px 1fr; gap: 8px 14px;
+      align-items: start;
+      padding: 12px 0;
+      border-top: 1px solid rgba(0,0,0,0.06);
+    }
+    .qa:first-of-type { border-top: none; }
+    .qa .q { font-weight: 700; color: var(--brand-strong); font-size: 13px; }
+    .qa .body { font-size: 13.5px; line-height: 1.5; color: var(--text); }
+
+    @media (prefers-color-scheme: dark) {
+      body {
+        background: radial-gradient(1200px 800px at 10% -10%, rgba(255,107,74,0.10) 0%, transparent 55%),
+                    radial-gradient(1200px 800px at 100% 10%, rgba(70,140,255,0.10) 0%, transparent 60%),
+                    #0B0B10;
+        color: #F5F5F7;
+      }
+      header.doc-head h1 { color: #FFF; }
+      header.doc-head p { color: #A0A0A8; }
+      header.doc-head .meta span { background: rgba(255,255,255,0.06); color: #C0C0C8; }
+      .phone { background: #1C1C1E; border-color: rgba(255,255,255,0.06); box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
+      .screen { background: linear-gradient(180deg, #1C1C1E 0%, #17171A 100%); }
+      .status { color: #FFF; }
+      .headline { color: #FFF; }
+      .subhead { color: #A0A0A8; }
+      .subhead strong { color: #FFF; }
+      .progress span { background: rgba(255,255,255,0.12); }
+      .features .txt-t { color: #FFF; }
+      .features .txt-d { color: #A0A0A8; }
+      .features .icn { background: rgba(255,107,74,0.16); }
+      .price { background: #232326; border-color: rgba(255,255,255,0.08); }
+      .price.selected { background: rgba(255,107,74,0.14); }
+      .price .lbl, .price .amt { color: #FFF; }
+      .price .sub, .price .amtsub { color: #9E9EA5; }
+      .value-list li { color: #F5F5F7; }
+      .fine, .caption { color: #9E9EA5; }
+      .caption strong { color: #FFF; }
+      .cta-primary { background: #F5F5F7; color: #000; }
+      .cta-primary.brand { background: var(--brand); color: #FFF; }
+      .cta-secondary { color: #9E9EA5; }
+      .trust { background: rgba(52,199,89,0.14); color: #7FD59E; }
+
+      section.notes { background: #1C1C1E; }
+      section.notes h2 { color: #FFF; }
+      section.notes p, section.notes li, .grid .item .v, .qa .body { color: #E5E5EA; }
+      section.notes > p { color: #9E9EA5; }
+      .grid .item { background: #232326; border-color: rgba(255,255,255,0.06); }
+      .qa { border-color: rgba(255,255,255,0.08); }
+    }
+  
+
+/* Export overrides */
+html, body {
+  margin: 0 !important;
+  padding: 0 !important;
+  background: #0B0B10 !important;
+  min-height: 100vh;
+}
+body {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 32px 0 !important;
+}
+.caption { display: none !important; }
+.frame { margin: 0 auto !important; }
+</style>
+</head>
+<body>
+<div class="frame">
+    <div class="phone">
+      <div class="status">
+        <span>9:41</span>
+        <span class="signal">
+          <svg width="16" height="10" viewBox="0 0 16 10" fill="currentColor"><rect x="0" y="6" width="3" height="4" rx="0.5"/><rect x="4" y="4" width="3" height="6" rx="0.5"/><rect x="8" y="2" width="3" height="8" rx="0.5"/><rect x="12" y="0" width="3" height="10" rx="0.5"/></svg>
+          <svg width="16" height="10" viewBox="0 0 16 10" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="0.5" y="2" width="12" height="6" rx="1.5"/><rect x="13.5" y="4" width="1.5" height="2" rx="0.4" fill="currentColor" stroke="none"/><rect x="2" y="3.5" width="9" height="3" rx="0.5" fill="currentColor" stroke="none"/></svg>
+        </span>
+      </div>
+      <div class="screen">
+        <div class="progress">
+          <span class="done"></span><span class="done"></span><span class="done"></span><span class="active"></span>
+        </div>
+        <div class="hero">
+          <svg class="illus" viewBox="0 0 240 200" width="220">
+            <defs>
+              <filter id="mvpFolderShadow" x="-20%" y="-20%" width="140%" height="140%">
+                <feDropShadow dx="0" dy="6" stdDeviation="8" flood-opacity="0.14"/>
+              </filter>
+            </defs>
+            <g opacity="0.85">
+              <g transform="translate(20, 20) rotate(-14)">
+                <rect width="36" height="46" rx="4" fill="#2B5CE6"/>
+                <text x="18" y="30" text-anchor="middle" fill="#fff" font-family="-apple-system" font-size="16" font-weight="800">W</text>
+              </g>
+              <g transform="translate(70, 12) rotate(-6)">
+                <rect width="36" height="46" rx="4" fill="#217346"/>
+                <text x="18" y="30" text-anchor="middle" fill="#fff" font-family="-apple-system" font-size="16" font-weight="800">X</text>
+              </g>
+              <g transform="translate(122, 8) rotate(4)">
+                <rect width="36" height="46" rx="4" fill="#D24726"/>
+                <text x="18" y="30" text-anchor="middle" fill="#fff" font-family="-apple-system" font-size="16" font-weight="800">P</text>
+              </g>
+              <g transform="translate(174, 16) rotate(12)">
+                <rect width="36" height="46" rx="4" fill="#E53935"/>
+                <text x="18" y="32" text-anchor="middle" fill="#fff" font-family="-apple-system" font-size="10" font-weight="800">PDF</text>
+              </g>
+            </g>
+            <g stroke="#FF6B4A" stroke-width="1.2" stroke-linecap="round" opacity="0.5" fill="none">
+              <path d="M38 78 Q60 90 120 110" stroke-dasharray="2 4"/>
+              <path d="M88 68 Q100 90 120 110" stroke-dasharray="2 4"/>
+              <path d="M140 58 Q135 90 120 110" stroke-dasharray="2 4"/>
+              <path d="M192 68 Q170 90 120 110" stroke-dasharray="2 4"/>
+            </g>
+            <g filter="url(#mvpFolderShadow)" transform="translate(60, 100)">
+              <path d="M0 12 Q0 4 8 4 L36 4 L44 12 L112 12 Q120 12 120 20 L120 76 Q120 84 112 84 L8 84 Q0 84 0 76 Z" fill="#FF6B4A"/>
+              <rect x="0" y="20" width="120" height="60" rx="6" fill="#FF8C68"/>
+              <rect x="0" y="20" width="120" height="8" fill="rgba(0,0,0,0.06)"/>
+            </g>
+          </svg>
+        </div>
+        <h2 class="headline">Pick a folder —<br>your library, ready</h2>
+        <p class="subhead">Grant access once and Word Office finds and organizes what you already have — <strong>right where your files live, nothing uploaded</strong></p>
+        <div class="trust">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M7 1 L2 3 v4 c0 3 2 5 5 6 3-1 5-3 5-6 V3 z" stroke-linejoin="round"/><path d="M5 7 L6.5 8.5 L9 5.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>On-device only · Encrypted at rest · Revoke anytime in Settings</span>
+        </div>
+        <button class="cta-primary brand">Choose Folder</button>
+        <button class="cta-secondary">I'll do this later</button>
+      </div>
+    </div>
+    <div class="caption"><strong>MVP Screen 4</strong> · Folder + Ready (merged) — <span style="color:var(--brand-strong)">Aha moment</span></div>
+  </div>
+</body>
+</html>

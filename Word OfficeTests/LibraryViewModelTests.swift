@@ -20,6 +20,8 @@ struct LibraryViewModelTests {
     let reminders: MockReminders
     let importer: MockImporter
     let creator: MockDocumentCreator
+    let renamer: MockDocumentRenamer
+    let zipper: MockDocumentZipper
     let vm: LibraryViewModel
     let folderURL: URL
 
@@ -31,6 +33,8 @@ struct LibraryViewModelTests {
         self.reminders = MockReminders()
         self.importer = MockImporter()
         self.creator = MockDocumentCreator()
+        self.renamer = MockDocumentRenamer()
+        self.zipper = MockDocumentZipper()
         self.folderURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("wordoffice-vm-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
@@ -43,6 +47,8 @@ struct LibraryViewModelTests {
             reminders: reminders,
             importer: importer,
             documentCreator: creator,
+            documentRenamer: renamer,
+            documentZipper: zipper,
             documentsURL: folderURL
         )
     }
@@ -52,6 +58,12 @@ struct LibraryViewModelTests {
     @Test("loadLibrary sets .notGranted when no bookmark saved")
     func loadLibraryNoBookmark() async {
         bookmarks.savedBookmark = nil
+        // Session 20 seeder auto-grant fallback (`LibraryViewModel.loadLibrary`
+        // treats no-bookmark + seeded flag as `.granted` on the app's own
+        // Documents/) would otherwise flip this test to `.granted`. Explicit
+        // clear ensures the classic "no bookmark ever saved" path is the
+        // one under test.
+        UserDefaults.standard.set(false, forKey: SampleFileSeeder.didSeedDefaultsKey)
 
         await vm.loadLibrary()
 
@@ -183,7 +195,7 @@ struct LibraryViewModelTests {
 
     // MARK: - Import (§4.5 v2)
 
-    @Test("importFiles delegates to importer and returns outcomes")
+    @Test("importFiles delegates to importer and drains the queue")
     func importFilesDelegates() async {
         let url = folderURL.appendingPathComponent("incoming.pdf")
         let successRef = DocumentRef(
@@ -192,12 +204,19 @@ struct LibraryViewModelTests {
             modifiedAt: Date(),
             kind: .pdf
         )
-        importer.outcomes = [ImportOutcome(sourceURL: url, result: .success(successRef))]
+        // Session 19 shape: `ImportOutcome.result` is now
+        // `Result<ImportResult, ImportError>`; success wraps
+        // `.imported(DocumentRef)` (was plain `DocumentRef`).
+        importer.outcomes = [ImportOutcome(sourceURL: url, result: .success(.imported(successRef)))]
 
-        let result = await vm.importFiles(from: [url])
+        // Session 19 change: `importFiles(from:)` now orchestrates a
+        // queue and returns `Void` (was `[ImportOutcome]`). The test
+        // observes success via the mock's captured resolutions +
+        // the entry landing in the store.
+        await vm.importFiles(from: [url])
 
-        #expect(result.count == 1)
-        #expect(importer.lastImportedURLs == [url])
+        #expect(importer.lastResolutions.map(\.url) == [url])
+        #expect(vm.store.entries.contains { $0.document.url == url })
     }
 
     @Test("importFiles sets errorMessage on any failure")
@@ -207,7 +226,7 @@ struct LibraryViewModelTests {
             ImportOutcome(sourceURL: url, result: .failure(.securityScopeAccessDenied))
         ]
 
-        _ = await vm.importFiles(from: [url])
+        await vm.importFiles(from: [url])
 
         #expect(vm.errorMessage != nil)
     }
@@ -320,10 +339,37 @@ final class MockReminders: RemindScheduling, @unchecked Sendable {
 final class MockImporter: DocumentImporting, @unchecked Sendable {
     var outcomes: [ImportOutcome] = []
     var lastImportedURLs: [URL]?
+    /// Preconfigured conflict lookup — key is `url.lastPathComponent`.
+    /// Empty map → `nameConflict(for:)` always returns nil (no-conflict
+    /// fast path in `LibraryViewModel.processNextPendingImport`).
+    var conflictsByFilename: [String: URL] = [:]
+    /// Session 19 — mirrors the new `importOne` contract added when the
+    /// conflict-resolution flow shipped. Consumes `outcomes` FIFO so
+    /// existing tests that hand it a single outcome (`outcomes = [x]`)
+    /// keep passing through `importFiles(from:)`'s per-URL loop
+    /// without special-casing the multi-URL batches new tests may add.
+    var lastResolutions: [(url: URL, resolution: ImportConflictResolution)] = []
 
     func importFiles(from urls: [URL]) async -> [ImportOutcome] {
         lastImportedURLs = urls
         return outcomes
+    }
+
+    func nameConflict(for url: URL) async -> URL? {
+        conflictsByFilename[url.lastPathComponent]
+    }
+
+    func importOne(url: URL, resolution: ImportConflictResolution) async -> ImportOutcome {
+        lastResolutions.append((url, resolution))
+        // Pop the first configured outcome (test authors typically
+        // stage one per expected import). Fall back to a synthesised
+        // skipped outcome if the test forgot to configure — matches
+        // the safer "do-nothing on stub gap" semantic that legacy
+        // tests relied on for pass-through.
+        if !outcomes.isEmpty {
+            return outcomes.removeFirst()
+        }
+        return ImportOutcome(sourceURL: url, result: .success(.skipped(sourceURL: url)))
     }
 }
 
@@ -339,6 +385,33 @@ final class MockDocumentCreator: DocumentCreating, @unchecked Sendable {
             url: FileManager.default.temporaryDirectory.appendingPathComponent("\(name)-\(UUID().uuidString).\(kind.rawValue)"),
             modifiedAt: Date(),
             kind: kind
+        )
+    }
+}
+
+final class MockDocumentRenamer: DocumentRenaming, @unchecked Sendable {
+    /// Records every rename call in order so tests can assert on it.
+    var renameRequests: [(url: URL, newFilename: String)] = []
+    /// If set, `rename` throws this error instead of doing the move — lets
+    /// tests exercise the failure branch of `LibraryViewModel.rename`.
+    var error: Error?
+
+    func rename(_ url: URL, to newFilename: String) async throws -> URL {
+        renameRequests.append((url, newFilename))
+        if let error { throw error }
+        return url.deletingLastPathComponent().appendingPathComponent(newFilename)
+    }
+}
+
+final class MockDocumentZipper: DocumentZipping, @unchecked Sendable {
+    var zipRequests: [(url: URL, folder: URL)] = []
+    var error: Error?
+
+    func zip(_ url: URL, into folder: URL) async throws -> URL {
+        zipRequests.append((url, folder))
+        if let error { throw error }
+        return folder.appendingPathComponent(
+            "\(url.deletingPathExtension().lastPathComponent).zip"
         )
     }
 }

@@ -33,7 +33,7 @@ final class MockArtifexDocumentWriter: DocumentWriting {
                 try DOCXCodec.write(text, to: url)
             }.value
 
-        case .xlsx, .pptx, .pdf, .doc, .xls, .ppt, .hwp, .hwpx:
+        case .xlsx, .pptx, .pdf, .doc, .xls, .ppt, .hwp, .hwpx, .zip:
             // Mock: no-op. Real writer via Artifex SDK arrives Sprint 0.2.
             break
         }

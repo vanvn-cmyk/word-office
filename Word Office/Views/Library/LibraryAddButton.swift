@@ -23,10 +23,17 @@ struct LibraryAddButton: View {
     /// Diameter of the circular FAB. Also used to compute how far above the
     /// FAB the popup menu sits (see `body`'s `.padding(.bottom, ...)`), so both
     /// values stay in lockstep.
-    static let fabDiameter: CGFloat = 56
+    static let fabDiameter: CGFloat = 60
 
     @Bindable var viewModel: LibraryViewModel
     let container: DependencyContainer
+    /// Read here so the FAB scan sheet's inner `.toastHost(_:)` can bridge
+    /// the environment presenter into an explicit param — SwiftUI sheets
+    /// present above scene-root overlays, and the scene's toast host is
+    /// invisible under a sheet. Same reason `EditorSheet` also hosts
+    /// its own toast.
+    @Environment(DSToastPresenter.self) private var toaster
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Open state of the popup menu — owned by `RootView` and threaded in
     /// here so `RootView.libraryShell` can render a full-screen invisible
@@ -37,7 +44,25 @@ struct LibraryAddButton: View {
     @State private var isPresentingImporter = false
     @State private var isPresentingScan = false
     @State private var comingSoonKind: DocumentKind?
-    @State private var ocrVM: OCRViewModel?
+
+    /// Eager-init in `init` (via `State(wrappedValue:)`) rather than lazily
+    /// in `.task { ocrVM = container.make…() }` on `body`. The lazy pattern
+    /// produced a real bug in `ToolsTabView` (see its file comment): a `.task`
+    /// on a view mounted inside the ZStack-of-three-tabs did not populate
+    /// state before a downstream sheet (`.sheet(isPresented: $isPresentingScan)`
+    /// here) tried to read it, so the sheet rendered a `ProgressView`
+    /// fallback and never updated. `LibraryAddButton` is in exactly that
+    /// mount pattern (it's a sibling in `RootView.customTabBar`, always
+    /// alive even when the Library tab is not selected), so it has the same
+    /// exposure and needs the same eager-init fix.
+    @State private var ocrVM: OCRViewModel
+
+    init(viewModel: LibraryViewModel, container: DependencyContainer, isMenuOpen: Binding<Bool>) {
+        self._viewModel = Bindable(wrappedValue: viewModel)
+        self.container = container
+        self._isMenuOpen = isMenuOpen
+        self._ocrVM = State(wrappedValue: container.makeOCRViewModel())
+    }
 
     var body: some View {
         // `fabButton` is the ONLY layout-participating child here. The popup
@@ -100,56 +125,51 @@ struct LibraryAddButton: View {
             }
             .sheet(isPresented: $isPresentingScan) {
                 NavigationStack {
-                    if let ocrVM {
-                        ScanFlowView(viewModel: ocrVM)
-                    } else {
-                        ProgressView()
-                    }
+                    // Sheet root has no back chevron; ScanFlowView needs its
+                    // own Cancel here — differs from the Tools-tab push where
+                    // the system back chevron already covers dismissal.
+                    ScanFlowView(viewModel: ocrVM, showsExplicitCancel: true)
                 }
+                // In-sheet toast host — save-success toasts fired from
+                // ScanFlowView would otherwise render below this sheet and
+                // stay invisible for the 3s dismiss window.
+                .toastHost(toaster)
             }
-            .task { if ocrVM == nil { ocrVM = container.makeOCRViewModel() } }
     }
 
     // MARK: - FAB
 
     private var fabButton: some View {
         Button {
-            if isMenuOpen { closeMenu() } else { openMenu() }
+            if isMenuOpen { $isMenuOpen.closeMenuAnimated(reduceMotion: reduceMotion) } else { openMenu() }
         } label: {
             Image(systemName: "plus")
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: Self.fabDiameter, height: Self.fabDiameter)
-                .background(
-                    LinearGradient(
-                        colors: [Color.dsBrandPrimary, Color.dsBrandPrimaryPressed],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    ),
-                    in: Circle()
-                )
-                .shadow(color: Color.dsBrandPrimary.opacity(0.35), radius: 14, y: 6)
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(Color.dsTextOnBrand)
                 .rotationEffect(.degrees(isMenuOpen ? 45 : 0))
+                .frame(width: Self.fabDiameter, height: Self.fabDiameter)
         }
+        // Liquid Glass with brand tint + interactive feedback (iOS 26
+        // pattern, matches Apple Music / Reminders floating action
+        // buttons). `.interactive()` gives the built-in press dip that
+        // glass surfaces have — better than a custom scale animation.
+        // `GlassEffectContainer` in `RootView.customTabBar` groups this
+        // with the tab pill for coherent glass sampling.
+        .glassEffect(.regular.tint(Color.dsBrandPrimary).interactive(), in: .circle)
+        .shadow(color: Color.dsBrandPrimary.opacity(0.28), radius: 12, y: 6)
         .accessibilityLabel(isMenuOpen ? "Close" : "Add")
     }
 
-    /// Explicit `withAnimation` at both call sites (not one shared `.animation(value:)`
-    /// on the container) — open and close each get their own short, fixed duration
-    /// instead of inheriting whatever transaction happens to be in flight, which is
+    /// Explicit `withAnimation` (not one shared `.animation(value:)` on the
+    /// container) — open gets its own short, fixed duration instead of
+    /// inheriting whatever transaction happens to be in flight, which is
     /// what made the close transition feel sluggish under `.popover`.
+    /// Closing is handled by the shared `Binding<Bool>.closeMenuAnimated`
+    /// helper (see `Binding+MenuAnimation.swift`) — every closer, whether
+    /// menu row, scrim tap, tab switch, or FAB re-tap, uses the same
+    /// idempotent guard + 0.15s ease-out, so they can never drift apart.
     private func openMenu() {
-        withAnimation(.easeOut(duration: 0.2)) { isMenuOpen = true }
-    }
-
-    private func closeMenu() {
-        // Idempotency guard: if `isMenuOpen` is already false when this
-        // fires (e.g., the outside-tap scrim in `RootView` already toggled
-        // the shared binding one tick before a menu row's action ran),
-        // opening a `withAnimation` transaction on a no-op state change
-        // spends a frame animating nothing. Mirrors `RootView.closeFABMenu`.
-        guard isMenuOpen else { return }
-        withAnimation(.easeOut(duration: 0.15)) { isMenuOpen = false }
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { isMenuOpen = true }
     }
 
     // MARK: - Menu content
@@ -158,8 +178,8 @@ struct LibraryAddButton: View {
         VStack(alignment: .leading, spacing: 0) {
             menuSectionHeader("Create new")
             ForEach([DocumentKind.docx, .xlsx, .pptx], id: \.self) { kind in
-                menuRow(icon: kind.systemImage, title: createLabel(for: kind)) {
-                    closeMenu()
+                menuRow(image: iconAssetName(for: kind), title: createLabel(for: kind)) {
+                    $isMenuOpen.closeMenuAnimated(reduceMotion: reduceMotion)
                     Task { await handleCreate(kind: kind) }
                 }
             }
@@ -168,7 +188,7 @@ struct LibraryAddButton: View {
 
             menuSectionHeader("Add existing")
             menuRow(icon: "square.and.arrow.down", title: "Import file") {
-                closeMenu()
+                $isMenuOpen.closeMenuAnimated(reduceMotion: reduceMotion)
                 isPresentingImporter = true
             }
 
@@ -176,7 +196,7 @@ struct LibraryAddButton: View {
 
             menuSectionHeader("Scan")
             menuRow(icon: "viewfinder", title: "Scan document") {
-                closeMenu()
+                $isMenuOpen.closeMenuAnimated(reduceMotion: reduceMotion)
                 isPresentingScan = true
             }
         }
@@ -221,6 +241,31 @@ struct LibraryAddButton: View {
         .contentShape(Rectangle())
     }
 
+    /// Same shape as the SF-Symbol overload above, but takes an asset
+    /// image name so the Create New rows can render the full-color app
+    /// icons (Word / Excel / PowerPoint) instead of the generic
+    /// `doc.text` / `tablecells` / `rectangle.on.rectangle` symbols.
+    /// Import file and Scan document keep the symbol overload — they
+    /// aren't tied to one document family.
+    private func menuRow(image: String, title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: DSSpacing.sm) {
+                Image(image)
+                    .resizable()
+                    .renderingMode(.original)
+                    .frame(width: 24, height: 24)
+                Text(title)
+                    .font(DSFont.body)
+                    .foregroundStyle(Color.dsTextPrimary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, DSSpacing.md)
+        .padding(.vertical, DSSpacing.sm)
+        .contentShape(Rectangle())
+    }
+
     private func handleCreate(kind: DocumentKind) async {
         let outcome = await viewModel.createBlankDocument(kind: kind)
         if outcome == .unsupported {
@@ -234,6 +279,22 @@ struct LibraryAddButton: View {
         case .xlsx: "Spreadsheet"
         case .pptx: "Presentation"
         default:    kind.displayName
+        }
+    }
+
+    /// Asset name for the Create New menu row icons — matches the four
+    /// imageset folders in `Assets.xcassets`. The `default` branch is
+    /// unreachable in practice (the forEach iterates the fixed
+    /// `[.docx, .xlsx, .pptx]` triple) but Swift requires exhaustive
+    /// switch on the open `DocumentKind` enum.
+    private func iconAssetName(for kind: DocumentKind) -> String {
+        switch kind {
+        case .docx: return "DocumentIconWord"
+        case .xlsx: return "DocumentIconSpreadsheet"
+        case .pptx: return "DocumentIconPresentation"
+        default:
+            assertionFailure("iconAssetName: no asset for \(kind) — add it to Assets.xcassets")
+            return ""
         }
     }
 }

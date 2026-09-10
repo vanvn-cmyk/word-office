@@ -7,9 +7,25 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A2B3C4D5E6F70012B3C4D5E6 /* OfficeBundle in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60011A2B3C4D5 /* OfficeBundle */; };
+		0DBE6288CB788EAE3A8A2925 /* DocumentLibraryScannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42A87D024EEB427FF044F4C1 /* DocumentLibraryScannerTests.swift */; };
 		13BE9831304596A2007D11B1 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = 13BE9830304596A2007D11B1 /* ZIPFoundation */; };
+		1E9F4415E7779D4F79EC4CD8 /* FolderBookmarkStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E64AD9D9E8EA2C36DBEE6D4B /* FolderBookmarkStoreTests.swift */; };
+		3A284BBD6758CCCD2F2CCD2C /* MetadataStoreImplTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 960BC3C36D2219ED04D5742B /* MetadataStoreImplTests.swift */; };
 		84E38DB730412DCD007F4CB1 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 84E38DB630412DCD007F4CB1 /* GRDB */; };
+		8EC4BBD32E2369DBC7C946D2 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 233F2F3C1CB91AF291D12A84 /* Foundation.framework */; };
+		FF72F5C74D3F4D7C6103DFCA /* LibraryViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC48563032893CC0EB65D522 /* LibraryViewModelTests.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		9CA1AB2A30EAF9C9BBF025A6 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 8465955F303D96BC00A6CAAC /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 84659566303D96BC00A6CAAC;
+			remoteInfo = "Word Office";
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
 		8439AB0D30412B6800259C81 /* Embed Frameworks */ = {
@@ -25,7 +41,14 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		A1B2C3D4E5F60011A2B3C4D5 /* OfficeBundle */ = {isa = PBXFileReference; lastKnownFileType = folder; name = OfficeBundle; path = OfficeBundle; sourceTree = SOURCE_ROOT; };
+		233F2F3C1CB91AF291D12A84 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
+		42A87D024EEB427FF044F4C1 /* DocumentLibraryScannerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DocumentLibraryScannerTests.swift; sourceTree = "<group>"; };
 		84659567303D96BC00A6CAAC /* Word Office.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Word Office.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		954CA2E44099D5ADAA62E1F6 /* Word OfficeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Word OfficeTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		960BC3C36D2219ED04D5742B /* MetadataStoreImplTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MetadataStoreImplTests.swift; sourceTree = "<group>"; };
+		BC48563032893CC0EB65D522 /* LibraryViewModelTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LibraryViewModelTests.swift; sourceTree = "<group>"; };
+		E64AD9D9E8EA2C36DBEE6D4B /* FolderBookmarkStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FolderBookmarkStoreTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -37,6 +60,14 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		7EC68228218047C2925E723F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8EC4BBD32E2369DBC7C946D2 /* Foundation.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		84659564303D96BC00A6CAAC /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -49,11 +80,25 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		76B3EC3BCDA82D388E5257B8 /* Word OfficeTests */ = {
+			isa = PBXGroup;
+			children = (
+				42A87D024EEB427FF044F4C1 /* DocumentLibraryScannerTests.swift */,
+				E64AD9D9E8EA2C36DBEE6D4B /* FolderBookmarkStoreTests.swift */,
+				BC48563032893CC0EB65D522 /* LibraryViewModelTests.swift */,
+				960BC3C36D2219ED04D5742B /* MetadataStoreImplTests.swift */,
+			);
+			path = "Word OfficeTests";
+			sourceTree = "<group>";
+		};
 		8465955E303D96BC00A6CAAC = {
 			isa = PBXGroup;
 			children = (
 				84659569303D96BC00A6CAAC /* Word Office */,
+				A1B2C3D4E5F60011A2B3C4D5 /* OfficeBundle */,
 				84659568303D96BC00A6CAAC /* Products */,
+				B33C52DE9080894ADA0C5943 /* Frameworks */,
+				76B3EC3BCDA82D388E5257B8 /* Word OfficeTests */,
 			);
 			sourceTree = "<group>";
 		};
@@ -61,13 +106,48 @@
 			isa = PBXGroup;
 			children = (
 				84659567303D96BC00A6CAAC /* Word Office.app */,
+				954CA2E44099D5ADAA62E1F6 /* Word OfficeTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		B33C52DE9080894ADA0C5943 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				E568692D937E53E94C9DAAF3 /* iOS */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		E568692D937E53E94C9DAAF3 /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				233F2F3C1CB91AF291D12A84 /* Foundation.framework */,
+			);
+			name = iOS;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		53531C5EB3E86624DA340937 /* Word OfficeTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1AFD4F29D2F5E81FD4C1A3E0 /* Build configuration list for PBXNativeTarget "Word OfficeTests" */;
+			buildPhases = (
+				25E0D3DDA3C3DA9F04F02F84 /* Sources */,
+				7EC68228218047C2925E723F /* Frameworks */,
+				C0082D8A804C77507F2DFF90 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				4DFC8963B5228F46C7C0201F /* PBXTargetDependency */,
+			);
+			name = "Word OfficeTests";
+			productName = "Word OfficeTests";
+			productReference = 954CA2E44099D5ADAA62E1F6 /* Word OfficeTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		84659566303D96BC00A6CAAC /* Word Office */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 84659572303D96BE00A6CAAC /* Build configuration list for PBXNativeTarget "Word Office" */;
@@ -127,6 +207,7 @@
 			projectRoot = "";
 			targets = (
 				84659566303D96BC00A6CAAC /* Word Office */,
+				53531C5EB3E86624DA340937 /* Word OfficeTests */,
 			);
 		};
 /* End PBXProject section */
@@ -136,12 +217,31 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A2B3C4D5E6F70012B3C4D5E6 /* OfficeBundle in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C0082D8A804C77507F2DFF90 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		25E0D3DDA3C3DA9F04F02F84 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0DBE6288CB788EAE3A8A2925 /* DocumentLibraryScannerTests.swift in Sources */,
+				1E9F4415E7779D4F79EC4CD8 /* FolderBookmarkStoreTests.swift in Sources */,
+				FF72F5C74D3F4D7C6103DFCA /* LibraryViewModelTests.swift in Sources */,
+				3A284BBD6758CCCD2F2CCD2C /* MetadataStoreImplTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		84659563303D96BC00A6CAAC /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -151,7 +251,31 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		4DFC8963B5228F46C7C0201F /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = "Word Office";
+			target = 84659566303D96BC00A6CAAC /* Word Office */;
+			targetProxy = 9CA1AB2A30EAF9C9BBF025A6 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		5560BB5942508605EBF55CDC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.app.word.office.Word-Office.Tests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Word Office.app/Word Office";
+			};
+			name = Debug;
+		};
 		84659570303D96BE00A6CAAC /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -362,9 +486,34 @@
 			};
 			name = Release;
 		};
+		88C546FB03EA9119BEF0EB88 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.app.word.office.Word-Office.Tests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Word Office.app/Word Office";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		1AFD4F29D2F5E81FD4C1A3E0 /* Build configuration list for PBXNativeTarget "Word OfficeTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				88C546FB03EA9119BEF0EB88 /* Release */,
+				5560BB5942508605EBF55CDC /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		84659562303D96BC00A6CAAC /* Build configuration list for PBXProject "Word Office" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
