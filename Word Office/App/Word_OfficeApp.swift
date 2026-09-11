@@ -2,6 +2,18 @@ import SwiftUI
 
 @main
 struct Word_OfficeApp: App {
+
+    init() {
+        #if DEBUG
+        // Allow simulator test runs to bypass first-run onboarding via a launch arg.
+        // Usage: simctl launch UDID BUNDLE -- --skip-onboarding
+        if CommandLine.arguments.contains("--skip-onboarding") {
+            UserDefaults.standard.set(true, forKey: "root.hasCompletedOnboarding")
+            UserDefaults.standard.set(true, forKey: SampleFileSeeder.didSeedDefaultsKey)
+        }
+        #endif
+    }
+
     @State private var appState = AppState()
     @State private var themeStore = ThemeStore()
     @State private var sessionStore = SessionStore()

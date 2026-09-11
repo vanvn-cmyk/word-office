@@ -412,31 +412,26 @@ class $ {
       case "saveChanges":
         Q({
           type: "unSaveLock",
-          index: -1,
+          index: typeof A.endIndex === "number" ? A.endIndex : typeof A.startIndex === "number" ? A.startIndex : 0,
           syncChangesIndex: ++this.syncChangesIndex,
           time: +/* @__PURE__ */ new Date()
         });
         break;
-      case "getLock":
-        Q({
-          type: "getLock",
-          locks: {
-            [A.block]: {
-              time: +/* @__PURE__ */ new Date(),
-              user: P == null ? void 0 : P.id,
-              block: A.block
-            }
-          }
-        }), Q({
-          type: "releaseLock",
-          locks: {
-            [A.block]: {
-              time: +/* @__PURE__ */ new Date(),
-              user: P == null ? void 0 : P.id,
-              block: A.block
-            }
-          }
-        });
+      case "getLock": {
+        // YLb (local user key) = user.id + indexUser (string concat). Must match so
+        // xye sets state=2 (my lock) → zFc guard "2!=G.state" skips bEi/eEi entirely,
+        // avoiding "G.indexOf" TypeError when Element.sheetId is undefined.
+        const ownerId = (P == null ? void 0 : P.id) + 1;
+        const blocks = Array.isArray(A.block) ? A.block : A.block ? [A.block] : [];
+        const lockMap = {};
+        for (const bl of blocks) {
+          const key = String(bl);
+          lockMap[key] = { time: +/* @__PURE__ */ new Date(), user: ownerId, block: bl };
+        }
+        Q({ type: "getLock", locks: lockMap });
+        break;
+      }
+      case "releaseLock":
         break;
     }
   }

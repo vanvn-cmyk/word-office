@@ -310,6 +310,14 @@
       document.getElementById('loading').style.display = 'none';
       document.getElementById('placeholder').style.display = 'block';
 
+      // Mark both frames as fully loaded so the WKUserScript unhandledrejection
+      // handler (injected into every frame via forMainFrameOnly:false) knows
+      // that any subsequent promise rejection is a non-fatal feature error,
+      // not an engine-init failure.  The inner iframe (frameEditor) is the
+      // origin of most ONLYOFFICE runtime rejections (e.g. 'G.indexOf'),
+      // so it needs the flag too — setting only the outer window is not enough.
+      window._editorFullyLoaded = true;
+      win._editorFullyLoaded = true;
       window.webkit.messageHandlers.editorBridge.postMessage({ action: 'ready' });
     }
 

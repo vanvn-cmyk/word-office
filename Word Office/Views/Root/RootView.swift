@@ -114,6 +114,22 @@ struct RootView: View {
         .task {
             initializeViewModelsIfNeeded()
             await permissionVM?.checkExistingPermission()
+            #if DEBUG
+            // Auto-open a test file when launched with --open-xlsx or --open-docx.
+            // Usage: simctl launch UDID BUNDLE -- --open-xlsx
+            let args = CommandLine.arguments
+            let ext: String? = args.contains("--open-xlsx") ? "xlsx"
+                : args.contains("--open-docx") ? "docx"
+                : nil
+            if let ext, let kind = DocumentKind(rawValue: ext) {
+                let docsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                let prefix = ext == "xlsx" ? "Get Started Excel" : "Get Started Word"
+                let fileURL = docsURL.appendingPathComponent("\(prefix).\(ext)")
+                if FileManager.default.fileExists(atPath: fileURL.path) {
+                    editingRef = DocumentRef(name: fileURL.lastPathComponent, url: fileURL, modifiedAt: Date(), kind: kind)
+                }
+            }
+            #endif
         }
     }
 

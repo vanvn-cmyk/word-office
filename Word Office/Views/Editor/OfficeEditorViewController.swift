@@ -20,6 +20,12 @@ final class OfficeEditorViewController: UIViewController {
     private var webViewReady = false
     // True after JS posts scriptReady — means window.receiveFileFromIOS is defined.
     private var scriptReady = false
+    // True after JS posts 'ready' (onAppReady fired, editor UI visible).
+    // Any editorError arriving before this is a fatal init failure.
+    // Any editorError arriving after this is a non-fatal runtime feature
+    // error (e.g. ONLYOFFICE module unavailable offline) — must NOT kill
+    // the editor or the user loses all unsaved edits.
+    private var editorLoaded = false
     // Watchdog: if scriptReady hasn't arrived within 40s of the page loading,
     // the JS bridge silently failed. Surface an error instead of an infinite spinner.
     private var scriptReadyWatchdog: DispatchWorkItem?
@@ -137,6 +143,15 @@ final class OfficeEditorViewController: UIViewController {
                 ); } catch(_) {}
             };
             window.addEventListener('unhandledrejection', function(e) {
+                // window._editorFullyLoaded is set by editor.html once onAppReady fires.
+                // After that point, rejections come from individual features (offline
+                // modules, unsupported chart types, clipboard access, etc.) — they are
+                // non-fatal and must NOT close the editor.
+                if (window._editorFullyLoaded) {
+                    console.warn('[editor] non-fatal rejection (feature error):', String(e.reason));
+                    return;
+                }
+                // Pre-load rejections are fatal (module import / engine init failed).
                 try { webkit.messageHandlers.editorBridge.postMessage(
                     { action: 'editorError', message: 'Unhandled promise rejection: ' + String(e.reason) }
                 ); } catch(_) {}
@@ -407,10 +422,22 @@ extension OfficeEditorViewController: OfficeBridgeDelegate {
         case .save(let fileName, let data):
             onFileSaved?(data, fileName)
 
-        case .editorError(let msg), .openError(let msg):
+        case .editorError(let msg):
+            // Fatal only while the editor is still initialising (engine load failure,
+            // api.js error, etc.). Once the editor UI is visible (`editorLoaded`),
+            // these are runtime feature errors from ONLYOFFICE internals (offline
+            // modules, unsupported operations, clipboard access) — swallow silently
+            // so the user keeps their unsaved edits.
+            if !editorLoaded {
+                onError?(msg)
+            }
+
+        case .openError(let msg):
+            // Always fatal — the document itself could not be opened.
             onError?(msg)
 
         case .ready:
+            editorLoaded = true
             onReady?()
 
         case .documentStateChange(let dirty):
