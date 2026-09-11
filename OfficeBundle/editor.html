@@ -213,33 +213,23 @@
     // CSS injected into the inner iframe (frameEditor) to strip ONLYOFFICE chrome.
     // Selectors verified against ONLYOFFICE v9.3.x app.css from CDN bundle.
     const OO_IOS_CSS = [
-      // ── Header bar: ONLYOFFICE logo + File/Home/Insert tab row (v9) ──────────
+      // ── Header bar: ONLYOFFICE logo + File/Home/Insert tab row ───────────────
+      // Hidden because the iOS nav bar (title + Done button) replaces it.
       '#header-row,#header-logo',
       '{display:none!important;height:0!important;min-height:0!important;overflow:hidden!important}',
-      // ── Toolbar ribbon: Bold/Italic/Format buttons (v9) ──────────────────────
-      '#toolbar',
-      '{display:none!important;height:0!important;min-height:0!important;overflow:hidden!important}',
-      // ── Formula bar: cell name box + fx button + input (SSE v9 only) ─────────
-      '#cell-editing-box',
-      '{display:none!important;height:0!important;overflow:hidden!important}',
-      // ── Left side panel: icon strip + chat/comment/search panels (v9) ────────
-      '.left-panel,#left-panel-chat,#left-panel-comments,',
-      '#left-panel-history,#left-panel-search',
-      '{display:none!important;width:0!important;overflow:hidden!important}',
-      // ── Status bar at bottom: sheet tabs, zoom, page info (v9) ──────────────
-      '#statusbar,.statusbar',
-      '{display:none!important;height:0!important;overflow:hidden!important}',
-      // ── Scrollbar chrome ─────────────────────────────────────────────────────
+      // ── Scrollbar chrome (not usable on touch; scrolling handled by WKWebView) ─
       '#ws-v-scrollbar,#ws-h-scrollbar,#ws-scrollbar-corner',
       '{display:none!important}',
       '::-webkit-scrollbar{width:0!important;height:0!important}',
+      // NOTE: toolbar (#toolbar), formula bar (#cell-editing-box), left panel
+      // (.left-panel), and status bar (#statusbar) are intentionally NOT hidden —
+      // they provide essential editing features (formatting, cell input, sheet tabs).
     ].join('');
 
-    // Elements to force-hide via inline style (in addition to CSS) since
-    // the React app may set explicit style attributes that override our stylesheet.
+    // Elements to force-hide via inline style on first paint (belt-and-suspenders
+    // for elements that carry an explicit style="display:block" attribute).
     const CHROME_SELECTORS = [
-      '#header-row', '#header-logo', '#toolbar',
-      '#cell-editing-box', '.left-panel', '#statusbar', '.statusbar',
+      '#header-row', '#header-logo',
     ];
 
     function injectIOSChrome(iDoc) {
@@ -259,21 +249,13 @@
         });
       }
 
+      // One-shot forceHide() handles elements that already exist with inline
+      // display:block at injection time. CSS !important handles all future elements
+      // ONLYOFFICE creates dynamically — no MutationObserver needed.
+      // (A previous MutationObserver that dispatched resize on every mutation was
+      // removed: it caused an infinite mutation→resize→layout→mutation loop during
+      // spreadsheet rendering at ~89%, preventing the load from completing.)
       forceHide();
-
-      // MutationObserver — re-run when ONLYOFFICE async-renders elements
-      new MutationObserver(function() {
-        forceHide();
-        // After each mutation, prod OO to recalculate layout without the chrome
-        try { iDoc.defaultView && iDoc.defaultView.dispatchEvent(new Event('resize')); } catch(_) {}
-      }).observe(iDoc.documentElement, { childList: true, subtree: true });
-
-      // Interval fallback for deferred React renders (runs 20× over 10s)
-      var n = 0;
-      var t = setInterval(function() {
-        forceHide();
-        if (++n >= 20) clearInterval(t);
-      }, 500);
     }
 
     // ── onAppReady — patch inner iframe and inject api.js ─────────────────────

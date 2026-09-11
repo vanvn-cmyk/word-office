@@ -153,30 +153,19 @@ final class OfficeEditorViewController: UIViewController {
         let ooUIScript = WKUserScript(source: #"""
             (function() {
                 var CSS = [
-                    /* ── v9: header bar (ONLYOFFICE logo + File/Home/Insert tabs) ── */
+                    /* ── Header bar: ONLYOFFICE logo + File/Home/Insert tabs ── */
+                    /* Hidden because the iOS nav bar replaces it.              */
                     '#header-row,#header-logo',
                     '{display:none!important;height:0!important;min-height:0!important;overflow:hidden!important}',
-                    /* ── v9: formatting toolbar ribbon ── */
-                    '#toolbar',
-                    '{display:none!important;height:0!important;min-height:0!important;overflow:hidden!important}',
-                    /* ── v9: formula bar in Spreadsheet Editor ── */
-                    '#cell-editing-box',
-                    '{display:none!important;height:0!important;overflow:hidden!important}',
-                    /* ── v9: left side panel ── */
-                    '.left-panel,#left-panel-chat,#left-panel-comments,',
-                    '#left-panel-history,#left-panel-search',
-                    '{display:none!important;width:0!important;overflow:hidden!important}',
-                    /* ── v9: status bar (sheet tabs + zoom) ── */
-                    '#statusbar,.statusbar',
-                    '{display:none!important;height:0!important;overflow:hidden!important}',
-                    /* ── scrollbars ── */
+                    /* ── Scrollbars (touch scrolling handled by WKWebView) ── */
                     '#ws-v-scrollbar,#ws-h-scrollbar,#ws-scrollbar-corner{display:none!important}',
                     '::-webkit-scrollbar{width:0!important;height:0!important}'
+                    /* toolbar (#toolbar), formula bar (#cell-editing-box), left panel */
+                    /* and status bar are intentionally kept — they are editing features. */
                 ].join('');
 
                 var SELECTORS = [
-                    '#header-row','#header-logo','#toolbar',
-                    '#cell-editing-box','.left-panel','#statusbar','.statusbar'
+                    '#header-row', '#header-logo'
                 ];
 
                 function inject() {
