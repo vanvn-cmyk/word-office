@@ -24,12 +24,16 @@ struct OnboardingTrackDocumentsHero: View {
     @State private var isPDFSigned = false
 
     var body: some View {
-        HStack(alignment: .center, spacing: -8) {
-            listCard
-                .zIndex(0)
-            timelineColumn
-                .padding(.top, 40)
-                .zIndex(1)
+        ZStack {
+            backgroundPages
+
+            HStack(alignment: .center, spacing: -8) {
+                listCard
+                    .zIndex(0)
+                timelineColumn
+                    .padding(.top, 40)
+                    .zIndex(1)
+            }
         }
         .padding(.horizontal, DSSpacing.xs)
         .frame(maxWidth: .infinity)
@@ -61,6 +65,53 @@ struct OnboardingTrackDocumentsHero: View {
             withAnimation(.easeOut(duration: 0.4)) { isPDFSigned = true }
             try? await Task.sleep(nanoseconds: 2_200_000_000)
         }
+    }
+
+    // MARK: - Background peeking pages
+
+    /// Faint document pages peeking out from behind the main card, one near
+    /// each corner — purely decorative depth cue matching the approved
+    /// mockup's floating-pages background. Sits below the card in the
+    /// ZStack and ignores hit testing. Offsets are pushed well clear of the
+    /// card's own rounded corners — placing a page so its straight edge
+    /// crossed the card's corner curve produced a visible seam where the
+    /// two anti-aliased edges met (looked like a crack through the card).
+    private var backgroundPages: some View {
+        ZStack {
+            peekingPage
+                .rotationEffect(.degrees(-13))
+                .offset(x: -98, y: -102)
+            peekingPage
+                .rotationEffect(.degrees(8))
+                .offset(x: 78, y: -106)
+            peekingPage
+                .rotationEffect(.degrees(-9))
+                .offset(x: -92, y: 38)
+            peekingPage
+                .rotationEffect(.degrees(12))
+                .offset(x: 118, y: -52)
+        }
+        .allowsHitTesting(false)
+    }
+
+    private var peekingPage: some View {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(Color.dsSurfacePrimary.opacity(0.55))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.5), lineWidth: 0.6)
+            }
+            .overlay(alignment: .topLeading) {
+                VStack(alignment: .leading, spacing: 7) {
+                    Capsule().fill(Color.dsTextTertiary.opacity(0.28))
+                        .frame(width: 48, height: 6)
+                    Capsule().fill(Color.dsTextTertiary.opacity(0.18))
+                        .frame(width: 32, height: 5)
+                }
+                .padding(15)
+            }
+            .frame(width: 88, height: 112)
+            .shadow(color: Color.black.opacity(0.06), radius: 8, y: 4)
     }
 
     // MARK: - List card

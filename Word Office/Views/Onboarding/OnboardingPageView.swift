@@ -83,10 +83,26 @@ struct OnboardingPageView: View {
     @ViewBuilder
     private var heroContent: some View {
         switch page.id {
-        case .editOffice:
-            OnboardingEditHero(isActive: isActive)
         case .tools:
-            OnboardingToolsHero(isActive: isActive)
+            ZStack(alignment: .bottom) {
+                Image(page.imageName)
+                    .resizable()
+                    .scaledToFit()
+                    .padding(DSSpacing.sm)
+
+                // Merge + Split badges added alongside the original PNG —
+                // the PNG alone (Convert/Sign/Compress) doesn't depict
+                // these two real `ToolsTabView` tools, and Compress isn't
+                // a real feature (cut from MVP scope) so it isn't
+                // represented here either. Staggered vertically (Split
+                // above, Merge below) rather than side by side.
+                ZStack {
+                    toolBadge(icon: "square.split.2x1", label: "Split")
+                        .offset(x: 138, y: -168)
+                    toolBadge(icon: "doc.on.doc.fill", label: "Merge")
+                        .offset(x: -108, y: 18)
+                }
+            }
         case .trackDocuments:
             OnboardingTrackDocumentsHero(isActive: isActive)
         default:
@@ -94,6 +110,25 @@ struct OnboardingPageView: View {
                 .resizable()
                 .scaledToFit()
                 .padding(DSSpacing.sm)
+        }
+    }
+
+    /// Small icon badge for a real `ToolsTabView` tool not shown in the S2
+    /// PNG (Merge/Split) — same rounded-square style as the PNG's own
+    /// signature/checkmark accents, tinted with the PDF-document color to
+    /// match those tools' real icon tint in `ToolsTabView`.
+    private func toolBadge(icon: String, label: String) -> some View {
+        VStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 42, height: 42)
+                .background(Color.dsDocumentPDF.gradient, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .shadow(color: Color.dsDocumentPDF.opacity(0.35), radius: 8, y: 4)
+
+            Text(label)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(OnboardingColors.textSecondary)
         }
     }
 

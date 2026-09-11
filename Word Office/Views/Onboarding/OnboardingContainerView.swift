@@ -44,7 +44,7 @@ struct OnboardingContainerView: View {
         }
         .animation(reduceMotion ? nil : .default, value: permissionVM.errorMessage)
         .animation(reduceMotion ? nil : .default, value: permissionVM.isRequesting)
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: viewModel.isLastPage)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: viewModel.currentIndex)
     }
 
     // MARK: - Top bar (progress indicator, leading + Skip, trailing)
@@ -64,7 +64,7 @@ struct OnboardingContainerView: View {
 
             Spacer()
 
-            if !viewModel.isLastPage {
+            if viewModel.isFirstPage {
                 // Backing pill, not bare text — the background blob's anchor
                 // sits directly under this corner on `.tools`, and at its
                 // brightest breathing phase a plain gray label here drops

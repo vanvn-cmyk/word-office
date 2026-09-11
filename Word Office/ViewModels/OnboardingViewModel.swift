@@ -23,6 +23,7 @@ final class OnboardingViewModel {
 
     var currentPage: OnboardingPage { pages[currentIndex] }
     var isLastPage: Bool { currentIndex == pages.count - 1 }
+    var isFirstPage: Bool { currentIndex == 0 }
 
     /// Advance to the next page, or finish if we're already on the last.
     /// Non-last pages' primary CTA calls this; S4 uses `finish()` directly
