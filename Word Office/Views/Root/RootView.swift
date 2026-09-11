@@ -68,20 +68,15 @@ struct RootView: View {
             // `permissionVM` for the folder grant. Once completed (grant or
             // "Maybe Later"), `hasCompletedOnboarding` flips true and the
             // permission-state switch below owns routing from here on.
-            // Session 19 — bundle-seeded first launch skips onboarding
-            // entirely. `SampleFileSeeder` (fires from
-            // `DependencyContainer.init`) flips `didSeedDefaultsKey`
-            // to true before the view hierarchy first renders, so
-            // this branch reads the flag on the first appearance and
-            // marks onboarding done in the same tick. Users open the
-            // app for the first time and land straight in Library
-            // with the three tour files already visible — no folder-
-            // permission gate.
+            // Session 19's bundle-seeded auto-skip (bypass the pager whenever
+            // `SampleFileSeeder` already ran) was reverted this session — the
+            // pager is the real first-run experience again. `SampleFileSeeder`
+            // still seeds the 3 tour files into `Documents/` from
+            // `DependencyContainer.init` regardless, so whichever way the
+            // user exits S4 (grant a folder, or "Maybe Later"), the Library
+            // shell they land in afterward already has the tour files ready.
             if !hasCompletedOnboarding {
-                if UserDefaults.standard.bool(forKey: SampleFileSeeder.didSeedDefaultsKey) {
-                    checkingView
-                        .onAppear { hasCompletedOnboarding = true }
-                } else if let onboardingVM, let permissionVM {
+                if let onboardingVM, let permissionVM {
                     OnboardingContainerView(
                         viewModel: onboardingVM,
                         permissionVM: permissionVM

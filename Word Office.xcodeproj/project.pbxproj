@@ -7,13 +7,13 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A2B3C4D5E6F70012B3C4D5E6 /* OfficeBundle in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60011A2B3C4D5 /* OfficeBundle */; };
 		0DBE6288CB788EAE3A8A2925 /* DocumentLibraryScannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42A87D024EEB427FF044F4C1 /* DocumentLibraryScannerTests.swift */; };
 		13BE9831304596A2007D11B1 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = 13BE9830304596A2007D11B1 /* ZIPFoundation */; };
 		1E9F4415E7779D4F79EC4CD8 /* FolderBookmarkStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E64AD9D9E8EA2C36DBEE6D4B /* FolderBookmarkStoreTests.swift */; };
 		3A284BBD6758CCCD2F2CCD2C /* MetadataStoreImplTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 960BC3C36D2219ED04D5742B /* MetadataStoreImplTests.swift */; };
 		84E38DB730412DCD007F4CB1 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 84E38DB630412DCD007F4CB1 /* GRDB */; };
 		8EC4BBD32E2369DBC7C946D2 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 233F2F3C1CB91AF291D12A84 /* Foundation.framework */; };
+		A2B3C4D5E6F70012B3C4D5E6 /* OfficeBundle in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60011A2B3C4D5 /* OfficeBundle */; };
 		FF72F5C74D3F4D7C6103DFCA /* LibraryViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC48563032893CC0EB65D522 /* LibraryViewModelTests.swift */; };
 /* End PBXBuildFile section */
 
@@ -41,12 +41,12 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		A1B2C3D4E5F60011A2B3C4D5 /* OfficeBundle */ = {isa = PBXFileReference; lastKnownFileType = folder; name = OfficeBundle; path = OfficeBundle; sourceTree = SOURCE_ROOT; };
 		233F2F3C1CB91AF291D12A84 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		42A87D024EEB427FF044F4C1 /* DocumentLibraryScannerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DocumentLibraryScannerTests.swift; sourceTree = "<group>"; };
 		84659567303D96BC00A6CAAC /* Word Office.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Word Office.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		954CA2E44099D5ADAA62E1F6 /* Word OfficeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Word OfficeTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		960BC3C36D2219ED04D5742B /* MetadataStoreImplTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MetadataStoreImplTests.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60011A2B3C4D5 /* OfficeBundle */ = {isa = PBXFileReference; lastKnownFileType = folder; path = OfficeBundle; sourceTree = SOURCE_ROOT; };
 		BC48563032893CC0EB65D522 /* LibraryViewModelTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LibraryViewModelTests.swift; sourceTree = "<group>"; };
 		E64AD9D9E8EA2C36DBEE6D4B /* FolderBookmarkStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FolderBookmarkStoreTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */

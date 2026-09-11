@@ -12,6 +12,7 @@ struct OnboardingPageIndicator: View {
     let currentIndex: Int
     let activeColor: Color
     let inactiveColor: Color
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Backwards-compatible init defaulting to brand colors for surfaces that
     /// don't pass colors explicitly.
@@ -32,7 +33,7 @@ struct OnboardingPageIndicator: View {
                 Capsule()
                     .fill(isActive ? activeColor : inactiveColor)
                     .frame(width: isActive ? 24 : 6, height: 6)
-                    .animation(.easeInOut(duration: 0.25), value: currentIndex)
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: currentIndex)
             }
         }
         .accessibilityElement(children: .ignore)

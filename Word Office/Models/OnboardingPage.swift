@@ -15,7 +15,6 @@ struct OnboardingPage: Identifiable, Hashable {
     let primaryCTA: String
     let secondaryCTA: String?
     let showsPrivacyChip: Bool
-    let usesGradientCTA: Bool
 
     enum Kind: Hashable {
         case editOffice
@@ -32,18 +31,19 @@ struct OnboardingPage: Identifiable, Hashable {
             subtitle: "Open and edit Word, Excel, and PowerPoint files while preserving every table, font, and layout.",
             primaryCTA: "Get Started",
             secondaryCTA: nil,
-            showsPrivacyChip: false,
-            usesGradientCTA: false
+            showsPrivacyChip: false
         ),
+        // Compress dropped from the subtitle — cut from MVP scope
+        // (Phase0-Implementation-Logic-v2.md); the hero image still shows
+        // its zip icon, a known follow-up pending a re-exported asset.
         OnboardingPage(
             id: .tools,
             imageName: "OnboardingTools",
             title: "Every tool, one tap away",
-            subtitle: "Convert to PDF, sign documents, and compress files—all without switching apps.",
+            subtitle: "Convert to PDF and sign documents—all without switching apps.",
             primaryCTA: "Continue",
             secondaryCTA: nil,
-            showsPrivacyChip: false,
-            usesGradientCTA: true
+            showsPrivacyChip: false
         ),
         OnboardingPage(
             id: .trackDocuments,
@@ -52,8 +52,7 @@ struct OnboardingPage: Identifiable, Hashable {
             subtitle: "Tag files as Draft, Reviewed, or Signed so you always know what needs attention.",
             primaryCTA: "Continue",
             secondaryCTA: nil,
-            showsPrivacyChip: false,
-            usesGradientCTA: true
+            showsPrivacyChip: false
         ),
         OnboardingPage(
             id: .chooseFolder,
@@ -62,8 +61,7 @@ struct OnboardingPage: Identifiable, Hashable {
             subtitle: "Grant access once to find and organize files directly on your device—nothing gets uploaded.",
             primaryCTA: "Choose Folder",
             secondaryCTA: "Maybe Later",
-            showsPrivacyChip: true,
-            usesGradientCTA: true
+            showsPrivacyChip: true
         ),
     ]
 }

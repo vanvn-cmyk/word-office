@@ -5,15 +5,17 @@ import SwiftUI
 /// `FolderPermissionOnboarding` on the fresh-install path. That view remains
 /// as the re-grant fallback after a user resets folder access from Settings.
 ///
-/// Layout (top→bottom):
-/// - Top bar: right-aligned "Skip" button (hidden on S4)
-/// - Pager: swipeable `TabView(.page)` with per-page hero card + text
-/// - Footer: pill dots + white primary CTA + (S4 only) "Maybe Later"
+/// Layout (top→bottom), matching the approved mockup
+/// (`onboarding-exports/S1-S4`):
+/// - Top bar: pill-dot progress indicator, leading, + "Skip" trailing (hidden on S4)
+/// - Pager: swipeable `TabView(.page)` with per-page hero art + text
+/// - Footer: primary CTA + (S4 only) "Maybe Later"
 ///
-/// The background gradient switches per page (`OnboardingAuroraBackground`)
-/// and text/indicator/CTA are all rendered white so they read against the
-/// deep gradient. S4's "Choose Folder" delegates to `FolderPermissionViewModel`
-/// so the permission logic stays in one place.
+/// The background is a fixed light "soft brand wash" (`OnboardingAuroraBackground`
+/// — see its doc comment for the visual history) and text/CTA are rendered
+/// dark/near-black to read against it, as fixed literals rather than DS
+/// tokens (see `OnboardingColors`). S4's "Choose Folder" delegates to
+/// `FolderPermissionViewModel` so the permission logic stays in one place.
 struct OnboardingContainerView: View {
     @Bindable var viewModel: OnboardingViewModel
     @Bindable var permissionVM: FolderPermissionViewModel
@@ -22,6 +24,7 @@ struct OnboardingContainerView: View {
     /// `FolderPermissionViewModel.requestPermission()` writes the granted state
     /// synchronously to this store before returning; a cancel leaves it as-is.
     @Environment(LibraryStore.self) private var libraryStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
@@ -39,29 +42,44 @@ struct OnboardingContainerView: View {
                     .padding(.bottom, DSSpacing.lg)
             }
         }
-        // Plug the gap: on iOS 26 the window background bleeds into the
-        // Dynamic Island / status bar zone if no explicit color is set.
-        // This dark navy matches the top of every page's gradient palette
-        // so there's no visible seam even before the gradient renders.
-        .background(Color(red: 0.04, green: 0.09, blue: 0.28).ignoresSafeArea())
-        .animation(.default, value: permissionVM.errorMessage)
-        .animation(.default, value: permissionVM.isRequesting)
-        .animation(.easeInOut(duration: 0.2), value: viewModel.isLastPage)
+        .animation(reduceMotion ? nil : .default, value: permissionVM.errorMessage)
+        .animation(reduceMotion ? nil : .default, value: permissionVM.isRequesting)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: viewModel.isLastPage)
     }
 
-    // MARK: - Top bar (Skip only, right-aligned)
+    // MARK: - Top bar (progress indicator, leading + Skip, trailing)
 
     /// Fixed 44pt height so the pager's top edge stays stable when Skip
-    /// disappears on S4 — otherwise the hero would jump up.
+    /// disappears on S4 — otherwise the hero would jump up. Indicator moved
+    /// up here from the footer (mockup places progress at the very top,
+    /// right under the status bar, not stacked above the CTA).
     private var topBar: some View {
         HStack {
+            OnboardingPageIndicator(
+                pageCount: viewModel.pages.count,
+                currentIndex: viewModel.currentIndex,
+                activeColor: .dsBrandPrimary,
+                inactiveColor: .black.opacity(0.12)
+            )
+
             Spacer()
+
             if !viewModel.isLastPage {
+                // Backing pill, not bare text — the background blob's anchor
+                // sits directly under this corner on `.tools`, and at its
+                // brightest breathing phase a plain gray label here drops
+                // below the 4.5:1 contrast floor. A fixed white backing
+                // guarantees contrast regardless of what's behind it,
+                // instead of just relocating the blob (which review pointed
+                // out is easy to get wrong again on a future page).
                 Button("Skip") {
                     viewModel.jump(to: viewModel.pages.count - 1)
                 }
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.75))
+                .foregroundStyle(OnboardingColors.textSecondary)
+                .padding(.horizontal, DSSpacing.sm)
+                .padding(.vertical, DSSpacing.xxs)
+                .background(Color.white.opacity(0.7), in: Capsule())
                 .accessibilityHint("Jump to the folder-permission step")
                 .transition(.opacity)
             }
@@ -74,7 +92,7 @@ struct OnboardingContainerView: View {
     private var pager: some View {
         TabView(selection: pagerBinding) {
             ForEach(viewModel.pages) { page in
-                OnboardingPageView(page: page)
+                OnboardingPageView(page: page, isActive: page.id == viewModel.currentPage.id)
                     .tag(indexOf(page))
             }
         }
@@ -96,21 +114,14 @@ struct OnboardingContainerView: View {
         viewModel.pages.firstIndex(of: page) ?? 0
     }
 
-    // MARK: - Footer (indicator + CTA + secondary)
+    // MARK: - Footer (CTA + secondary)
 
     private var footer: some View {
         VStack(spacing: DSSpacing.md) {
-            OnboardingPageIndicator(
-                pageCount: viewModel.pages.count,
-                currentIndex: viewModel.currentIndex,
-                activeColor: .white,
-                inactiveColor: .white.opacity(0.35)
-            )
-
             if viewModel.currentPage.showsPrivacyChip, let errorMessage = permissionVM.errorMessage {
                 Text(errorMessage)
                     .font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(0.9))
+                    .foregroundStyle(OnboardingColors.error)
                     .multilineTextAlignment(.center)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
@@ -122,7 +133,11 @@ struct OnboardingContainerView: View {
         }
     }
 
-    // MARK: - Primary CTA (white pill with brand-colored text)
+    // MARK: - Primary CTA
+    //
+    // Brand-blue pill on every page (per user request — previously S1-S3
+    // used a neutral near-black pill, reserving blue for S4's "decision
+    // point" only; simpler and more consistent to keep every page on-brand).
 
     private var primaryCTA: some View {
         Button {
@@ -130,16 +145,16 @@ struct OnboardingContainerView: View {
         } label: {
             HStack(spacing: DSSpacing.xs) {
                 if isRequestingFolder {
-                    ProgressView().tint(Color.dsBrandPrimary)
+                    ProgressView().tint(.white)
                 } else {
                     Text(viewModel.currentPage.primaryCTA)
                         .font(.system(size: 17, weight: .semibold))
                 }
             }
             .frame(maxWidth: .infinity, minHeight: 56)
-            .foregroundStyle(Color.dsBrandPrimary)
-            .background(Color.white, in: Capsule())
-            .shadow(color: Color.black.opacity(0.20), radius: 16, y: 8)
+            .foregroundStyle(.white)
+            .background(Color.dsBrandPrimary, in: Capsule())
+            .shadow(color: Color.dsBrandPrimary.opacity(0.35), radius: 16, y: 8)
         }
         .buttonStyle(OnboardingPressableStyle())
         .disabled(isRequestingFolder)
@@ -163,7 +178,7 @@ struct OnboardingContainerView: View {
                 viewModel.finish()
             }
             .font(.system(size: 15, weight: .medium))
-            .foregroundStyle(.white.opacity(0.8))
+            .foregroundStyle(OnboardingColors.textSecondary)
             .disabled(permissionVM.isRequesting)
         } else {
             Color.clear.frame(height: 20)

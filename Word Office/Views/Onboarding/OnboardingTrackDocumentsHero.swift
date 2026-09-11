@@ -12,7 +12,17 @@ import SwiftUI
 ///
 /// The card and timeline overlap by ~18pt (negative HStack spacing) so the
 /// timeline sits half-on, half-off the card — same depth trick as the mockup.
+///
+/// The PDF row and its matching timeline badge loop between "Signing…" (a
+/// pulsing pen) and "Signed" (a pop-in checkmark + glow) — the user asked
+/// for an animated "signing → done" effect on this page specifically,
+/// rather than the fully static 3-fixed-states version this hero shipped
+/// with originally.
 struct OnboardingTrackDocumentsHero: View {
+    let isActive: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isPDFSigned = false
+
     var body: some View {
         HStack(alignment: .center, spacing: -8) {
             listCard
@@ -25,6 +35,32 @@ struct OnboardingTrackDocumentsHero: View {
         .frame(maxWidth: .infinity)
         .frame(height: 300)
         .accessibilityHidden(true)
+        .task(id: isActive) {
+            guard isActive else { return }
+            await runSigningLoop()
+        }
+        .task {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) {
+                pulseOpacity = 0.35
+            }
+        }
+    }
+
+    /// Reduce Motion settles on the final "Signed" state once and stops —
+    /// same fallback pattern as `OnboardingEditHero`/`OnboardingToolsHero`.
+    private func runSigningLoop() async {
+        guard !reduceMotion else {
+            isPDFSigned = true
+            return
+        }
+        while !Task.isCancelled {
+            withAnimation(.easeInOut(duration: 0.3)) { isPDFSigned = false }
+            try? await Task.sleep(nanoseconds: 1_600_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.4)) { isPDFSigned = true }
+            try? await Task.sleep(nanoseconds: 2_200_000_000)
+        }
     }
 
     // MARK: - List card
@@ -44,7 +80,7 @@ struct OnboardingTrackDocumentsHero: View {
             )
             documentRow(
                 assetName: "DocumentIconPDF",
-                status: .signed
+                status: isPDFSigned ? .signed : .signing
             )
         }
         .padding(DSSpacing.md)
@@ -156,8 +192,8 @@ struct OnboardingTrackDocumentsHero: View {
 
     // MARK: - Status pill
 
-    private enum DocumentStatus {
-        case draft, reviewed, signed
+    private enum DocumentStatus: Equatable {
+        case draft, reviewed, signing, signed
     }
 
     private func statusPill(_ status: DocumentStatus) -> some View {
@@ -167,6 +203,12 @@ struct OnboardingTrackDocumentsHero: View {
                 Image(systemName: icon)
                     .font(.system(size: 8, weight: .heavy))
                     .foregroundStyle(tint)
+                    // The one continuously-animating detail that reads as
+                    // "in progress" rather than just "a different static
+                    // pill" — independent of the slow signing/signed cycle
+                    // so it keeps pulsing throughout the ~1.6s "Signing…"
+                    // window instead of firing once.
+                    .opacity(status == .signing ? pulseOpacity : 1.0)
             }
             Text(label)
                 .font(.system(size: 9, weight: .heavy))
@@ -181,6 +223,7 @@ struct OnboardingTrackDocumentsHero: View {
         .overlay {
             Capsule().strokeBorder(tint.opacity(0.14), lineWidth: 0.5)
         }
+        .modifier(PopOnChangeModifier(enabled: !reduceMotion, trigger: status))
     }
 
     /// Tuple: label, foreground tint, background fill, leading SF-Symbol.
@@ -198,6 +241,11 @@ struct OnboardingTrackDocumentsHero: View {
                     Color.dsBrandPrimary,
                     Color.dsBrandPrimarySubtle,
                     "checkmark")
+        case .signing:
+            return ("SIGNING…",
+                    Color.dsBrandPrimary,
+                    Color.dsBrandPrimarySubtle,
+                    "pencil")
         case .signed:
             return ("SIGNED",
                     Color.dsStatusSuccess,
@@ -218,7 +266,7 @@ struct OnboardingTrackDocumentsHero: View {
             connector(from: .dsBorderSubtle, to: .dsBrandPrimarySubtle)
             timelineBadge(kind: .reviewed)
             connector(from: .dsBrandPrimarySubtle, to: .dsStatusSuccessBackground)
-            timelineBadge(kind: .signed)
+            timelineBadge(kind: isPDFSigned ? .signed : .signing)
         }
     }
 
@@ -234,8 +282,8 @@ struct OnboardingTrackDocumentsHero: View {
             .frame(width: 2.5, height: 22)
     }
 
-    private enum TimelineBadgeKind {
-        case empty, reviewed, signed
+    private enum TimelineBadgeKind: Equatable {
+        case empty, reviewed, signing, signed
     }
 
     private func timelineBadge(kind: TimelineBadgeKind) -> some View {
@@ -251,6 +299,7 @@ struct OnboardingTrackDocumentsHero: View {
         .frame(width: 44, height: 44)
         .shadow(color: badgeGlow(kind), radius: 10, y: 0)
         .shadow(color: Color.black.opacity(0.08), radius: 5, y: 3)
+        .modifier(PopOnChangeModifier(enabled: !reduceMotion, trigger: kind))
     }
 
     @ViewBuilder
@@ -264,6 +313,11 @@ struct OnboardingTrackDocumentsHero: View {
             Image(systemName: "checkmark")
                 .font(.system(size: 16, weight: .heavy))
                 .foregroundStyle(Color.dsBrandPrimary)
+        case .signing:
+            Image(systemName: "pencil")
+                .font(.system(size: 15, weight: .heavy))
+                .foregroundStyle(Color.dsBrandPrimary)
+                .opacity(pulseOpacity)
         case .signed:
             Image(systemName: "checkmark")
                 .font(.system(size: 16, weight: .heavy))
@@ -275,6 +329,7 @@ struct OnboardingTrackDocumentsHero: View {
         switch kind {
         case .empty:    return Color.dsSurfacePrimary
         case .reviewed: return Color.dsBrandPrimarySubtle
+        case .signing:  return Color.dsBrandPrimarySubtle
         case .signed:   return Color.dsStatusSuccessBackground
         }
     }
@@ -283,6 +338,7 @@ struct OnboardingTrackDocumentsHero: View {
         switch kind {
         case .empty:    return Color.dsBorderSubtle
         case .reviewed: return Color.dsBrandPrimary.opacity(0.35)
+        case .signing:  return Color.dsBrandPrimary.opacity(0.35)
         case .signed:   return Color.dsStatusSuccess.opacity(0.35)
         }
     }
@@ -294,7 +350,37 @@ struct OnboardingTrackDocumentsHero: View {
         switch kind {
         case .empty:    return Color.black.opacity(0)
         case .reviewed: return Color.dsBrandPrimary.opacity(0.15)
+        case .signing:  return Color.dsBrandPrimary.opacity(0.15)
         case .signed:   return Color.dsStatusSuccess.opacity(0.30)
+        }
+    }
+
+    // MARK: - Pulse (the "Signing…" pencil's in-progress opacity pulse)
+
+    /// Own continuous fast loop, independent of the slow signing/signed
+    /// cycle — only reads while a `.signing` state is actually showing, but
+    /// keeps running underneath so it's mid-cycle (not always starting from
+    /// the same phase) whenever `.signing` reappears.
+    @State private var pulseOpacity: Double = 1.0
+}
+
+/// Brief overshoot-and-settle "pop" whenever `trigger` changes — no spring
+/// physics (kept consistent with this feature's easeOut/easeInOut motion
+/// language elsewhere), just two chained `easeOut` phases via
+/// `phaseAnimator`. Same technique as `OnboardingPageView.HeroBobModifier`.
+private struct PopOnChangeModifier<Trigger: Equatable>: ViewModifier {
+    let enabled: Bool
+    let trigger: Trigger
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.phaseAnimator([1.0, 1.16, 1.0], trigger: trigger) { view, phase in
+                view.scaleEffect(phase)
+            } animation: { phase in
+                phase == 1.16 ? .easeOut(duration: 0.15) : .easeOut(duration: 0.2)
+            }
+        } else {
+            content
         }
     }
 }
@@ -302,7 +388,7 @@ struct OnboardingTrackDocumentsHero: View {
 #Preview("Track Documents Hero") {
     ZStack {
         Color.dsBackgroundPrimary
-        OnboardingTrackDocumentsHero()
+        OnboardingTrackDocumentsHero(isActive: true)
     }
     .ignoresSafeArea()
 }
