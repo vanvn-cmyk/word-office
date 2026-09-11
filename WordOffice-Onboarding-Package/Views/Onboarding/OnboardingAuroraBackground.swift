@@ -24,56 +24,29 @@ struct OnboardingAuroraBackground: View {
     @State private var isDrifting = false
 
     private static let baseColor = Color(red: 0xFA / 255, green: 0xFA / 255, blue: 0xFB / 255)
+    /// The dark-mode value of `BrandPrimary` (a lighter, more saturated
+    /// blue) — used only as the second blob's tint so the two blobs read as
+    /// "one family, two depths" instead of one flat repeated color.
     private static let accentBlue = Color(red: 0x5B / 255, green: 0x8C / 255, blue: 0xFF / 255)
-
-    /// Per-page accent blob — gives each screen a distinct personality while
-    /// the two brand-blue blobs stay as a constant "foundation" layer.
-    private func pageAccentColor(for kind: OnboardingPage.Kind) -> Color {
-        switch kind {
-        case .editOffice:     Color(red: 0.55, green: 0.35, blue: 0.95) // violet — creative editing
-        case .tools:          Color(red: 0.95, green: 0.52, blue: 0.18) // amber — productive tools
-        case .trackDocuments: Color(red: 0.10, green: 0.75, blue: 0.65) // teal  — organized tracking
-        case .chooseFolder:   Color(red: 0.35, green: 0.45, blue: 0.98) // indigo — systematic storage
-        }
-    }
-
-    private func pageAccentAnchor(for kind: OnboardingPage.Kind) -> UnitPoint {
-        switch kind {
-        case .editOffice:     UnitPoint(x: 0.75, y: 0.30)
-        case .tools:          UnitPoint(x: 0.20, y: 0.25)
-        case .trackDocuments: UnitPoint(x: 0.80, y: 0.40)
-        case .chooseFolder:   UnitPoint(x: 0.25, y: 0.35)
-        }
-    }
 
     var body: some View {
         GeometryReader { proxy in
             ZStack {
                 Self.baseColor
 
-                // Primary brand-blue blob — drifts horizontally
                 blob(color: .dsBrandPrimary, size: proxy.size.width * 1.1,
                      anchor: primaryAnchor(for: page), in: proxy.size)
-                    .offset(x: isDrifting ? 18 : -18, y: isDrifting ? -12 : 12)
-                    .opacity(breathingOpacity(base: 0.38))
+                    .offset(x: isDrifting ? 16 : -16, y: isDrifting ? -10 : 10)
+                    .opacity(breathingOpacity(base: 0.32))
                     .scaleEffect(breathingScale)
 
-                // Secondary blue blob — counter-drifts
-                blob(color: Self.accentBlue, size: proxy.size.width * 0.80,
+                blob(color: Self.accentBlue, size: proxy.size.width * 0.75,
                      anchor: secondaryAnchor(for: page), in: proxy.size)
-                    .offset(x: isDrifting ? -14 : 14, y: isDrifting ? 10 : -10)
-                    .opacity(breathingOpacity(base: 0.28))
-                    .scaleEffect(breathingScale, anchor: .center)
-
-                // Per-page accent blob — changes color & position per page,
-                // adding a distinct hue identity to each onboarding screen.
-                blob(color: pageAccentColor(for: page), size: proxy.size.width * 0.65,
-                     anchor: pageAccentAnchor(for: page), in: proxy.size)
-                    .offset(x: isDrifting ? 10 : -10, y: isDrifting ? -8 : 8)
-                    .opacity(breathingOpacity(base: 0.22))
+                    .offset(x: isDrifting ? -12 : 12, y: isDrifting ? 8 : -8)
+                    .opacity(breathingOpacity(base: 0.24))
                     .scaleEffect(breathingScale, anchor: .center)
             }
-            .animation(reduceMotion ? nil : .easeInOut(duration: 0.8), value: page)
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.7), value: page)
         }
         .ignoresSafeArea()
         .task {

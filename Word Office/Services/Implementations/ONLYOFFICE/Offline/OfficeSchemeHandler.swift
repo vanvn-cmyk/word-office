@@ -10,16 +10,15 @@ final class OfficeSchemeHandler: NSObject, WKURLSchemeHandler {
 
     // MARK: - Bundle root
 
-    private let bundleURL: URL = {
-        guard let url = Bundle.main.url(forResource: "OfficeBundle", withExtension: nil) else {
-            fatalError("OfficeBundle not found in app bundle — add folder reference in Xcode")
-        }
-        return url
-    }()
+    // Optional — nil if OfficeBundle was not copied into the .app bundle (returns 503 for every request instead of crashing).
+    private let bundleURL: URL? = Bundle.main.url(forResource: "OfficeBundle", withExtension: nil)
 
     // MARK: - Active tasks
+    // WKURLSchemeHandler callbacks are always on the main thread (documented by Apple),
+    // so no additional synchronisation is needed for activeTasks.
 
     private var activeTasks: Set<ObjectIdentifier> = []
+    private let ioQueue = DispatchQueue(label: "com.wordoffice.OfficeSchemeHandler.io", qos: .userInitiated)
 
     // MARK: - WKURLSchemeHandler
 
@@ -27,45 +26,68 @@ final class OfficeSchemeHandler: NSObject, WKURLSchemeHandler {
         let taskId = ObjectIdentifier(urlSchemeTask)
         activeTasks.insert(taskId)
 
-        let url = urlSchemeTask.request.url!
-        // Strip `office://host` prefix → relative file path
-        var path = url.path  // e.g. "/web-apps/apps/api/documents/api.js"
-        if path.hasPrefix("/") { path = String(path.dropFirst()) }
+        guard let requestURL = urlSchemeTask.request.url else {
+            activeTasks.remove(taskId)
+            urlSchemeTask.didFailWithError(URLError(.badURL))
+            return
+        }
+        let url = requestURL
 
-        let fileURL = bundleURL.appendingPathComponent(path)
-
-        guard activeTasks.contains(taskId) else { return }
-
-        if let data = try? Data(contentsOf: fileURL) {
-            let mimeType = mimeType(for: fileURL.pathExtension)
-            let headers: [String: String] = [
-                "Content-Type": mimeType,
-                "Content-Length": "\(data.count)",
-                "Cache-Control": "public, max-age=86400",
-                "Access-Control-Allow-Origin": "*",
-            ]
-            let response = HTTPURLResponse(
-                url: url,
-                statusCode: 200,
-                httpVersion: "HTTP/1.1",
-                headerFields: headers
-            )!
-            urlSchemeTask.didReceive(response)
-            urlSchemeTask.didReceive(data)
-            urlSchemeTask.didFinish()
-        } else {
-            let response = HTTPURLResponse(
-                url: url,
-                statusCode: 404,
-                httpVersion: "HTTP/1.1",
-                headerFields: ["Content-Type": "text/plain"]
-            )!
-            urlSchemeTask.didReceive(response)
-            urlSchemeTask.didReceive("Not found: \(path)".data(using: .utf8)!)
-            urlSchemeTask.didFinish()
+        guard let bundleURL else {
+            respond(to: urlSchemeTask, url: url, status: 503, body: "OfficeBundle missing from app bundle")
+            activeTasks.remove(taskId)
+            return
         }
 
-        activeTasks.remove(taskId)
+        // Strip `office://host` prefix → relative file path
+        var path = url.path
+        if path.hasPrefix("/") { path = String(path.dropFirst()) }
+        let fileURL = bundleURL.appendingPathComponent(path)
+        let mime = mimeType(for: fileURL.pathExtension)
+
+        // Read on a background queue — x2t.wasm is 63 MB and would block the
+        // main thread long enough to trigger a watchdog warning if read inline.
+        ioQueue.async { [weak self] in
+            let data = try? Data(contentsOf: fileURL)
+            DispatchQueue.main.async {
+                guard let self, self.activeTasks.contains(taskId) else { return }
+                if let data {
+                    self.respond(to: urlSchemeTask, url: url, status: 200, mimeType: mime, data: data)
+                } else {
+                    self.respond(to: urlSchemeTask, url: url, status: 404, body: "Not found: \(path)")
+                }
+                self.activeTasks.remove(taskId)
+            }
+        }
+    }
+
+    // MARK: - Response helpers
+
+    private func respond(
+        to task: any WKURLSchemeTask,
+        url: URL,
+        status: Int,
+        mimeType: String = "text/plain; charset=utf-8",
+        data: Data
+    ) {
+        var headers: [String: String] = [
+            "Content-Type": mimeType,
+            "Content-Length": "\(data.count)",
+            "Access-Control-Allow-Origin": "*",
+        ]
+        if status == 200 { headers["Cache-Control"] = "public, max-age=86400" }
+        guard let response = HTTPURLResponse(
+            url: url, statusCode: status,
+            httpVersion: "HTTP/1.1", headerFields: headers
+        ) else { return }
+        task.didReceive(response)
+        task.didReceive(data)
+        task.didFinish()
+    }
+
+    private func respond(to task: any WKURLSchemeTask, url: URL, status: Int, body: String) {
+        respond(to: task, url: url, status: status,
+                data: (body.data(using: .utf8) ?? Data()))
     }
 
     func webView(_ webView: WKWebView, stop urlSchemeTask: any WKURLSchemeTask) {

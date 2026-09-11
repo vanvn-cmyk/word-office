@@ -30,6 +30,7 @@ struct OnboardingEditHero: View {
             orbitingBadges
             documentCard
         }
+        .frame(height: 260)
         .accessibilityHidden(true)
         .task(id: isActive) {
             guard isActive else { return }
@@ -192,14 +193,14 @@ struct OnboardingEditHero: View {
 
     private func orbitBadge(letter: String, color: Color, baseAngle: Double) -> some View {
         let angle = Angle.degrees(baseAngle) + orbitAngle
-        let radius: CGFloat = 130
+        let radius: CGFloat = 108
         return Text(letter)
-            .font(.system(size: 15, weight: .heavy))
+            .font(.system(size: 13, weight: .heavy))
             .foregroundStyle(.white)
-            .frame(width: 38, height: 38)
-            .background(color, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .shadow(color: Color.black.opacity(0.18), radius: 8, y: 4)
-            .offset(x: cos(angle.radians) * radius, y: sin(angle.radians) * radius * 0.5)
+            .frame(width: 30, height: 30)
+            .background(color, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .shadow(color: Color.black.opacity(0.15), radius: 6, y: 3)
+            .offset(x: cos(angle.radians) * radius, y: sin(angle.radians) * radius * 0.55)
     }
 }
 

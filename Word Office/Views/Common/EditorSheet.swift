@@ -1,19 +1,17 @@
 import SwiftUI
 
-/// Sheet wrapper for `EditorPlaceholderView` — owns its own `dismiss`
-/// environment so the Done button closes via `dismiss()` instead of writing
-/// to the parent's `editingRef` binding from outside (swiftui-expert-skill
-/// convention: "sheets own their actions").
+/// Full-screen cover wrapper for `EditorPlaceholderView`.
 ///
-/// Hosts its own `.toastHost(_:)` overlay so any success toast fired right
-/// before the sheet appears (or while it's up) stays visible — SwiftUI
-/// sheets sit above the scene-root overlay in z-order, so the presenter
-/// installed in `Word_OfficeApp` alone would render below and stay hidden.
+/// Owns dismiss so the Done button closes via `dismiss()` (swiftui-expert-skill
+/// convention: "sheets own their actions"). Intercepts dismiss when the document
+/// has unsaved changes — shows a destructive confirmation dialog first.
 ///
-/// Consolidated in Session 14 from two byte-for-byte identical wrappers
-/// (`LibraryEditorSheet` in `RootView`, `ToolsEditorSheet` in `ToolsTabView`)
-/// so future changes to the editor's toolbar / dismiss / toast-hosting
-/// pattern land in exactly one place.
+/// Receives dirty state via `EditorDirtyPreferenceKey` which bubbles up through
+/// the view hierarchy from `OfficeEditorView` without requiring a direct binding
+/// through the intermediate `EditorPlaceholderView`.
+///
+/// Hosts its own `.toastHost(_:)` overlay so success toasts fired while the
+/// cover is up remain visible above the cover's z-order.
 struct EditorSheet: View {
     let container: DependencyContainer
     let ref: DocumentRef
@@ -21,15 +19,34 @@ struct EditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(DSToastPresenter.self) private var toaster
 
+    @State private var isDirty = false
+    @State private var showDiscardAlert = false
+
     var body: some View {
         NavigationStack {
             EditorPlaceholderView(container: container, ref: ref)
                 .toolbar {
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") { dismiss() }
-                            .fontWeight(.semibold)
+                        Button("Done") {
+                            if isDirty { showDiscardAlert = true } else { dismiss() }
+                        }
+                        .fontWeight(.semibold)
                     }
                 }
+        }
+        // Disable swipe-to-dismiss gesture when there are unsaved changes.
+        .interactiveDismissDisabled(isDirty)
+        // Receive dirty state bubbled up from OfficeEditorView.
+        .onPreferenceChange(EditorDirtyPreferenceKey.self) { isDirty = $0 }
+        .confirmationDialog(
+            "Discard Changes?",
+            isPresented: $showDiscardAlert,
+            titleVisibility: .visible
+        ) {
+            Button("Discard Changes", role: .destructive) { dismiss() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Your unsaved edits will be lost.")
         }
         .toastHost(toaster)
     }

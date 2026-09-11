@@ -3,6 +3,8 @@ import Foundation
 
 /// Messages JS sends to Swift via `window.webkit.messageHandlers.editorBridge.postMessage(...)`.
 enum OfficeBridgeMessage {
+    /// sdk-core module loaded; window.receiveFileFromIOS is now defined.
+    case scriptReady
     /// Editor is initialized and ready (inner frame loaded).
     case ready
     /// User triggered save; contains the file data.
@@ -49,6 +51,9 @@ final class OfficeBridge: NSObject, WKScriptMessageHandler {
         else { return .unknown(body: body) }
 
         switch action {
+        case "scriptReady":
+            return .scriptReady
+
         case "ready":
             return .ready
 

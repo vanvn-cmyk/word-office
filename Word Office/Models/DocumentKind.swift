@@ -41,4 +41,13 @@ enum DocumentKind: String, Codable, Hashable, Sendable, CaseIterable {
         default: false
         }
     }
+
+    /// Formats the offline ONLYOFFICE editor (x2t.wasm) can actually open.
+    /// HWP/HWPX are office formats but x2t does not support them.
+    var isOnlyOfficeEditable: Bool {
+        switch self {
+        case .docx, .xlsx, .pptx, .doc, .xls, .ppt: return true
+        default: return false
+        }
+    }
 }

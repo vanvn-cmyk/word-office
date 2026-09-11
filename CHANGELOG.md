@@ -6,6 +6,153 @@ Format tham khảo [Keep a Changelog](https://keepachangelog.com/). Entry mới 
 
 ---
 
+## [Unreleased] — 2026-09-11 (ONLYOFFICE Offline Editor — full debug chain: DOCX + XLSX editing confirmed working)
+
+Toàn bộ session dành cho việc debug ONLYOFFICE offline editor từ crash → edit được. 6 bug liên tiếp được fix.
+
+### 💥 Fix 1 — `fatalError` crash trong OfficeSchemeHandler
+
+**File:** `Services/Implementations/ONLYOFFICE/Offline/OfficeSchemeHandler.swift`
+
+- `bundleURL` đổi từ closure có `fatalError` sang `URL?` optional.
+- Khi `bundleURL == nil` → trả 503 response thay vì crash.
+- Thêm guard trong `OfficeEditorViewController.viewDidLoad` để show error message thay vì load WebView.
+
+### 💥 Fix 2 — KVC crash `[WKPreferences setValue:forKey:"allowUniversalAccessFromFileURLs"]`
+
+**File:** `Views/Editor/OfficeEditorViewController.swift`
+
+- Xoá dòng `config.preferences.setValue(true, forKey: "allowUniversalAccessFromFileURLs")` — private API đã bị xoá khỏi WebKit, crash trên iOS mới.
+- Không cần thiết vì `office://` scheme handler đã set `Access-Control-Allow-Origin: *`.
+
+### 💥 Fix 3 — "A JavaScript exception occurred" (ReferenceError: window.receiveFileFromIOS is not defined)
+
+**File:** `OfficeBundle/editor.html`, `Views/Editor/OfficeEditorViewController.swift`, `Services/Implementations/ONLYOFFICE/Offline/OfficeBridge.swift`
+
+- Root cause: `<script type="module">` với static ES imports silently fail khi dùng custom URL scheme (`office://`) trong WKWebView — module không load, `window.receiveFileFromIOS` không được định nghĩa.
+- Fix editor.html: đổi `<script type="module">` → `<script>` thường với dynamic `await import()` trong async IIFE.
+- Thêm `scriptReady` handshake: JS post `{action:'scriptReady'}` sau khi module load xong → Swift chờ tín hiệu này trước khi gọi `sendFileToEditor`.
+- OfficeBridge: thêm `case scriptReady`.
+- OfficeEditorViewController: không gọi `sendFileToEditor` trong `didFinish`, chỉ gọi sau khi nhận `scriptReady`.
+- Thêm `WKUserScript` error capture (`window.onerror` + `unhandledrejection`) để JS errors hiện lên Swift UI.
+
+### 💥 Fix 4 — "Loading spreadsheet" đứng mãi (x2t.wasm không load được)
+
+**File:** `OfficeBundle/sdk-core/assets/x2t.worker-CjNFjWSw.js`
+
+Root cause phức tạp:
+1. Worker chạy tại `office://host/sdk-core/assets/x2t.worker-CjNFjWSw.js`.
+2. Emscripten trong x2t.js tính `_scriptName = self.location.href` (Worker URL) → `scriptDirectory = "office://host/sdk-core/assets/"`.
+3. x2t.js có pre-js IIFE: `Module.locateFile = function(path, prefix) { return prefix + path; }` — dùng `scriptDirectory` làm `prefix`.
+4. `locateFile('x2t.wasm')` = `"office://host/sdk-core/assets/x2t.wasm"` — file không tồn tại ở đó.
+5. `Module.onRuntimeInitialized` không bao giờ fire → Promise init hang → "Loading spreadsheet" mãi không xong.
+
+Fix: set `self.__filename = R + "x2t.js"` (= `"office://host/x2t/x2t.js"`) TRƯỚC `importScripts`. Emscripten check `typeof __filename != 'undefined'` đầu tiên → dùng làm `_scriptName` → `scriptDirectory = new URL('.', "office://host/x2t/x2t.js").href = "office://host/x2t/"` → `locateFile('x2t.wasm') = "office://host/x2t/x2t.wasm"` ✅
+
+Thay thế code lỗi:
+```javascript
+// TRƯỚC (sai):
+Object.assign(self,{__filename:/^https?:\/\//.test(R)?R:self.location.origin+R})
+// SAU (đúng):
+self.__filename=_  // _ = R+"x2t.js" = "office://host/x2t/x2t.js"
+```
+
+### 🎨 Fix 5 — Double header UI (ONLYOFFICE header đè lên SwiftUI NavigationBar)
+
+**File:** `Views/Editor/OfficeEditorView.swift`, `Views/Root/RootView.swift`, `Views/Tabs/ToolsTabView.swift`
+
+- `_OfficeWebView` có `.ignoresSafeArea()` → WKWebView extend full screen kể cả dưới NavigationBar → ONLYOFFICE header hiển thị dưới/sau native nav bar → double header.
+- Fix: xoá `.ignoresSafeArea()` → WKWebView bắt đầu ngay dưới native nav bar.
+- Đổi `.sheet` → `.fullScreenCover` cho editor (RootView + ToolsTabView) — khớp pattern của Word/Docs/WPS (full-screen push, không có bottom sheet feel).
+
+### 🎨 Fix 6 — ONLYOFFICE UI trông quá "WebView", khó dùng trên mobile
+
+**File:** `OfficeBundle/editor.html`, `Views/Editor/OfficeEditorViewController.swift`
+
+**editor.html customization:**
+- `compactHeader: true` — thu gọn header xuống 1 row
+- `toolbarHideFileName: true` — ẩn filename khỏi header (đã có trong native nav bar)
+- `close: { visible: false }` — ẩn nút X của ONLYOFFICE (dùng Done button native)
+- `about: false`, `chat: false`, `comments: false` — ẩn các panel ít dùng
+- `hideRightMenu: true`, `permissions.rightMenu: false` — ẩn right panel icons chiếm horizontal space
+- `featuresTips: false` — tắt popup "New Multipage view" và tương tự
+- `macrosMode: 'disable'` — tắt macros UI
+
+**OfficeEditorViewController — WKUserScript CSS injection (forMainFrameOnly: false):**
+- Target: `#box-header-dir`, `#id-header-toolbar`, `.box-header-dir` — ẩn ONLYOFFICE header bar
+- Target: `.horz-ruler`, `.vert-ruler` — ẩn ruler
+- Target: `#id-statusbar`, `.statusBar` — ẩn bottom status bar (Page N, Word count)
+- `::-webkit-scrollbar { display:none }` — ẩn scrollbar chrome
+- MutationObserver + setInterval retry (15 lần × 800ms) để catch elements load async
+- `webView.scrollView.bounces = false` — tắt rubber-band scroll
+- `webView.scrollView.showsVertical/HorizontalScrollIndicator = false`
+
+---
+
+## [Unreleased] — 2026-09-11 (Session 25 — Onboarding final redesign + FolderPermission removal + Maybe Later fix + S2 badge animation + colorful background)
+
+### 🎨 Onboarding redesign (from `WordOffice-Onboarding-Package/`, committed `0333e68`)
+
+Complete visual overhaul of the S1→S4 first-run pager. Key design decisions:
+
+- **S1, S4**: static PNG heroes (`OnboardingEditOffice`, `OnboardingChooseFolder`)
+- **S2**: static PNG (`OnboardingTools`) + 2 inline SwiftUI badges (Split / Merge) floating alongside
+- **S3**: `OnboardingTrackDocumentsHero` SwiftUI composition — Signing→Signed loop card + 4 decorative background document pages peeking from behind
+- Background: off-white (`#FAFAFB`) base + 2 brand-blue blobs (breathing scale/opacity + drifting offset). Deliberately NOT theme-aware — text/CTA colors are fixed literals tuned for this exact surface.
+- Progress dots moved from footer → top bar (left side). Skip pill visible only on S1.
+- `OnboardingCardStack.swift` deleted — glass wrapper removed, heroes sit directly on background.
+- `OnboardingColors.swift` NEW — fixed literal palette: `textPrimary`, `textSecondary`, `success`, `error`.
+- `RootView.swift`: removed Session-19 `SampleFileSeeder` auto-skip branch — onboarding pager is the real first-run gate again.
+
+### 🐛 "Maybe Later" → "No folder yet" bug fixed
+
+**File**: `ViewModels/LibraryViewModel.swift`
+
+Root cause: `loadLibrary()` had an `else` branch that set `store.folderPermissionState = .notGranted` when no bookmark AND `SampleFileSeeder.didSeedDefaultsKey = false` (which happens after "Reset Onboarding" in dev settings). This routed the user to the "No folder yet" empty state instead of the Library shell.
+
+Fix: removed the early-return `.notGranted` branch. `loadLibrary()` now always falls back to `documentsURL` (app's own Documents/ sandbox) when no external bookmark exists — user always lands on Library with seeded files (or "No documents yet" if sandbox is empty), never the dead-end "No folder yet" gate.
+
+### 🗑️ FolderPermissionOnboarding removed from post-onboarding routing
+
+**File**: `Views/Root/RootView.swift`
+
+`.notGranted, .revoked` now routes directly to `libraryShell`. Onboarding S4 already handles the "Choose Folder / Maybe Later" decision — showing `FolderPermissionOnboarding` again after the pager was a duplicate UX gate. `.revoked` also routes to shell (ReauthorizePermissionCTA remains deferred).
+
+### 📐 Onboarding layout: flex hero replaces fixed height
+
+**File**: `Views/Onboarding/OnboardingPageView.swift`
+
+- Removed fixed `frame(height: 330)` from hero — hero now uses `frame(maxWidth: .infinity, maxHeight: .infinity)` and fills available vertical space proportionally (bigger on 430pt phones, smaller on 375pt phones, no dead whitespace on either).
+- Text block pinned to bottom: `VStack(spacing: 0)` with `padding(.top, DSSpacing.lg) + padding(.bottom, DSSpacing.md)`.
+- Removed top `Spacer(minLength: DSSpacing.md)` — eliminates the empty gap above the hero that made S1/S2 feel sparse.
+
+### ✨ S2 badge animations (Split / Merge)
+
+**File**: `Views/Onboarding/OnboardingPageView.swift`
+
+- **Size bump**: icon frame 42→56pt, font 17→22pt, corner radius 12→16, shadow boost (`radius 12, y 6`).
+- **Entrance spring**: when S2 becomes active, Split pops in first (delay 0.12s), Merge follows (delay 0.28s) — both scale 0.15→1.0 + fade from opacity 0 with `spring(response: 0.45, dampingFraction: 0.58)`.
+- **Continuous float**: Split bobs upward (2.2s easeInOut loop), Merge bobs downward (2.8s loop) — opposite phases give the hero independent visual life even after the entrance animation settles.
+- All animations gated on `reduceMotion`.
+
+### 🌈 Onboarding background: per-page accent blob
+
+**File**: `Views/Onboarding/OnboardingAuroraBackground.swift`
+
+Added a 3rd blob whose color changes per page, giving each screen a distinct hue identity while the two brand-blue blobs remain as the constant "foundation" layer:
+
+| Page | Accent color |
+|------|-------------|
+| S1 — Edit | Violet / purple |
+| S2 — Tools | Amber / orange |
+| S3 — Track | Teal / mint |
+| S4 — Folder | Indigo |
+
+- Primary blob opacity 0.32→0.38, secondary 0.24→0.28, accent blob at 0.22.
+- Page crossfade: 0.8s easeInOut on page transition (all 3 blobs animate to new positions/colors).
+
+---
+
 ## [Unreleased] — 2026-09-10 (Session 23 — UX polish: FileSourcePickerSheet + PrintFlowView auto-picker + PremiumButton size + Onboarding status bar)
 
 Screenshot-driven polish session. 7 discrete changes across 6 files. All UNCOMMITTED (cumulative ~17+ lô from S10c).

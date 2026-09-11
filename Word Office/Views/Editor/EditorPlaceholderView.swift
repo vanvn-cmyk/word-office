@@ -15,13 +15,25 @@ struct EditorPlaceholderView: View {
     @State private var editorVM: EditorViewModel?
 
     var body: some View {
-        // Office formats (DOCX, XLSX, PPTX, DOC, XLS, PPT) → ONLYOFFICE offline editor
-        // Runs x2t.wasm + virtual document server in WKWebView — no server needed.
-        if ref.kind.isOfficeFormat {
+        // DOCX/XLSX/PPTX/DOC/XLS/PPT → ONLYOFFICE offline editor (x2t.wasm).
+        // HWP/HWPX: isOfficeFormat but x2t doesn't support them — show specific message.
+        if ref.kind.isOnlyOfficeEditable {
             OfficeEditorView(ref: ref)
+        } else if ref.kind == .hwp || ref.kind == .hwpx {
+            hwpUnsupportedView
         } else {
             nativeEditorView
         }
+    }
+
+    private var hwpUnsupportedView: some View {
+        EmptyStateView(
+            icon: "doc.text",
+            title: "HWP Not Supported",
+            message: "HWP and HWPX editing is not currently available. Convert to DOCX to edit this file."
+        )
+        .navigationTitle(ref.name)
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     // PDF + plain text formats use native rendering

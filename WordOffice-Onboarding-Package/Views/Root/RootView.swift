@@ -89,12 +89,20 @@ struct RootView: View {
                 case .checking:
                     checkingView
 
-                // Onboarding S4 already handles "Choose Folder" / "Maybe Later" —
-                // FolderPermissionOnboarding is no longer shown after the pager.
-                // `.revoked` falls through here too (ReauthorizePermissionCTA
-                // remains TEMPORARILY DISABLED per earlier decision).
+                // `.revoked` currently falls through to the same handler as
+                // `.notGranted` — the dedicated "Folder access lost" screen
+                // (`ReauthorizePermissionCTA`) is TEMPORARILY hidden per user
+                // request. Re-enable by restoring the split branch below.
                 case .notGranted, .revoked:
-                    libraryShell
+                    if libraryStore.didSkipFolderOnboarding {
+                        libraryShell
+                    } else if let permissionVM {
+                        FolderPermissionOnboarding(viewModel: permissionVM) {
+                            permissionVM.skipOnboarding()
+                        }
+                    } else {
+                        checkingView
+                    }
 
                 case .granted:
                     libraryShell
@@ -214,7 +222,7 @@ struct RootView: View {
             // dangling over an unrelated tab. Close it as part of the same
             // interaction.
             .onChange(of: selectedTab) { $isFABMenuOpen.closeMenuAnimated(reduceMotion: reduceMotion) }
-            .fullScreenCover(item: $editingRef) { ref in
+            .sheet(item: $editingRef) { ref in
                 EditorSheet(container: container, ref: ref)
             }
         } else {

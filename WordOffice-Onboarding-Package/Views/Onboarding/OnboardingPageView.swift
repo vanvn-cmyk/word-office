@@ -21,35 +21,26 @@ struct OnboardingPageView: View {
     let isActive: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    // S2 badge animations
-    @State private var badgesRevealed = false
-    @State private var splitFloat = false
-    @State private var mergeFloat = false
-
     var body: some View {
-        VStack(spacing: 0) {
-            // Hero stretches to fill whatever vertical space is available
-            // above the text block — no fixed height, scales with device.
+        VStack(spacing: DSSpacing.xl) {
+            Spacer(minLength: DSSpacing.md)
+
             heroCard
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(.horizontal, DSSpacing.xl)
                 .modifier(HeroBobModifier(enabled: !reduceMotion, phaseSeed: page.id))
                 .scaleEffect(revealScale)
                 .opacity(revealOpacity)
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.4), value: isActive)
 
-            // Text + chip pinned to bottom with consistent padding
-            VStack(spacing: DSSpacing.sm) {
-                textBlock
+            textBlock
+                .padding(.horizontal, DSSpacing.lg)
 
-                if page.showsPrivacyChip {
-                    privacyChip
-                        .padding(.top, DSSpacing.xs)
-                }
+            if page.showsPrivacyChip {
+                privacyChip
+                    .padding(.horizontal, DSSpacing.lg)
             }
-            .padding(.horizontal, DSSpacing.lg)
-            .padding(.top, DSSpacing.lg)
-            .padding(.bottom, DSSpacing.md)
+
+            Spacer(minLength: 0)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel)
@@ -85,6 +76,8 @@ struct OnboardingPageView: View {
     /// assets).
     private var heroCard: some View {
         heroContent
+            .frame(maxWidth: .infinity)
+            .frame(height: 260)
     }
 
     @ViewBuilder
@@ -97,47 +90,18 @@ struct OnboardingPageView: View {
                     .scaledToFit()
                     .padding(DSSpacing.sm)
 
+                // Merge + Split badges added alongside the original PNG —
+                // the PNG alone (Convert/Sign/Compress) doesn't depict
+                // these two real `ToolsTabView` tools, and Compress isn't
+                // a real feature (cut from MVP scope) so it isn't
+                // represented here either. Staggered vertically (Split
+                // above, Merge below) rather than side by side.
                 ZStack {
-                    // Split — floats up, entrance delayed 0.12s
                     toolBadge(icon: "square.split.2x1", label: "Split")
-                        .offset(y: splitFloat ? -6 : 5)
-                        .animation(
-                            reduceMotion ? nil : .easeInOut(duration: 2.2).repeatForever(autoreverses: true),
-                            value: splitFloat
-                        )
-                        .offset(x: 138, y: -190)
-                        .scaleEffect(badgesRevealed ? 1.0 : 0.15)
-                        .opacity(badgesRevealed ? 1.0 : 0)
-                        .animation(
-                            reduceMotion ? nil : .spring(response: 0.45, dampingFraction: 0.58).delay(0.12),
-                            value: badgesRevealed
-                        )
-
-                    // Merge — floats opposite phase to Split, entrance delayed 0.28s
+                        .offset(x: 138, y: -168)
                     toolBadge(icon: "doc.on.doc.fill", label: "Merge")
-                        .offset(y: mergeFloat ? 5 : -4)
-                        .animation(
-                            reduceMotion ? nil : .easeInOut(duration: 2.8).repeatForever(autoreverses: true),
-                            value: mergeFloat
-                        )
                         .offset(x: -108, y: 18)
-                        .scaleEffect(badgesRevealed ? 1.0 : 0.15)
-                        .opacity(badgesRevealed ? 1.0 : 0)
-                        .animation(
-                            reduceMotion ? nil : .spring(response: 0.45, dampingFraction: 0.58).delay(0.28),
-                            value: badgesRevealed
-                        )
                 }
-            }
-            .onAppear {
-                if isActive { badgesRevealed = true }
-                // Start float loops immediately — badges are invisible until
-                // badgesRevealed flips, so the loop running off-screen is harmless.
-                splitFloat = true
-                mergeFloat = true
-            }
-            .onChange(of: isActive) { _, active in
-                badgesRevealed = active
             }
         case .trackDocuments:
             OnboardingTrackDocumentsHero(isActive: isActive)
@@ -154,16 +118,16 @@ struct OnboardingPageView: View {
     /// signature/checkmark accents, tinted with the PDF-document color to
     /// match those tools' real icon tint in `ToolsTabView`.
     private func toolBadge(icon: String, label: String) -> some View {
-        VStack(spacing: 5) {
+        VStack(spacing: 4) {
             Image(systemName: icon)
-                .font(.system(size: 22, weight: .semibold))
+                .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: 56, height: 56)
-                .background(Color.dsDocumentPDF.gradient, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .shadow(color: Color.dsDocumentPDF.opacity(0.40), radius: 12, y: 6)
+                .frame(width: 42, height: 42)
+                .background(Color.dsDocumentPDF.gradient, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .shadow(color: Color.dsDocumentPDF.opacity(0.35), radius: 8, y: 4)
 
             Text(label)
-                .font(.system(size: 11, weight: .bold))
+                .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(OnboardingColors.textSecondary)
         }
     }

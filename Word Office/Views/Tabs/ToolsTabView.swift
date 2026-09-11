@@ -124,7 +124,7 @@ struct ToolsTabView: View {
             .navigationDestination(for: PDFToolDestination.self) { destination in
                 destinationView(for: destination)
             }
-            .sheet(item: $editingRef) { ref in
+            .fullScreenCover(item: $editingRef) { ref in
                 EditorSheet(container: container, ref: ref)
             }
             .sheet(item: $galleryPayload, onDismiss: openPendingEditorIfNeeded) { payload in

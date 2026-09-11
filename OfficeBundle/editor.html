@@ -12,6 +12,10 @@
       align-items: center; justify-content: center; background: #f0f0f0; z-index: 9999;
       gap: 16px; font-family: -apple-system, sans-serif; color: #666;
     }
+    #loading-hint {
+      font-size: 11px; color: #aaa; text-align: center; max-width: 240px;
+      line-height: 1.5; opacity: 0; transition: opacity 0.6s ease;
+    }
     .spinner {
       width: 40px; height: 40px; border: 3px solid #e0e0e0;
       border-top-color: #007AFF; border-radius: 50%; animation: spin 0.8s linear infinite;
@@ -23,18 +27,27 @@
   <div id="loading">
     <div class="spinner"></div>
     <span id="loading-text">Opening document…</span>
+    <span id="loading-hint">First launch requires internet to load editor components</span>
   </div>
   <div id="placeholder" style="width:100%;height:100%;display:none"></div>
 
-  <script type="module">
-    // ── Imports from bundled wasm-onlyoffice-sdk core ──────────────────────────
-    import {
-      EditorServer,
-      MockSocket,
-      io,
-      createXHRProxy,
-      getDocumentType,
-    } from 'office://host/sdk-core/index.mjs';
+  <script>
+  // Dynamic import avoids WKWebView limitations with static ES module imports
+  // from custom URL scheme handlers. import() is a runtime call and works where
+  // <script type="module"> static imports silently fail.
+  (async function () {
+    let sdkCore;
+    try {
+      sdkCore = await import('office://host/sdk-core/index.mjs');
+    } catch (importErr) {
+      const msg = 'Failed to load editor engine: ' + String(importErr);
+      document.getElementById('loading-text').textContent = 'Editor engine failed to load.';
+      try {
+        window.webkit.messageHandlers.editorBridge.postMessage({ action: 'editorError', message: msg });
+      } catch (_) {}
+      return;
+    }
+    const { EditorServer, MockSocket, io, createXHRProxy, getDocumentType } = sdkCore;
 
     // ── Base64 → ArrayBuffer (chunked to avoid call-stack overflow) ────────────
     function base64ToArrayBuffer(b64) {
@@ -102,6 +115,22 @@
     let server = null;
     let docEditor = null;
     let pendingFilePayload = null; // set by receiveFileFromIOS before editor loads
+    let _innerWin = null;          // inner iframe contentWindow, saved in onAppReady()
+
+    // Show the "requires internet" hint after 5 s if the editor hasn't become
+    // ready yet — the CDN sdkjs download is what takes time on first launch.
+    let hintTimer = null;
+    function scheduleLoadingHint() {
+      hintTimer = setTimeout(() => {
+        const el = document.getElementById('loading-hint');
+        if (el) el.style.opacity = '1';
+      }, 5000);
+    }
+    function cancelLoadingHint() {
+      clearTimeout(hintTimer);
+      const el = document.getElementById('loading-hint');
+      if (el) el.style.opacity = '0';
+    }
 
     // ── Initialize EditorServer ────────────────────────────────────────────────
     function initServer() {
@@ -132,7 +161,8 @@
             fillForms: false,
             modifyFilter: true,
             protect: true,
-            download: false, // prevent built-in download UI; we handle save ourselves
+            download: false,
+            rightMenu: false,
           },
         },
         documentType,
@@ -144,6 +174,16 @@
             uiTheme: window.matchMedia('(prefers-color-scheme: dark)').matches ? 'theme-dark' : 'theme-light',
             features: { spellcheck: { change: false } },
             toolbar: { turnOffHeaderFooter: false },
+            compactHeader: true,
+            compactToolbar: true,   // collapse 2-row ribbon → single icon row
+            toolbarHideFileName: true,
+            close: { visible: false },
+            about: false,
+            chat: false,
+            comments: false,
+            hideRightMenu: true,
+            featuresTips: false,
+            macrosMode: 'disable',
           },
         },
         events: {
@@ -170,15 +210,87 @@
       });
     }
 
+    // CSS injected into the inner iframe (frameEditor) to strip ONLYOFFICE chrome.
+    // Selectors verified against ONLYOFFICE v9.3.x app.css from CDN bundle.
+    const OO_IOS_CSS = [
+      // ── Header bar: ONLYOFFICE logo + File/Home/Insert tab row (v9) ──────────
+      '#header-row,#header-logo',
+      '{display:none!important;height:0!important;min-height:0!important;overflow:hidden!important}',
+      // ── Toolbar ribbon: Bold/Italic/Format buttons (v9) ──────────────────────
+      '#toolbar',
+      '{display:none!important;height:0!important;min-height:0!important;overflow:hidden!important}',
+      // ── Formula bar: cell name box + fx button + input (SSE v9 only) ─────────
+      '#cell-editing-box',
+      '{display:none!important;height:0!important;overflow:hidden!important}',
+      // ── Left side panel: icon strip + chat/comment/search panels (v9) ────────
+      '.left-panel,#left-panel-chat,#left-panel-comments,',
+      '#left-panel-history,#left-panel-search',
+      '{display:none!important;width:0!important;overflow:hidden!important}',
+      // ── Status bar at bottom: sheet tabs, zoom, page info (v9) ──────────────
+      '#statusbar,.statusbar',
+      '{display:none!important;height:0!important;overflow:hidden!important}',
+      // ── Scrollbar chrome ─────────────────────────────────────────────────────
+      '#ws-v-scrollbar,#ws-h-scrollbar,#ws-scrollbar-corner',
+      '{display:none!important}',
+      '::-webkit-scrollbar{width:0!important;height:0!important}',
+    ].join('');
+
+    // Elements to force-hide via inline style (in addition to CSS) since
+    // the React app may set explicit style attributes that override our stylesheet.
+    const CHROME_SELECTORS = [
+      '#header-row', '#header-logo', '#toolbar',
+      '#cell-editing-box', '.left-panel', '#statusbar', '.statusbar',
+    ];
+
+    function injectIOSChrome(iDoc) {
+      if (iDoc.getElementById('_oo_ios_hide')) return;
+      const s = iDoc.createElement('style');
+      s.id = '_oo_ios_hide';
+      s.textContent = OO_IOS_CSS;
+      (iDoc.head || iDoc.documentElement).appendChild(s);
+
+      function forceHide() {
+        CHROME_SELECTORS.forEach(function(sel) {
+          try { iDoc.querySelectorAll(sel).forEach(function(el) {
+            if (el.style.display !== 'none') {
+              el.style.setProperty('display', 'none', 'important');
+            }
+          }); } catch(_) {}
+        });
+      }
+
+      forceHide();
+
+      // MutationObserver — re-run when ONLYOFFICE async-renders elements
+      new MutationObserver(function() {
+        forceHide();
+        // After each mutation, prod OO to recalculate layout without the chrome
+        try { iDoc.defaultView && iDoc.defaultView.dispatchEvent(new Event('resize')); } catch(_) {}
+      }).observe(iDoc.documentElement, { childList: true, subtree: true });
+
+      // Interval fallback for deferred React renders (runs 20× over 10s)
+      var n = 0;
+      var t = setInterval(function() {
+        forceHide();
+        if (++n >= 20) clearInterval(t);
+      }, 500);
+    }
+
     // ── onAppReady — patch inner iframe and inject api.js ─────────────────────
     function onAppReady() {
+      cancelLoadingHint();
       const iframe = document.querySelector('iframe[name="frameEditor"]');
       if (!iframe) {
         console.error('[editor] frameEditor iframe not found');
         return;
       }
       const win = iframe.contentWindow;
+      _innerWin = win;
       const iframeDoc = iframe.contentDocument;
+
+      // Inject iOS chrome-hiding CSS BEFORE api.js so rules are present when
+      // ONLYOFFICE creates its UI elements (avoids FOUC / flash of chrome).
+      injectIOSChrome(iframeDoc);
 
       // Patch XHR in inner iframe so EditorServer can handle requests
       const XHR = createXHRProxy(win.XMLHttpRequest);
@@ -240,12 +352,40 @@
 
     // ── Public API — called by Swift via callAsyncJavaScript ──────────────────
 
+    // Swift calls this to execute a formatting command in the inner editor iframe.
+    // Accepts: 'bold','italic','underline','strikeout','undo','redo',
+    //          'align-left','align-center','align-right','align-justify',
+    //          'list-bullet','list-numbered', 'style:<StyleName>'
+    window.execEditorCommand = function(cmd) {
+      if (!_innerWin) return;
+      try {
+        var MAP = {
+          'undo': 'Undo', 'redo': 'Redo',
+          'bold': 'Bold', 'italic': 'Italic',
+          'underline': 'Underline', 'strikeout': 'Strikeout',
+          'align-left': 'AlignLeft', 'align-center': 'AlignCenter',
+          'align-right': 'AlignRight', 'align-justify': 'AlignJustify',
+          'list-bullet': 'InsertBulletList', 'list-numbered': 'InsertNumberedList',
+        };
+        if (MAP[cmd]) {
+          _innerWin.AscDesktopEditor?.executeFocusedCommand(MAP[cmd]);
+          return;
+        }
+        if (cmd.startsWith('style:')) {
+          _innerWin.AscDesktopEditor?.executeFocusedCommand('paragraph|' + cmd.slice(6));
+        }
+      } catch(e) {
+        console.warn('[iOS] execEditorCommand:', cmd, e);
+      }
+    };
+
     // Swift calls this to send a file into the editor.
     window.receiveFileFromIOS = async function ({ fileName, fileType, base64data }) {
       try {
         document.getElementById('loading-text').textContent = 'Opening ' + fileName + '…';
         document.getElementById('loading').style.display = 'flex';
         document.getElementById('placeholder').style.display = 'none';
+        scheduleLoadingHint();
 
         if (docEditor) {
           docEditor.destroyEditor?.();
@@ -283,6 +423,14 @@
         console.error('[editor] triggerSave failed:', err);
       }
     };
+
+    // Signal Swift that the module loaded and window.receiveFileFromIOS is defined.
+    // Swift waits for this before calling receiveFileFromIOS.
+    try {
+      window.webkit.messageHandlers.editorBridge.postMessage({ action: 'scriptReady' });
+    } catch (_) {}
+
+  }()); // end async IIFE
   </script>
 </body>
 </html>
