@@ -89,20 +89,12 @@ struct RootView: View {
                 case .checking:
                     checkingView
 
-                // `.revoked` currently falls through to the same handler as
-                // `.notGranted` — the dedicated "Folder access lost" screen
-                // (`ReauthorizePermissionCTA`) is TEMPORARILY hidden per user
-                // request. Re-enable by restoring the split branch below.
+                // Onboarding S4 already handles "Choose Folder" / "Maybe Later" —
+                // FolderPermissionOnboarding is no longer shown after the pager.
+                // `.revoked` falls through here too (ReauthorizePermissionCTA
+                // remains TEMPORARILY DISABLED per earlier decision).
                 case .notGranted, .revoked:
-                    if libraryStore.didSkipFolderOnboarding {
-                        libraryShell
-                    } else if let permissionVM {
-                        FolderPermissionOnboarding(viewModel: permissionVM) {
-                            permissionVM.skipOnboarding()
-                        }
-                    } else {
-                        checkingView
-                    }
+                    libraryShell
 
                 case .granted:
                     libraryShell
