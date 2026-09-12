@@ -16,6 +16,7 @@ import Observation
 final class LibraryViewModel {
     var errorMessage: String?
     private(set) var isLoading: Bool = false
+    private(set) var hasLoadedOnce: Bool = false
 
     /// Active type/status filters — see `LibraryViewModel+Filtering.swift`.
     var typeFilter: DocumentTypeFilter = .all
@@ -221,6 +222,7 @@ final class LibraryViewModel {
             // when it finishes should flip it off.
             if generation == loadGeneration {
                 isLoading = false
+                hasLoadedOnce = true
             }
         }
 

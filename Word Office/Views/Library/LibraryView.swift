@@ -110,7 +110,7 @@ struct LibraryView: View {
                         message: "Choose a folder to start tracking your documents",
                         action: (label: "Choose folder", handler: { Task { await onRequestPermission() } })
                     )
-                } else if store.entries.isEmpty && !viewModel.isLoading {
+                } else if store.entries.isEmpty && viewModel.hasLoadedOnce {
                     // titleRow shown ABOVE the empty state so "Your Cabinet"
                     // + premium crown stays visible even when the library
                     // is empty — matches iOS Photos / Notes convention
