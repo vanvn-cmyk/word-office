@@ -3,6 +3,8 @@ import SwiftUI
 @main
 struct Word_OfficeApp: App {
 
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
     init() {
         #if DEBUG
         // Allow simulator test runs to bypass first-run onboarding via a launch arg.

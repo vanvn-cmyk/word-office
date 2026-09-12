@@ -49,5 +49,7 @@ struct EditorSheet: View {
             Text("Your unsaved edits will be lost.")
         }
         .toastHost(toaster)
+        .onAppear { OrientationManager.shared.allowAll() }
+        .onDisappear { OrientationManager.shared.lockToPortrait() }
     }
 }
