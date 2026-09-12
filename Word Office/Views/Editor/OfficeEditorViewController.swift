@@ -30,9 +30,6 @@ final class OfficeEditorViewController: UIViewController {
     // the JS bridge silently failed. Surface an error instead of an infinite spinner.
     private var scriptReadyWatchdog: DispatchWorkItem?
 
-    // Keyboard toolbar hosted via UIHostingController<FormatToolbarView>
-    private var toolbarHostingVC: UIHostingController<FormatToolbarView>?
-
     /// Called when the editor has saved a file. Provides new Data and suggested file name.
     var onFileSaved: ((Data, String) -> Void)?
     /// Called when an error occurs.
@@ -54,7 +51,6 @@ final class OfficeEditorViewController: UIViewController {
         }
         setupWebView()
         loadEditorHTML()
-        setupKeyboardToolbar()
     }
 
     deinit {
@@ -79,50 +75,6 @@ final class OfficeEditorViewController: UIViewController {
         guard scriptReady else { return }
         // cmd only contains alphanumeric, hyphens, and spaces (style names) — safe to interpolate
         webView.evaluateJavaScript("window.execEditorCommand('\(cmd)')")
-    }
-
-    // MARK: - Keyboard Toolbar
-
-    private func setupKeyboardToolbar() {
-        let toolbarView = FormatToolbarView(
-            onUndo: { [weak self] in self?.execEditorCommand("undo") },
-            onRedo: { [weak self] in self?.execEditorCommand("redo") },
-            onFormat: { [weak self] in self?.onShowFormatStudio?() },
-            onDismissKeyboard: { [weak self] in self?.webView.endEditing(true) }
-        )
-        let hosting = UIHostingController(rootView: toolbarView)
-        hosting.view.translatesAutoresizingMaskIntoConstraints = false
-        hosting.view.backgroundColor = .clear
-        hosting.view.isHidden = true
-
-        addChild(hosting)
-        view.addSubview(hosting.view)
-        hosting.didMove(toParent: self)
-        toolbarHostingVC = hosting
-
-        NSLayoutConstraint.activate([
-            hosting.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            hosting.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            hosting.view.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
-            hosting.view.heightAnchor.constraint(equalToConstant: 44),
-        ])
-
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(keyboardWillShow),
-            name: UIResponder.keyboardWillShowNotification, object: nil
-        )
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(keyboardWillHide),
-            name: UIResponder.keyboardWillHideNotification, object: nil
-        )
-    }
-
-    @objc private func keyboardWillShow() {
-        toolbarHostingVC?.view.isHidden = false
-    }
-
-    @objc private func keyboardWillHide() {
-        toolbarHostingVC?.view.isHidden = true
     }
 
     // MARK: - Setup
@@ -161,26 +113,39 @@ final class OfficeEditorViewController: UIViewController {
         config.userContentController.addUserScript(errorCapture)
 
         // Injected into every frame. Hides ONLYOFFICE chrome in the inner iframe.
-        // Selectors verified against ONLYOFFICE v9.3.x app.css bundle.
-        // The primary injection happens in editor.html's injectIOSChrome() via same-origin
-        // access to iframeDoc. This WKUserScript is a belt-and-suspenders backup that
-        // also runs in the inner frame's document context at atDocumentStart.
+        // #toolbar = entire ONLYOFFICE ribbon (File/Home/Insert tabs + formatting row).
+        // Kept: #cell-editing-box (formula bar), #statusbar (sheet tabs/page info).
         let ooUIScript = WKUserScript(source: #"""
             (function() {
                 var CSS = [
-                    /* ── Header bar: ONLYOFFICE logo + File/Home/Insert tabs ── */
-                    /* Hidden because the iOS nav bar replaces it.              */
-                    '#header-row,#header-logo',
-                    '{display:none!important;height:0!important;min-height:0!important;overflow:hidden!important}',
+                    /* ── Ribbon: File/Home/Insert tab row + all formatting buttons ── */
+                    /* Replaced by the native EditorTopToolbar above the WebView.     */
+                    '#toolbar{display:none!important;height:0!important;min-height:0!important;overflow:hidden!important}',
+                    /* ── Info / collaboration / co-author floating buttons ── */
+                    '#id-btn-coauthors,#btn-coauthors,#btn-info,#id-btn-info,.btn-header-info,',
+                    '#id-spreadsheet-info,.icon-info-container,#collaboration-info,',
+                    '.asc-info-icon,.coauthors-btn,.btn-icon-info{display:none!important}',
+                    /* ── Right panel / insert sidebar (table, shape, image, chart…) ── */
+                    '#right-panel,#id-right-panel,.right-panel,.rightpanel,',
+                    '#id-right-panel-spreadsheet,#spreadsheetRightPanel,',
+                    '[id*="right-panel"],[class*="right-panel"]{display:none!important}',
+                    /* ── Left sidebar icon strip (search / spell / info buttons) ── */
+                    '#leftmenu,.leftmenu,#id-sidebar,.asc-leftmenu,',
+                    '[id*="leftmenu"],[class*="leftmenu"],',
+                    '#id-toolbar-left,[id*="left-panel-btn"]{display:none!important}',
                     /* ── Scrollbars (touch scrolling handled by WKWebView) ── */
                     '#ws-v-scrollbar,#ws-h-scrollbar,#ws-scrollbar-corner{display:none!important}',
                     '::-webkit-scrollbar{width:0!important;height:0!important}'
-                    /* toolbar (#toolbar), formula bar (#cell-editing-box), left panel */
-                    /* and status bar are intentionally kept — they are editing features. */
+                    /* Formula bar (#cell-editing-box) and status bar (#statusbar)   */
+                    /* are intentionally kept — editing features on mobile.          */
                 ].join('');
 
                 var SELECTORS = [
-                    '#header-row', '#header-logo'
+                    '#toolbar',
+                    '#id-btn-coauthors', '#btn-coauthors', '#btn-info', '#id-btn-info',
+                    '.btn-header-info', '.asc-info-icon', '.coauthors-btn', '.btn-icon-info',
+                    '#right-panel', '#id-right-panel', '.right-panel', '.rightpanel',
+                    '#leftmenu', '.leftmenu', '#id-sidebar', '.asc-leftmenu'
                 ];
 
                 function inject() {
@@ -439,9 +404,25 @@ extension OfficeEditorViewController: OfficeBridgeDelegate {
         case .ready:
             editorLoaded = true
             onReady?()
+            // Dump live DOM 4s after ready so ONLYOFFICE has finished rendering toolbar.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+                self?.webView.evaluateJavaScript("window.execEditorCommand('dump-dom')")
+            }
 
         case .documentStateChange(let dirty):
             onDirtyChange?(dirty)
+
+        case .domDump(let entries):
+            let relevant = entries.filter { line in
+                let lower = line.lowercased()
+                return lower.contains("toolbar") || lower.contains("header") ||
+                       lower.contains("tabbar") || lower.contains("statusbar") ||
+                       lower.contains("formula") || lower.contains("ribbon") ||
+                       lower.contains("tabs-") || lower.contains("cell-edit")
+            }
+            print("=== ONLYOFFICE DOM DUMP (toolbar-related) ===")
+            relevant.forEach { print("  \($0)") }
+            print("=== END DOM DUMP (\(entries.count) total elements) ===")
 
         case .saved, .unknown:
             break

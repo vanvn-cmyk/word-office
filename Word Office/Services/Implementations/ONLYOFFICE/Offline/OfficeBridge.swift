@@ -17,6 +17,8 @@ enum OfficeBridgeMessage {
     case editorError(message: String)
     /// Opening the file failed.
     case openError(message: String)
+    /// DOM structure dump for debugging toolbar selectors.
+    case domDump(entries: [String])
     /// Unknown/unparseable message.
     case unknown(body: Any)
 }
@@ -79,6 +81,10 @@ final class OfficeBridge: NSObject, WKScriptMessageHandler {
         case "openError":
             let msg = dict["message"] as? String ?? "Open failed"
             return .openError(message: msg)
+
+        case "domDump":
+            let entries = dict["dump"] as? [String] ?? []
+            return .domDump(entries: entries)
 
         default:
             return .unknown(body: body)

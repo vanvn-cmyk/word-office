@@ -32,6 +32,10 @@ struct OfficeEditorView: View {
     @State private var showFormatStudio = false
     @State private var editorVC: OfficeEditorViewController?
 
+    private var fileKind: EditorTopToolbar.FileKind {
+        EditorTopToolbar.FileKind(ext: ref.url.pathExtension)
+    }
+
     var body: some View {
         Group {
             if let msg = errorMessage {
@@ -41,18 +45,24 @@ struct OfficeEditorView: View {
                     description: Text(msg)
                 )
             } else {
-                _OfficeWebView(
-                    ref: ref,
-                    onFileSaved: handleSave,
-                    onError: handleError,
-                    onReady: handleReady,
-                    onDirtyChange: { isDirty = $0 },
-                    onShowFormatStudio: { showFormatStudio = true },
-                    onVCReady: { editorVC = $0 }
-                )
-                .overlay(alignment: .topTrailing) {
-                    if saveCount > 0 {
-                        saveBadge
+                VStack(spacing: 0) {
+                    EditorTopToolbar(
+                        kind: fileKind,
+                        onCommand: { cmd in editorVC?.execEditorCommand(cmd) },
+                        onFormat: { showFormatStudio = true }
+                    )
+
+                    _OfficeWebView(
+                        ref: ref,
+                        onFileSaved: handleSave,
+                        onError: handleError,
+                        onReady: handleReady,
+                        onDirtyChange: { isDirty = $0 },
+                        onShowFormatStudio: { showFormatStudio = true },
+                        onVCReady: { editorVC = $0 }
+                    )
+                    .overlay(alignment: .topTrailing) {
+                        if saveCount > 0 { saveBadge }
                     }
                 }
                 .sheet(isPresented: $showFormatStudio) {
