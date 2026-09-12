@@ -23,10 +23,9 @@ fileprivate extension View {
 ///
 /// State handling:
 /// - `.checking`  → spinner (200-500ms window while Keychain resolves).
-/// - `.notGranted` → `FolderPermissionOnboarding`, or `libraryShell` if the user
-///   already tapped "Skip for now" (`LibraryStore.didSkipFolderOnboarding`).
+/// - `.notGranted` → `libraryShell` (user tapped "Maybe Later" on onboarding S4).
 /// - `.granted`   → 3-tab shell (Library/Tools/Settings) — `libraryShell`.
-/// - `.revoked`   → `ReauthorizePermissionCTA` (trap #4: never silently empty).
+/// - `.revoked`   → `libraryShell` (ReauthorizePermissionCTA temporarily disabled).
 struct RootView: View {
     let container: DependencyContainer
 

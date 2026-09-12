@@ -4,9 +4,7 @@ import Foundation
 /// data — the ViewModel maps this into the pager and CTA layout.
 ///
 /// The final page (`.chooseFolder`) is the folder-permission gate: its primary
-/// CTA delegates back to `FolderPermissionViewModel.requestPermission()`, and
-/// its secondary "Maybe Later" mirrors the existing "Skip for now" path on
-/// `FolderPermissionOnboarding`.
+/// CTA delegates back to `FolderPermissionViewModel.requestPermission()`.
 struct OnboardingPage: Identifiable, Hashable {
     let id: Kind
     let imageName: String

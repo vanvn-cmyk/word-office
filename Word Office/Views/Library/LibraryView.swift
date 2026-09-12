@@ -44,7 +44,7 @@ struct LibraryView: View {
     // click-lag the user flagged.
 
     /// Invoked from the no-folder-yet empty state's CTA — only reachable when the
-    /// user skipped folder onboarding earlier (Root/FolderPermissionOnboarding).
+    /// user tapped "Maybe Later" on onboarding S4.
     let onRequestPermission: () async -> Void
 
     /// Invoked from a row's kebab menu "Edit" — the parent (`RootView`)

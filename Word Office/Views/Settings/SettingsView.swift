@@ -119,10 +119,8 @@ struct SettingsView: View {
                             SettingsRowIcon(systemName: "star.fill", tint: Color.dsPremiumGoldEnd)
                         }
                     }
-                    // `lock.shield.fill` — reuses the exact glyph
-                    // `FolderPermissionOnboarding` already uses for "your
-                    // data stays private," instead of a fresh `lock.fill`
-                    // pick with no precedent in this app.
+                    // `lock.shield.fill` — consistent with the privacy
+                    // iconography used in onboarding S4.
                     SettingsLegalRow(title: "Privacy Policy", systemName: "lock.shield.fill", url: privacyPolicyURL)
                     SettingsLegalRow(title: "Terms of Service", systemName: "doc.text.fill", url: termsOfServiceURL)
                 }
@@ -337,9 +335,7 @@ private struct SettingsLegalRow: View {
                 .foregroundStyle(Color.dsTextPrimary)
         } icon: {
             // `dsBrandPrimary` — not held back to gray just because there's
-            // no URL yet. Same blue `FolderPermissionOnboarding` already
-            // uses for its own `lock.shield.fill` privacy row, so both
-            // Privacy Policy and Terms of Service match that precedent
+            // no URL yet; both Privacy Policy and Terms of Service use brand blue
             // instead of introducing a separate "disabled-looking" gray.
             SettingsRowIcon(systemName: systemName, tint: Color.dsBrandPrimary)
         }
