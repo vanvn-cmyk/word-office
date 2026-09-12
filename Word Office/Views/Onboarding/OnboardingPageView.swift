@@ -31,8 +31,8 @@ struct OnboardingPageView: View {
             // Hero stretches to fill whatever vertical space is available
             // above the text block — no fixed height, scales with device.
             heroCard
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(.horizontal, DSSpacing.xl)
+                .frame(maxWidth: .infinity, maxHeight: 290)
+                .clipped()
                 .modifier(HeroBobModifier(enabled: !reduceMotion, phaseSeed: page.id))
                 .scaleEffect(revealScale)
                 .opacity(revealOpacity)
@@ -94,8 +94,7 @@ struct OnboardingPageView: View {
             ZStack(alignment: .bottom) {
                 Image(page.imageName)
                     .resizable()
-                    .scaledToFit()
-                    .padding(DSSpacing.sm)
+                    .scaledToFill()
 
                 ZStack {
                     // Split — floats up, entrance delayed 0.12s
@@ -139,13 +138,10 @@ struct OnboardingPageView: View {
             .onChange(of: isActive) { _, active in
                 badgesRevealed = active
             }
-        case .trackDocuments:
-            OnboardingTrackDocumentsHero(isActive: isActive)
         default:
             Image(page.imageName)
                 .resizable()
-                .scaledToFit()
-                .padding(DSSpacing.sm)
+                .scaledToFill()
         }
     }
 
