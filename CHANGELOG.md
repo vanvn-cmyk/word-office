@@ -6,6 +6,70 @@ Format tham khảo [Keep a Changelog](https://keepachangelog.com/). Entry mới 
 
 ---
 
+## [Unreleased] — 2026-09-12 (Onboarding polish: layout, animations, copy, dark mode lock)
+
+### 🎨 Hero clip fix — badge overflow (S2/S3)
+**File:** `Views/Onboarding/OnboardingPageView.swift`
+- Removed `.clipped()` từ outer `heroCard` modifier chain
+- Moved `.frame(...).clipped()` INSIDE mỗi case trực tiếp lên `Image` — chỉ image bị clip, overlay badge (Split/Merge/status pills) overflow tự do ra ngoài frame
+- **Why:** `.clipped()` ở outer frame cắt cả badge → Split/Merge bị crop phía trên/dưới
+
+### 🎨 S2 badge positions & float amplitude
+**File:** `Views/Onboarding/OnboardingPageView.swift`
+- Split: `offset(x: 110, y: -175)` (was y=-90 → -140 → -175)
+- Merge: `offset(x: -110, y: 155)` (was y=70 → 120 → 155)
+- Float amplitude: Split `-14/+8` (was -6/+5), Merge `+10/-8` (was +5/-4)
+
+### 🎨 S1 sparkle animation rewrite
+**File:** `Views/Onboarding/OnboardingPageView.swift`
+- `S1SparkleOverlay` đổi từ `withAnimation { phaseX = true }` + `.repeatForever` → pattern `.animation(.easeInOut.repeatForever, value: floatX)` (same as S2 badges) — reliable loop
+- Amplitude: 12/9/11pt (was 8/6/7pt), stagger starts: floatA=0s, floatC=+0.25s, floatB=+0.5s
+
+### 🎨 S3 signing loop animation
+**File:** `Views/Onboarding/OnboardingPageView.swift`
+- `S3StatusOverlay`: `.task(id: isActive)` cycling DRAFT(1.6s) → REVIEWED(1.6s) → SIGNED(2.2s) → loop
+- Pills at `x=148` (right margin, outside white card in PNG)
+- Active pill: full color + scale 1.06 + glow; inactive: 35% opacity
+
+### 🎨 S4 hero + privacy chip
+**File:** `Views/Onboarding/OnboardingPageView.swift`
+- Hero: `scaledToFit` → `scaledToFill` với `heroMaxHeight=310` — image fills frame thay vì tiny
+- Privacy chip: bỏ "A • B • C" green capsule, thay bằng 3 `privacyRow` checkmark items left-aligned trong subtle green-bordered box
+
+### ✍️ Copy rewrite — S1/S2/S3/S4
+**File:** `Models/OnboardingPage.swift`
+
+| Page | Title | Subtitle |
+|------|-------|----------|
+| S1 | Edit Word, Excel & PowerPoint on the go | Open the file your colleague just sent... |
+| S2 | Every document task, one tap away | Split a report into pages, combine files... |
+| S3 | From first draft to final signature | Mark documents as Draft, Reviewed, or Signed... |
+| S4 | Choose a folder\nYour files stay yours | Grant access once to find and organize files... |
+
+Writing rules: no trailing periods, no file extensions (.docx etc.), no UX arrows (Draft→Reviewed→Signed), human tone for office workers.
+
+### 🔒 Dark mode temporarily locked to light
+**Files:** `App/ThemeStore.swift`, `Views/Settings/SettingsView.swift`
+- `ThemeStore.appearance` default: `.system` → `.light`
+- Removed "Appearance" section + Theme Picker từ Settings
+- **Why:** dark mode palette chưa đủ polished (card contrast thấp, Draft chip màu bùn); tạm ẩn cho đến khi fix xong
+
+### 🎨 Dark mode colorset improvements (partial — pending full polish)
+**Files:** `Assets.xcassets/BackgroundElevated`, `BorderSubtle`, `StatusWarningBackground`
+
+| Token | Dark before | Dark after |
+|-------|------------|------------|
+| BackgroundElevated | `#262A31` | `#30363E` — card nổi hơn |
+| BorderSubtle | `#292D33` (delta 3pt) | `#464C55` — border visible |
+| StatusWarningBackground | `#3C290C` (bùn nâu) | `#3A2800` — amber tối sạch hơn |
+
+### 🐛 Fix — `insertImage(dataURL:)` missing
+**File:** `Views/Editor/OfficeEditorViewController.swift`
+- Pre-existing build error: `OfficeEditorView.swift` gọi `editorVC?.insertImage(dataURL:)` nhưng method không tồn tại
+- Added `insertImage(dataURL:)` calling `window.insertImageByDataURL(escaped)` via JS bridge
+
+---
+
 ## [Unreleased] — 2026-09-11 (ONLYOFFICE Offline Editor — full debug chain: DOCX + XLSX editing confirmed working)
 
 Toàn bộ session dành cho việc debug ONLYOFFICE offline editor từ crash → edit được. 6 bug liên tiếp được fix.

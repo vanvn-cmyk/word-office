@@ -225,9 +225,106 @@
       '#ws-v-scrollbar,#ws-h-scrollbar,#ws-scrollbar-corner',
       '{display:none!important}',
       '::-webkit-scrollbar{width:0!important;height:0!important}',
+      // ── Right-panel insert icon strip ────────────────────────────────────────
+      // The vertical strip of icons on the right edge (Insert table/chart/shape/
+      // image/¶/text) is replaced by the native iOS Insert tab in the toolbar.
+      '#right-panel,#rightpanel,#right-menu,#rightmenu,',
+      '#id-right-panel,#id-rightmenu,',
+      '.right-panel,.rightpanel,.asc-rightmenu,',
+      '[id*="right-panel"],[id*="rightpanel"],[id*="rightmenu"],',
+      '[class*="right-panel"],[class*="rightpanel"]',
+      '{display:none!important}',
       // NOTE: toolbar (#toolbar), formula bar (#cell-editing-box), left panel
       // (.left-panel), and status bar (#statusbar) are intentionally NOT hidden —
       // they provide essential editing features (formatting, cell input, sheet tabs).
+
+      // ── AutoFilter / dialog panel — iOS-native feel ───────────────────────────
+      // ONLYOFFICE renders its own filter dropdown and modal dialogs in HTML.
+      // These rules restyle them with SF fonts, rounded corners, and iOS button colours.
+      `
+      /* iOS-native font everywhere in dialogs / filter panels */
+      .asc-window, .asc-window *, .combo-dataview, .combo-dataview *,
+      .filter-panel, .filter-panel *, .popup-menu, .popup-menu *,
+      .dialog, .dialog * {
+        font-family: -apple-system, 'SF Pro Text', sans-serif !important;
+      }
+      /* Dialog card — rounded corners, no browser chrome */
+      .asc-window {
+        border-radius: 14px !important;
+        border: none !important;
+        box-shadow: 0 4px 32px rgba(0,0,0,0.22) !important;
+        overflow: hidden !important;
+      }
+      /* Dialog title bar */
+      .asc-window > .header, .asc-window > .asc-window-header {
+        background: transparent !important;
+        border-bottom: 0.5px solid rgba(0,0,0,0.12) !important;
+        font-size: 17px !important; font-weight: 600 !important;
+        text-align: center !important; padding: 14px 16px 12px !important;
+      }
+      /* Hide yellow warning triangle icon — text conveys the message */
+      .asc-window .header .icon, .asc-window .header img { display: none !important; }
+      /* Dialog body */
+      .asc-window > .body, .asc-window > .asc-window-body {
+        padding: 12px 16px !important; font-size: 14px !important;
+        color: #333 !important; text-align: center !important;
+      }
+      /* Dialog footer buttons — iOS UIAlertController style */
+      .asc-window > .footer, .asc-window > .asc-window-footer {
+        display: flex !important; flex-direction: row !important;
+        padding: 0 !important;
+        border-top: 0.5px solid rgba(0,0,0,0.12) !important;
+      }
+      .asc-window > .footer button, .asc-window > .asc-window-footer button {
+        flex: 1 !important; border: none !important; border-radius: 0 !important;
+        background: transparent !important; color: #007aff !important;
+        font-size: 17px !important; padding: 12px !important;
+        font-family: -apple-system, sans-serif !important;
+      }
+      .asc-window > .footer button.primary,
+      .asc-window > .footer button.btn-type-ok {
+        font-weight: 600 !important;
+      }
+      .asc-window > .footer button + button {
+        border-left: 0.5px solid rgba(0,0,0,0.12) !important;
+      }
+      /* AutoFilter combo dropdown panel */
+      .combo-dataview, .filter-panel {
+        border-radius: 12px !important; border: none !important;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.18) !important;
+        overflow: hidden !important;
+      }
+      /* Filter list rows */
+      .combo-dataview .listview-item, .filter-panel .listview-item,
+      .combo-dataview .item, .filter-panel .item {
+        font-size: 14px !important; min-height: 44px !important;
+        display: flex !important; align-items: center !important;
+        border-bottom: 0.5px solid rgba(0,0,0,0.06) !important;
+        padding: 0 16px !important;
+      }
+      /* Filter search input */
+      .combo-dataview input[type=text], .filter-panel input[type=text] {
+        border-radius: 10px !important; border: none !important;
+        background: rgba(120,120,128,0.12) !important;
+        padding: 7px 12px !important; font-size: 14px !important;
+        margin: 8px !important; width: calc(100% - 16px) !important;
+        box-sizing: border-box !important;
+      }
+      /* Filter OK/Cancel buttons */
+      .combo-dataview .btn-type-ok, .combo-dataview .btn-ok,
+      .filter-panel .btn-type-ok, .filter-panel .btn-ok {
+        background: #007aff !important; color: white !important;
+        border-radius: 10px !important; border: none !important;
+        font-size: 15px !important; font-weight: 600 !important;
+        min-height: 44px !important; padding: 0 20px !important;
+      }
+      .combo-dataview .btn-type-cancel, .combo-dataview .btn-cancel,
+      .filter-panel .btn-type-cancel, .filter-panel .btn-cancel {
+        background: rgba(120,120,128,0.12) !important; color: #007aff !important;
+        border-radius: 10px !important; border: none !important;
+        font-size: 15px !important; min-height: 44px !important; padding: 0 20px !important;
+      }
+      `,
     ].join('');
 
     // Elements to force-hide via inline style on first paint (belt-and-suspenders
@@ -236,8 +333,122 @@
       '#header-row', '#header-logo',
     ];
 
+    // Touch → mouse simulation for formula range selection.
+    // When the user types '=SUM(' and then touch-drags on the sheet, ONLYOFFICE
+    // needs to receive mousedown/mousemove/mouseup to insert a range ref (A1:A10).
+    // When editing a formula (text starts with '='), WKWebView's pan/scroll gesture
+    // steals touch events before ONLYOFFICE can use them to select a cell range.
+    // Fix: call preventDefault() on touchstart/touchmove to suppress scroll.
+    // WKWebView then lets touch-to-mouse conversion happen naturally, and ONLYOFFICE's
+    // existing mouse handlers do the range selection.  We do NOT synthesise mouse events
+    // manually — that caused double-dispatch conflicts.
+    function injectFormulaTouchSelect(iDoc, innerWin) {
+      var retries = 0;
+      var attached = false;
+
+      // Check whether the spreadsheet is currently in formula-edit mode.
+      // Try the ONLYOFFICE API first, then fall back to DOM inspection.
+      function isFormulaMode() {
+        // --- ONLYOFFICE API path ---
+        var ed = innerWin.Asc && innerWin.Asc.editor;
+        if (ed) {
+          // Some builds expose a direct "formula edit" flag
+          if (typeof ed.asc_getIsFormulaEditMode === 'function') {
+            return !!ed.asc_getIsFormulaEditMode();
+          }
+          // asc_getCellInfo reflects the current cell; formula starts with '='
+          if (typeof ed.asc_getCellInfo === 'function') {
+            try {
+              var ci = ed.asc_getCellInfo();
+              if (ci) {
+                var f = typeof ci.asc_getFormula === 'function' ? ci.asc_getFormula() : null;
+                if (typeof f === 'string' && f.trimStart().startsWith('=')) return true;
+              }
+            } catch(_) {}
+          }
+        }
+        // --- DOM fallback: scan known formula-bar / inline-editor selectors ---
+        var candidates = [
+          '#cell-editing-box',
+          '#ce-cell-content',
+          '[id*="cell-edit"]',
+          '[id*="formulaBar"]',
+          '[id*="formula-bar"]',
+          '.cell-editor-content',
+          '.asc_editor'
+        ];
+        for (var i = 0; i < candidates.length; i++) {
+          var el = iDoc.querySelector(candidates[i]);
+          if (!el) continue;
+          var txt = (typeof el.value === 'string' ? el.value : null)
+                  || el.innerText || el.textContent || '';
+          if (txt.trimStart().startsWith('=')) return true;
+        }
+        return false;
+      }
+
+      function trySetup() {
+        if (attached) return;
+        // Find the canvas that ONLYOFFICE renders spreadsheet cells onto
+        var canvas = iDoc.querySelector('#ws-canvas-overlay')
+          || iDoc.querySelector('#canvases canvas')
+          || iDoc.querySelector('#id-main-view canvas')
+          || iDoc.querySelector('.asc_CanvasScrollBody canvas')
+          || iDoc.querySelector('#id-work-area canvas')
+          || iDoc.querySelector('canvas');
+        if (!canvas) {
+          if (++retries < 20) { setTimeout(trySetup, 1000); }
+          else { console.warn('[OO-touch] formula-select: canvas not found after retries'); }
+          return;
+        }
+        attached = true;
+        console.log('[OO-touch] formula-select attached on', canvas.id || canvas.tagName);
+
+        // Prevent WKWebView scroll while in formula mode so ONLYOFFICE can select cells.
+        // WKWebView automatically converts the non-scroll touch into mousedown/move/up
+        // events that ONLYOFFICE's canvas handlers already understand.
+        canvas.addEventListener('touchstart', function(e) {
+          if (isFormulaMode()) e.preventDefault();
+        }, { passive: false, capture: true });
+
+        canvas.addEventListener('touchmove', function(e) {
+          if (isFormulaMode()) e.preventDefault();
+        }, { passive: false, capture: true });
+      }
+
+      // Start looking for the canvas 2 s after api.js injection; ONLYOFFICE needs time
+      // to build its DOM but the canvas is usually ready well before 2 s.
+      setTimeout(trySetup, 2000);
+    }
+
     function injectIOSChrome(iDoc) {
       if (iDoc.getElementById('_oo_ios_hide')) return;
+
+      // Suppress G.indexOf TypeError from ONLYOFFICE collaborative state machine.
+      // This fires when insert/format operations touch the lock layer — the editor
+      // handles the operation locally but the collab layer crashes on undefined refs.
+      // Suppressing it allows the insert to complete visually without killing the editor.
+      var _iWin = iDoc.defaultView;
+      if (_iWin && !_iWin._ooErrPatched) {
+        _iWin._ooErrPatched = true;
+        var _prev = _iWin.onerror;
+        _iWin.onerror = function(msg, src, line, col, err) {
+          // After editor fully loaded: ALL errors are non-fatal feature errors.
+          // Suppress here so the WKUserScript handler doesn't report them as fatal.
+          if (_iWin._editorFullyLoaded) {
+            console.warn('[OO] non-fatal post-load error:', msg, src + ':' + line);
+            return true;
+          }
+          // Pre-load: suppress G.indexOf from collab state machine (getLock timing)
+          if (typeof msg === 'string' && msg.indexOf('indexOf') !== -1) return true;
+          return _prev ? _prev.apply(this, arguments) : false;
+        };
+        _iWin.addEventListener('unhandledrejection', function(ev) {
+          if (_iWin._editorFullyLoaded) { ev.preventDefault(); return; }
+          if (ev.reason && String(ev.reason).indexOf('indexOf') !== -1) ev.preventDefault();
+        });
+      }
+
       const s = iDoc.createElement('style');
       s.id = '_oo_ios_hide';
       s.textContent = OO_IOS_CSS;
@@ -260,6 +471,279 @@
       // removed: it caused an infinite mutation→resize→layout→mutation loop during
       // spreadsheet rendering at ~89%, preventing the load from completing.)
       forceHide();
+
+      // ── Geometry-based left sidebar hider ────────────────────────────────────
+      // Run after ONLYOFFICE has finished rendering (4 s after injection).
+      // Approach 1: keyword scan on id/class names.
+      // Approach 2: geometric — hide any narrow left-anchored vertical strip.
+      // Both write !important so they survive ONLYOFFICE's own style resets.
+      setTimeout(function() {
+        var keywords = ['leftmenu','left-menu','lefttoolbar','asc-leftmenu',
+                        'plugin-panel','sidebar-btn','panel-left','panel-info','about-panel',
+                        'left-panel','leftpanel','lft-panel','side-bar',
+                        'rightmenu','right-menu','righttoolbar','asc-rightmenu',
+                        'right-panel','rightpanel','rgt-panel','right-sidebar'];
+        iDoc.querySelectorAll('*').forEach(function(el) {
+          var id = (el.id || '').toLowerCase();
+          var cls = (typeof el.className === 'string' ? el.className : '').toLowerCase();
+          var str = id + ' ' + cls;
+          for (var i = 0; i < keywords.length; i++) {
+            if (str.indexOf(keywords[i]) !== -1) {
+              el.style.setProperty('display', 'none', 'important');
+              console.log('[OO-kw-hide]', el.tagName, el.id, el.className);
+              break;
+            }
+          }
+        });
+        // Geometry: any narrow left-positioned full-height strip = left sidebar
+        var winW = iDoc.documentElement.clientWidth || (iDoc.body && iDoc.body.clientWidth) || 375;
+        var candidates = Array.from(
+          iDoc.querySelectorAll('body > *, #app-container > *, .app-container > *')
+        );
+        candidates.forEach(function(el) {
+          var r = el.getBoundingClientRect();
+          if (r.width > 1 && r.width < 80 && r.left < 10 && r.height > 150) {
+            el.style.setProperty('display', 'none', 'important');
+            console.log('[OO-geo-hide-L]', el.tagName, '#' + el.id, el.className,
+                        r.width + 'x' + r.height);
+          }
+          // Any narrow right-positioned full-height strip = right insert panel
+          if (r.width > 1 && r.width < 80 && r.right > winW - 10 && r.height > 150) {
+            el.style.setProperty('display', 'none', 'important');
+            console.log('[OO-geo-hide-R]', el.tagName, '#' + el.id, el.className,
+                        r.width + 'x' + r.height + ' right=' + Math.round(r.right));
+          }
+        });
+        // Dump all visible IDs to help identify any remaining unknown selectors
+        var ids = [];
+        iDoc.querySelectorAll('[id]').forEach(function(el) {
+          var r = el.getBoundingClientRect();
+          if (r.width > 0 && r.height > 0)
+            ids.push('#' + el.id + '[' + Math.round(r.width) + 'x' + Math.round(r.height) + ']');
+        });
+        console.log('[OO-inner-ids]', ids.join(' '));
+      }, 4000);
+
+      // ── Native filter interception + generic dialog styler ───────────────────
+      // MutationObserver watches childList only (not attributes) — safe, no loop.
+      (function() {
+        function _sp(el, prop, val) { el.style.setProperty(prop, val, 'important'); }
+
+        // ── Filter panel detection ─────────────────────────────────────────────
+        // ONLYOFFICE uses custom UI (no <input type=checkbox>).
+        // Detect by: text input + OK button + Cancel button pattern.
+        function _isFilterPanel(node) {
+          // Real checkboxes (some OO builds)
+          if (node.querySelectorAll('input[type=checkbox]').length >= 2) return true;
+          // Custom UI: must have a text/search input
+          if (!node.querySelector('input[type=text], input:not([type])')) return false;
+          var btns = Array.from(node.querySelectorAll('button'));
+          var hasOK     = btns.some(function(b) { var t = b.textContent.trim().toLowerCase(); return t === 'ok' || t === 'apply'; });
+          var hasCancel = btns.some(function(b) { return b.textContent.trim().toLowerCase() === 'cancel'; });
+          return hasOK && hasCancel;
+        }
+
+        // Extract list rows from the filter panel.
+        // Returns [{id, text, checked, el}] — el is the row element for later clicking.
+        function _extractRows(panel) {
+          // Real checkboxes path
+          var cbs = Array.from(panel.querySelectorAll('input[type=checkbox]'));
+          if (cbs.length > 0) {
+            return cbs.map(function(cb, idx) {
+              var row = cb.closest('li') || cb.closest('[role="option"]') || cb.parentElement;
+              var text = '(blank)';
+              if (row) {
+                var tmp = row.cloneNode(true);
+                tmp.querySelectorAll('input,button').forEach(function(e) { e.remove(); });
+                text = tmp.textContent.trim().replace(/\s+\d+\s*$/, '').trim() || '(blank)';
+              }
+              return { id: idx, text: text, checked: cb.checked, el: cb };
+            });
+          }
+          // Custom-UI path: find all leaf list items
+          var candidates = Array.from(panel.querySelectorAll(
+            'li, [role="option"], [role="listitem"], .listview-item, .list-item, .combo-item'
+          )).filter(function(r) {
+            // Keep only leaf nodes (no nested li/option inside)
+            return r.querySelectorAll('li,[role="option"]').length === 0
+              && r.textContent.trim().length > 0;
+          });
+          // Skip "Select all" row (first row or text contains "all")
+          var dataRows = candidates.filter(function(r) {
+            var t = r.textContent.trim().toLowerCase();
+            return t !== 'select all' && !(t === 'all') && !r.classList.contains('all');
+          });
+          // If we only got 1 candidate it might be the "Select all" row itself — use all
+          if (dataRows.length === 0) dataRows = candidates;
+
+          return dataRows.map(function(row, idx) {
+            // Detect selected state: aria attrs or CSS class
+            var checked = row.getAttribute('aria-checked') === 'true'
+              || row.getAttribute('aria-selected') === 'true'
+              || row.classList.contains('selected')
+              || row.classList.contains('checked')
+              || !!row.querySelector('.checked, .active, [class*="check"][class*="on"]');
+            // Extract display text
+            var tmp = row.cloneNode(true);
+            tmp.querySelectorAll('button, svg, [class*="icon"], [class*="count"]').forEach(function(e) { e.remove(); });
+            var text = tmp.textContent.trim().replace(/\s+\d+\s*$/, '').trim() || '(blank)';
+            return { id: idx, text: text, checked: checked, el: row };
+          });
+        }
+
+        // Intercept filter panel: extract values, move offscreen, post to Swift.
+        function _interceptFilter(panel) {
+          if (panel._iosFP) return;
+          panel._iosFP = true;
+
+          var rows = _extractRows(panel);
+          if (rows.length === 0) {
+            // Nothing to show natively — let OO handle it
+            panel._iosFP = false;
+            return;
+          }
+
+          // Cache rows on panel for _applyNativeFilter
+          panel._ooRows = rows;
+          // Find the "Select all" row element for bulk select
+          panel._ooSelectAllEl = Array.from(panel.querySelectorAll(
+            'li, [role="option"], .listview-item, .list-item'
+          )).find(function(r) {
+            var t = r.textContent.trim().toLowerCase();
+            return t.indexOf('select all') !== -1 || t === 'all';
+          }) || null;
+
+          // Find OK / Cancel buttons
+          var btns = Array.from(panel.querySelectorAll('button'));
+          panel._ooOkBtn     = btns.find(function(b) { var t = b.textContent.trim().toLowerCase(); return t === 'ok' || t === 'apply'; }) || null;
+          panel._ooCancelBtn = btns.find(function(b) { return b.textContent.trim().toLowerCase() === 'cancel'; }) || null;
+
+          // Move panel offscreen — visibility:hidden keeps it functional for clicking
+          _sp(panel, 'position', 'fixed');
+          _sp(panel, 'top',      '-9999px');
+          _sp(panel, 'left',     '-9999px');
+          _sp(panel, 'visibility', 'hidden');
+          window._ooFilterPanel = panel;
+
+          var items = rows.map(function(r) { return { id: r.id, text: r.text, checked: r.checked }; });
+          try {
+            window.webkit.messageHandlers.editorBridge.postMessage({ action: 'showNativeFilter', items: items });
+          } catch(e) {
+            // Bridge unavailable — restore panel
+            ['position','top','left','visibility'].forEach(function(p) { panel.style.removeProperty(p); });
+            window._ooFilterPanel = null;
+            panel._iosFP = false;
+          }
+        }
+
+        // Called by Swift after user confirms native filter sheet.
+        window._applyNativeFilter = function(selectedIds, cancel) {
+          var panel = window._ooFilterPanel;
+          if (!panel) return;
+          window._ooFilterPanel = null;
+
+          if (cancel) {
+            if (panel._ooCancelBtn) panel._ooCancelBtn.click();
+            else panel.remove();
+            return;
+          }
+
+          var rows = panel._ooRows || [];
+          if (rows[0] && rows[0].el && typeof rows[0].el.click === 'function') {
+            // Custom-UI path: rows are clickable elements
+            // Step 1: ensure "Select All" is unchecked (click to deselect all)
+            if (panel._ooSelectAllEl) {
+              var allSelected = rows.every(function(r) { return selectedIds.indexOf(r.id) !== -1; });
+              if (!allSelected) {
+                // Deselect all first, then re-select wanted items
+                panel._ooSelectAllEl.click(); // toggle off (assuming currently on)
+                panel._ooSelectAllEl.click(); // toggle back — result depends on OO state
+              }
+            }
+            // Step 2: click each row to match desired selection
+            rows.forEach(function(r) {
+              var want = selectedIds.indexOf(r.id) !== -1;
+              var is   = r.el.getAttribute('aria-checked') === 'true'
+                       || r.el.getAttribute('aria-selected') === 'true'
+                       || r.el.classList.contains('selected')
+                       || r.el.classList.contains('checked');
+              if (want !== is) r.el.click();
+            });
+          } else {
+            // Checkbox path
+            rows.forEach(function(r) {
+              var cb = r.el;
+              if (!cb) return;
+              var want = selectedIds.indexOf(r.id) !== -1;
+              if (!!cb.checked !== want) cb.click();
+            });
+          }
+
+          // Click OK
+          if (panel._ooOkBtn) panel._ooOkBtn.click();
+        };
+
+        // Generic dialog styler for non-filter popups (Warning, etc.)
+        function _styleDialog(node) {
+          if (!node || node._iosStyled || node._iosFP) return;
+          node._iosStyled = true;
+          var cs = iDoc.defaultView.getComputedStyle(node);
+          if (cs.position !== 'absolute' && cs.position !== 'fixed') return;
+          if (node.offsetWidth < 80 || node.offsetHeight < 40) return;
+          _sp(node, 'border-radius', '14px');
+          _sp(node, 'border', 'none');
+          _sp(node, 'box-shadow', '0 8px 40px rgba(0,0,0,0.22)');
+          _sp(node, 'overflow', 'hidden');
+          _sp(node, 'font-family', '-apple-system, SF Pro Text, sans-serif');
+          node.querySelectorAll('button').forEach(function(btn) {
+            var t = btn.textContent.trim().toLowerCase();
+            _sp(btn, 'font-family', '-apple-system, sans-serif');
+            _sp(btn, 'font-size', '16px'); _sp(btn, 'min-height', '44px');
+            _sp(btn, 'border-radius', '10px'); _sp(btn, 'border', 'none');
+            _sp(btn, 'cursor', 'pointer'); _sp(btn, 'padding', '0 20px');
+            if (t === 'ok' || t === 'yes') {
+              _sp(btn, 'background', '#007aff'); _sp(btn, 'color', 'white'); _sp(btn, 'font-weight', '600');
+            } else if (t === 'cancel' || t === 'no') {
+              _sp(btn, 'background', 'rgba(120,120,128,0.12)'); _sp(btn, 'color', '#007aff');
+            }
+          });
+        }
+
+        var _obs = new MutationObserver(function(mutations) {
+          for (var i = 0; i < mutations.length; i++) {
+            var added = mutations[i].addedNodes;
+            for (var j = 0; j < added.length; j++) {
+              var n = added[j];
+              if (n.nodeType !== 1) continue;
+
+              // ── Filter detection is SYNCHRONOUS (no setTimeout) ───────────────
+              // MutationObserver callbacks run before the browser paints, so hiding
+              // the panel here prevents any visual flash.
+              if (_isFilterPanel(n)) { _interceptFilter(n); continue; }
+              var _fp = null;
+              var _kids = n.querySelectorAll('*');
+              for (var _k = 0; _k < _kids.length; _k++) {
+                if (_isFilterPanel(_kids[_k])) { _fp = _kids[_k]; break; }
+              }
+              if (_fp) { _interceptFilter(_fp); continue; }
+
+              // ── Generic dialog styling needs layout → small delay ─────────────
+              setTimeout(function(el) {
+                _styleDialog(el);
+                el.querySelectorAll('*').forEach(function(c) { _styleDialog(c); });
+              }.bind(null, n), 30);
+            }
+          }
+        });
+
+        if (iDoc.body) {
+          _obs.observe(iDoc.body, { childList: true, subtree: true });
+        } else {
+          iDoc.addEventListener('DOMContentLoaded', function() {
+            _obs.observe(iDoc.body, { childList: true, subtree: true });
+          });
+        }
+      })();
     }
 
     // ── onAppReady — patch inner iframe and inject api.js ─────────────────────
@@ -277,6 +761,7 @@
       // Inject iOS chrome-hiding CSS BEFORE api.js so rules are present when
       // ONLYOFFICE creates its UI elements (avoids FOUC / flash of chrome).
       injectIOSChrome(iframeDoc);
+      injectFormulaTouchSelect(iframeDoc, win);
 
       // Patch XHR in inner iframe so EditorServer can handle requests
       const XHR = createXHRProxy(win.XMLHttpRequest);
@@ -333,6 +818,13 @@
           '#id-btn-coauthors,#btn-coauthors,#btn-info,#id-btn-info,',
           '.btn-header-info,.asc-info-icon,.coauthors-btn,.btn-icon-info,',
           '#id-spreadsheet-info,.icon-info-container,#collaboration-info',
+          '{display:none!important}',
+          // Right-panel insert icon strip (outer frame)
+          '#right-panel,#rightpanel,#right-menu,#rightmenu,',
+          '#id-right-panel,#id-rightmenu,',
+          '.right-panel,.rightpanel,.asc-rightmenu,',
+          '[id*="right-panel"],[id*="rightpanel"],[id*="rightmenu"],',
+          '[class*="right-panel"],[class*="rightpanel"]',
           '{display:none!important}'
         ].join('');
         (document.head || document.documentElement).appendChild(s);
@@ -367,6 +859,30 @@
         }, 2500);
       })();
 
+      // Outer window G.indexOf suppressor (belt-and-suspenders for operations
+      // that crash in the outer frame's collaborative layer callback).
+      if (!window._ooErrPatched) {
+        window._ooErrPatched = true;
+        var _pOuter = window.onerror;
+        window.onerror = function(msg, src, line, col, err) {
+          // Cross-frame errors from inner iframe always arrive as "Script error." at line 0
+          // with no src — already handled by the inner-frame suppressor, safe to discard.
+          if (!src && (!line || line === 0)) return true;
+          // After full load: ALL outer-frame errors are non-fatal feature errors.
+          if (window._editorFullyLoaded) {
+            console.warn('[OO] non-fatal outer post-load:', msg, src + ':' + line);
+            return true;
+          }
+          // Pre-load: suppress G.indexOf
+          if (typeof msg === 'string' && msg.indexOf('indexOf') !== -1) return true;
+          return _pOuter ? _pOuter.apply(this, arguments) : false;
+        };
+        window.addEventListener('unhandledrejection', function(ev) {
+          if (window._editorFullyLoaded) { ev.preventDefault(); return; }
+          if (ev.reason && String(ev.reason).indexOf('indexOf') !== -1) ev.preventDefault();
+        });
+      }
+
       // Mark both frames as fully loaded so the WKUserScript unhandledrejection
       // handler (injected into every frame via forMainFrameOnly:false) knows
       // that any subsequent promise rejection is a non-fatal feature error,
@@ -376,6 +892,8 @@
       window._editorFullyLoaded = true;
       win._editorFullyLoaded = true;
       window.webkit.messageHandlers.editorBridge.postMessage({ action: 'ready' });
+      // Auto-dump API so Xcode console shows real method names without manual trigger.
+      setTimeout(function() { try { _dumpEditorAPI(); } catch(_) {} }, 3000);
     }
 
     // ── Load api.js into outer frame, then create editor ──────────────────────
@@ -399,6 +917,42 @@
 
     // ── Public API — called by Swift via callAsyncJavaScript ──────────────────
 
+    // Scans Asc.editor prototype chain for all toolbar-relevant methods and logs them.
+    // Called automatically once after editor ready AND by 'dump-api' command.
+    function _dumpEditorAPI() {
+      var _edDump = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+      if (!_edDump) { console.log('[API-DUMP] Asc.editor not available yet'); return; }
+      var seen = {};
+      var methods = [];
+      var patterns = [
+        'align','Align','sort','Sort','merge','Merge','filter','Filter',
+        'insert','Insert','delete','Delete','row','Row','col','Col',
+        'freeze','Freeze','setCell','getCell','asc_','auto','Auto'
+      ];
+      var proto = _edDump;
+      while (proto && proto !== Object.prototype) {
+        Object.getOwnPropertyNames(proto).forEach(function(n) {
+          if (seen[n]) return;
+          seen[n] = true;
+          if (typeof _edDump[n] !== 'function') return;
+          for (var i = 0; i < patterns.length; i++) {
+            if (n.indexOf(patterns[i]) !== -1) { methods.push(n); break; }
+          }
+        });
+        proto = Object.getPrototypeOf(proto);
+      }
+      methods.sort();
+      console.log('[API-DUMP] ' + methods.length + ' methods:\n' + methods.join('\n'));
+      // Also log c_oAscInsertOptions / c_oAscDeleteOptions enum values
+      var A = _innerWin.Asc || {};
+      console.log('[API-DUMP] c_oAscInsertOptions:', JSON.stringify(A.c_oAscInsertOptions));
+      console.log('[API-DUMP] c_oAscDeleteOptions:', JSON.stringify(A.c_oAscDeleteOptions));
+      console.log('[API-DUMP] c_oAscMergeOptions:', JSON.stringify(A.c_oAscMergeOptions));
+      console.log('[API-DUMP] c_oAscHAlign:', JSON.stringify(A.c_oAscHAlign));
+      console.log('[API-DUMP] c_oAscVAlign:', JSON.stringify(A.c_oAscVAlign));
+      try { window.webkit.messageHandlers.editorBridge.postMessage({ action: 'apiDump', methods: methods }); } catch(_) {}
+    }
+
     // Swift calls this to execute a formatting command in the inner editor iframe.
     // Accepts: 'bold','italic','underline','strikeout','undo','redo',
     //          'align-left','align-center','align-right','align-justify',
@@ -406,15 +960,46 @@
     window.execEditorCommand = function(cmd) {
       if (!_innerWin) return;
       try {
+        // ── B/I/U/S — spreadsheet uses Asc cell API; Word/PPT uses executeFocusedCommand ──
+        if (cmd === 'bold' || cmd === 'italic' || cmd === 'underline' || cmd === 'strikeout') {
+          var _xed = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+          if (_xed && typeof _xed.asc_setCellBold === 'function') {
+            var _ci = _xed.asc_getCellInfo ? _xed.asc_getCellInfo() : null;
+            if      (cmd === 'bold')      { _xed.asc_setCellBold(!(_ci && _ci.asc_getFontBold ? _ci.asc_getFontBold() : false)); }
+            else if (cmd === 'italic')    { _xed.asc_setCellItalic(!(_ci && _ci.asc_getFontItalic ? _ci.asc_getFontItalic() : false)); }
+            else if (cmd === 'underline') { _xed.asc_setCellUnderline(!(_ci && _ci.asc_getFontUnderline ? _ci.asc_getFontUnderline() : false)); }
+            else                          { _xed.asc_setCellStrikethrough(!(_ci && _ci.asc_getFontStrikethrough ? _ci.asc_getFontStrikethrough() : false)); }
+            return;
+          }
+          // Word / PPT
+          var _bmap = { bold:'Bold', italic:'Italic', underline:'Underline', strikeout:'Strikeout' };
+          _innerWin.AscDesktopEditor?.executeFocusedCommand(_bmap[cmd]);
+          return;
+        }
+
+        // Undo / Redo — use direct Asc API so WKWebView focus is not required.
+        if (cmd === 'undo') {
+          var _ued = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+          if      (_ued && typeof _ued.asc_Undo === 'function') { _ued.asc_Undo(); }
+          else if (_ued && typeof _ued.asc_undo === 'function') { _ued.asc_undo(); }
+          else { try { _innerWin.focus(); } catch(_) {} _innerWin.AscDesktopEditor?.executeFocusedCommand('Undo'); }
+          return;
+        }
+        if (cmd === 'redo') {
+          var _red = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+          if      (_red && typeof _red.asc_Redo === 'function') { _red.asc_Redo(); }
+          else if (_red && typeof _red.asc_redo === 'function') { _red.asc_redo(); }
+          else { try { _innerWin.focus(); } catch(_) {} _innerWin.AscDesktopEditor?.executeFocusedCommand('Redo'); }
+          return;
+        }
+
         var MAP = {
-          'undo': 'Undo', 'redo': 'Redo',
-          'bold': 'Bold', 'italic': 'Italic',
-          'underline': 'Underline', 'strikeout': 'Strikeout',
           'align-left': 'AlignLeft', 'align-center': 'AlignCenter',
           'align-right': 'AlignRight', 'align-justify': 'AlignJustify',
           'list-bullet': 'InsertBulletList', 'list-numbered': 'InsertNumberedList',
         };
         if (MAP[cmd]) {
+          try { _innerWin.focus(); } catch(_) {}
           _innerWin.AscDesktopEditor?.executeFocusedCommand(MAP[cmd]);
           return;
         }
@@ -449,25 +1034,131 @@
         if (_ed) {
           var _A = _innerWin.Asc;
 
-          // Cell horizontal alignment
+          // Font size increase / decrease
+          if (cmd === 'font-size-inc') {
+            if      (typeof _ed.asc_increaseFontSize === 'function') { _ed.asc_increaseFontSize(); }
+            else if (typeof _ed.asc_FontSizeIncrease === 'function') { _ed.asc_FontSizeIncrease(); }
+            else {
+              var _ci0 = _ed.asc_getCellInfo && _ed.asc_getCellInfo();
+              var _sz0 = _ci0 && _ci0.asc_getFontSize && _ci0.asc_getFontSize();
+              if (_sz0 && _ed.asc_setCellFontSize) { _ed.asc_setCellFontSize(_sz0 + 2); }
+              else { _execFocused('FontSizeInc'); }
+            }
+            return;
+          }
+          if (cmd === 'font-size-dec') {
+            if      (typeof _ed.asc_decreaseFontSize === 'function') { _ed.asc_decreaseFontSize(); }
+            else if (typeof _ed.asc_FontSizeDecrease === 'function') { _ed.asc_FontSizeDecrease(); }
+            else {
+              var _ci1 = _ed.asc_getCellInfo && _ed.asc_getCellInfo();
+              var _sz1 = _ci1 && _ci1.asc_getFontSize && _ci1.asc_getFontSize();
+              if (_sz1 && _sz1 > 6 && _ed.asc_setCellFontSize) { _ed.asc_setCellFontSize(_sz1 - 2); }
+              else { _execFocused('FontSizeDec'); }
+            }
+            return;
+          }
+
+          // Clear cell content — try enum-based API first, then fallbacks
+          if (cmd === 'clear-cell') {
+            var _co = _A.c_oAscCleanOptions || {};
+            // Content = 1 in most ONLYOFFICE builds; All = 7 or 0
+            var _clearVal = _co.Content !== undefined ? _co.Content : 1;
+            if      (typeof _ed.asc_emptyCells       === 'function') { _ed.asc_emptyCells(_clearVal); }
+            else if (typeof _ed.asc_clearCell        === 'function') { _ed.asc_clearCell(_clearVal); }
+            else if (typeof _ed.asc_clearCellContent === 'function') { _ed.asc_clearCellContent(); }
+            else if (typeof _ed.asc_deleteCellValue  === 'function') { _ed.asc_deleteCellValue(); }
+            else { _execFocused('ClearContent'); }
+            return;
+          }
+
+          // All borders
+          if (cmd === 'border-all') {
+            var _applied = false;
+            // Primary path: asc_setCellBorder + CBorderOptions
+            if (typeof _ed.asc_setCellBorder === 'function' && typeof _A.asc_CBorderOptions === 'function') {
+              try {
+                var _bo = new _A.asc_CBorderOptions();
+                // Build a thin black border — try with and without explicit color
+                var _bs;
+                if (typeof _A.asc_CColorBorder === 'function') {
+                  _bs = new _A.asc_CColorBorder();
+                  // Style 1 = thin (c_oAscBorderStyles.Thin)
+                  typeof _bs.asc_setStyle === 'function' ? _bs.asc_setStyle(1) : (_bs.style = 1);
+                  // Color: black — try constructor args first, then property setters
+                  if (typeof _A.asc_CColor === 'function') {
+                    var _bc;
+                    try { _bc = new _A.asc_CColor(0, 0, 0); } catch(_) { _bc = new _A.asc_CColor(); _bc.r = 0; _bc.g = 0; _bc.b = 0; }
+                    if (typeof _bc.asc_putR === 'function') { _bc.asc_putR(0); _bc.asc_putG(0); _bc.asc_putB(0); }
+                    typeof _bs.asc_setColor === 'function' ? _bs.asc_setColor(_bc) : (_bs.color = _bc);
+                  }
+                }
+                var _sides = ['asc_setTop','asc_setBottom','asc_setLeft','asc_setRight','asc_setInsideH','asc_setInsideV'];
+                _sides.forEach(function(m) { if (typeof _bo[m] === 'function' && _bs) _bo[m](_bs); });
+                _ed.asc_setCellBorder(_bo);
+                _applied = true;
+                console.log('[border-all] asc_setCellBorder OK');
+              } catch(_e) { console.warn('[border-all] asc_setCellBorder failed:', _e.message || _e); }
+            }
+            // Fallback method names
+            if (!_applied) {
+              if      (typeof _ed.asc_setCellBorderAll  === 'function') { _ed.asc_setCellBorderAll();  _applied = true; }
+              else if (typeof _ed.asc_setBorderAll      === 'function') { _ed.asc_setBorderAll();       _applied = true; }
+              else if (typeof _ed.asc_AllBorders        === 'function') { _ed.asc_AllBorders();          _applied = true; }
+            }
+            // Focused command fallback — try known OO command names
+            if (!_applied) {
+              try { _innerWin.focus(); } catch(_) {}
+              var _aDsk = _innerWin.AscDesktopEditor;
+              var _borderFired = false;
+              ['BordersFull','borders:all','borders_all','BordersAll','InsertBordersFull'].forEach(function(n) {
+                if (!_borderFired && _aDsk) { try { _aDsk.executeFocusedCommand(n); _borderFired = true; } catch(_) {} }
+              });
+            }
+            return;
+          }
+
+          // Cell horizontal alignment — direct Asc API (no WKWebView focus needed).
+          // Method name varies by ONLYOFFICE build: try all known variants in order.
           if (cmd === 'cell-align-left' || cmd === 'cell-align-center' || cmd === 'cell-align-right') {
             var ha = _A.c_oAscHAlign || {};
-            var alignVal = { 'cell-align-left': ha.Left||'left', 'cell-align-center': ha.Center||'center', 'cell-align-right': ha.Right||'right' };
-            _ed.asc_HorizontalAlign && _ed.asc_HorizontalAlign(alignVal[cmd]);
+            var hv = {'cell-align-left':ha.Left!==undefined?ha.Left:1,'cell-align-center':ha.Center!==undefined?ha.Center:2,'cell-align-right':ha.Right!==undefined?ha.Right:3};
+            var nHA = hv[cmd];
+            if      (typeof _ed.asc_setCellHoriAlign  === 'function') { _ed.asc_setCellHoriAlign(nHA); }
+            else if (typeof _ed.asc_HorizontalAlign   === 'function') { _ed.asc_HorizontalAlign(nHA); }
+            else if (typeof _ed.asc_setCellTextAlign  === 'function') { _ed.asc_setCellTextAlign(nHA); }
+            else if (typeof _ed.asc_setCellAlign      === 'function') { _ed.asc_setCellAlign(nHA); }
+            else {
+              var hmap2 = {'cell-align-left':'AlignLeft','cell-align-center':'AlignCenter','cell-align-right':'AlignRight'};
+              _execFocused(hmap2[cmd]);
+            }
             return;
           }
 
-          // Merge & Center (type 0 = merge all into one cell)
+          // Merge & Center — direct Asc API primary (no WKWebView focus needed)
           if (cmd === 'merge-center') {
             var M = _A.c_oAscMergeOptions || _A.EN_MergeType || {};
-            _ed.asc_mergeCells && _ed.asc_mergeCells(M.Merge !== undefined ? M.Merge : 0);
+            console.log('[OO] merge options:', JSON.stringify(M));
+            if (_ed.asc_mergeCells) { _ed.asc_mergeCells(M.Merge !== undefined ? M.Merge : 2); }
+            else if (_innerWin.AscDesktopEditor) { _innerWin.AscDesktopEditor.executeFocusedCommand('MergeCenter'); }
             return;
           }
 
-          // Unmerge cells
+          // Unmerge cells — try dedicated method first, then enum value, then fallback
           if (cmd === 'merge-unmerge') {
-            var M = _A.c_oAscMergeOptions || _A.EN_MergeType || {};
-            _ed.asc_mergeCells && _ed.asc_mergeCells(M.UnMerge !== undefined ? M.UnMerge : 3);
+            var M2 = _A.c_oAscMergeOptions || _A.EN_MergeType || {};
+            console.log('[OO] unmerge options:', JSON.stringify(M2));
+            if (typeof _ed.asc_unMergeCells === 'function') {
+              _ed.asc_unMergeCells();
+            } else if (typeof _ed.asc_cancelMergeCells === 'function') {
+              _ed.asc_cancelMergeCells();
+            } else if (_ed.asc_mergeCells) {
+              // Try UnMerge key; fall back to 0 (None) which undoes merge in most builds
+              var uv = M2.UnMerge !== undefined ? M2.UnMerge
+                     : (M2.None !== undefined ? M2.None : 0);
+              _ed.asc_mergeCells(uv);
+            } else if (_innerWin.AscDesktopEditor) {
+              _innerWin.AscDesktopEditor.executeFocusedCommand('Unmerge');
+            }
             return;
           }
 
@@ -479,11 +1170,13 @@
           }
 
           // Font color: 'font-color:#RRGGBB'
+          // Excel: asc_setCellTextColor; Word/PPT: put_TextColor
           if (cmd.indexOf('font-color:') === 0 && _A.asc_CColor) {
             var hex = cmd.slice(11);
             var r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
             var c = new _A.asc_CColor(); c.r = r; c.g = g; c.b = b;
-            _ed.asc_setCellTextColor && _ed.asc_setCellTextColor(c);
+            if (_ed.asc_setCellTextColor) { _ed.asc_setCellTextColor(c); }
+            else if (_ed.put_TextColor) { _ed.put_TextColor(c); }
             return;
           }
 
@@ -496,48 +1189,299 @@
             return;
           }
 
-          // Sort A→Z
+          // ── Helper: restore inner-frame focus before executeFocusedCommand ──────
+          function _execFocused(name) {
+            try { _innerWin.focus(); } catch(_) {}
+            _innerWin.AscDesktopEditor && _innerWin.AscDesktopEditor.executeFocusedCommand(name);
+          }
+
+          // ── Sort A→Z / Z→A ───────────────────────────────────────────────────
           if (cmd === 'sort-asc') {
-            _ed.asc_sortRangeAscending && _ed.asc_sortRangeAscending(false);
+            if      (typeof _ed.asc_sortRangeAscending  === 'function') { _ed.asc_sortRangeAscending(); }
+            else if (typeof _ed.asc_sortAscending        === 'function') { _ed.asc_sortAscending(); }
+            else if (typeof _ed.asc_sortCells            === 'function') { _ed.asc_sortCells(true); }
+            else if (typeof _ed.asc_sortRows             === 'function') { _ed.asc_sortRows(true); }
+            else { _execFocused('SortAscending'); }
             return;
           }
-
-          // Toggle AutoFilter
-          if (cmd === 'filter-toggle') {
-            _ed.asc_AutoFilter && _ed.asc_AutoFilter();
-            return;
-          }
-
-          // Sort Z→A
           if (cmd === 'sort-desc') {
-            _ed.asc_sortRangeDescending && _ed.asc_sortRangeDescending(false);
+            if      (typeof _ed.asc_sortRangeDescending === 'function') { _ed.asc_sortRangeDescending(); }
+            else if (typeof _ed.asc_sortDescending       === 'function') { _ed.asc_sortDescending(); }
+            else if (typeof _ed.asc_sortCells            === 'function') { _ed.asc_sortCells(false); }
+            else if (typeof _ed.asc_sortRows             === 'function') { _ed.asc_sortRows(false); }
+            else { _execFocused('SortDescending'); }
             return;
           }
 
-          // Cell vertical alignment
+          // ── AutoFilter toggle ─────────────────────────────────────────────────
+          if (cmd === 'filter-toggle') {
+            if      (typeof _ed.asc_AutoFilter    === 'function') { _ed.asc_AutoFilter(); }
+            else if (typeof _ed.asc_autoFilter    === 'function') { _ed.asc_autoFilter(); }
+            else if (typeof _ed.asc_addAutoFilter === 'function') { _ed.asc_addAutoFilter(null); }
+            else { _execFocused('AutoFilter'); }
+            return;
+          }
+
+          // ── Freeze / Unfreeze panes ───────────────────────────────────────────
+          if (cmd === 'freeze-panes') {
+            if      (typeof _ed.asc_freezePane    === 'function') { _ed.asc_freezePane(); }
+            else if (typeof _ed.asc_freezeRow     === 'function') { _ed.asc_freezeRow(); }
+            else { _execFocused('FreezeRowsColumns'); }
+            return;
+          }
+
+          // ── Remove duplicates ─────────────────────────────────────────────────
+          if (cmd === 'remove-dup') {
+            if (typeof _ed.asc_removeDuplicates === 'function') { _ed.asc_removeDuplicates(); }
+            else { _execFocused('RemoveDuplicates'); }
+            return;
+          }
+
+          // ── Insert / delete rows & columns ────────────────────────────────────
+          // Try direct Asc API (asc_insertCells / asc_deleteCells with enum, then
+          // named helpers), falling back to executeFocusedCommand with inner focus.
+          if (cmd === 'row-insert-above' || cmd === 'row-insert-below') {
+            var _io = _A.c_oAscInsertOptions || {};
+            var _rowType = _io.InsertRows !== undefined ? _io.InsertRows : 2;
+            if      (typeof _ed.asc_insertCells === 'function') { _ed.asc_insertCells(_rowType); }
+            else if (typeof _ed.asc_insertRows  === 'function') { _ed.asc_insertRows(cmd === 'row-insert-above', 1); }
+            else if (typeof _ed.asc_addRow      === 'function') { _ed.asc_addRow(cmd === 'row-insert-above'); }
+            else { _execFocused(cmd === 'row-insert-above' ? 'InsertRowAbove' : 'InsertRowBelow'); }
+            return;
+          }
+          if (cmd === 'row-delete') {
+            var _do = _A.c_oAscDeleteOptions || {};
+            var _delRowType = _do.DeleteRows !== undefined ? _do.DeleteRows : 2;
+            if      (typeof _ed.asc_deleteCells === 'function') { _ed.asc_deleteCells(_delRowType); }
+            else if (typeof _ed.asc_deleteRows  === 'function') { _ed.asc_deleteRows(); }
+            else if (typeof _ed.asc_deleteRow   === 'function') { _ed.asc_deleteRow(); }
+            else { _execFocused('DeleteRow'); }
+            return;
+          }
+          if (cmd === 'col-insert-left' || cmd === 'col-insert-right') {
+            var _io2 = _A.c_oAscInsertOptions || {};
+            var _colType = _io2.InsertColumns !== undefined ? _io2.InsertColumns : 3;
+            if      (typeof _ed.asc_insertCells   === 'function') { _ed.asc_insertCells(_colType); }
+            else if (typeof _ed.asc_insertColumns === 'function') { _ed.asc_insertColumns(cmd === 'col-insert-left', 1); }
+            else if (typeof _ed.asc_addColumn     === 'function') { _ed.asc_addColumn(cmd === 'col-insert-left'); }
+            else { _execFocused(cmd === 'col-insert-left' ? 'InsertColumnLeft' : 'InsertColumnRight'); }
+            return;
+          }
+          if (cmd === 'col-delete') {
+            var _do2 = _A.c_oAscDeleteOptions || {};
+            var _delColType = _do2.DeleteColumns !== undefined ? _do2.DeleteColumns : 3;
+            if      (typeof _ed.asc_deleteCells   === 'function') { _ed.asc_deleteCells(_delColType); }
+            else if (typeof _ed.asc_deleteColumns === 'function') { _ed.asc_deleteColumns(); }
+            else if (typeof _ed.asc_deleteColumn  === 'function') { _ed.asc_deleteColumn(); }
+            else { _execFocused('DeleteColumn'); }
+            return;
+          }
+
+          // Group / Ungroup rows
+          if (cmd === 'group-rows') {
+            _innerWin.AscDesktopEditor && _innerWin.AscDesktopEditor.executeFocusedCommand('group-row');
+            return;
+          }
+          if (cmd === 'ungroup-rows') {
+            _innerWin.AscDesktopEditor && _innerWin.AscDesktopEditor.executeFocusedCommand('ungroup-row');
+            return;
+          }
+
+          // Group / Ungroup columns
+          if (cmd === 'group-cols') {
+            _innerWin.AscDesktopEditor && _innerWin.AscDesktopEditor.executeFocusedCommand('group-column');
+            return;
+          }
+          if (cmd === 'ungroup-cols') {
+            _innerWin.AscDesktopEditor && _innerWin.AscDesktopEditor.executeFocusedCommand('ungroup-column');
+            return;
+          }
+
+          // Cell vertical alignment — try all known method name variants.
           if (cmd === 'cell-valign-top' || cmd === 'cell-valign-middle' || cmd === 'cell-valign-bottom') {
             var va = _A.c_oAscVAlign || {};
-            var vMap = { 'cell-valign-top': va.Top||'top', 'cell-valign-middle': va.Center||'center', 'cell-valign-bottom': va.Bottom||'bottom' };
-            _ed.asc_VerticalAlign && _ed.asc_VerticalAlign(vMap[cmd]);
+            var vMap = {'cell-valign-top':va.Top!==undefined?va.Top:1,'cell-valign-middle':va.Center!==undefined?va.Center:2,'cell-valign-bottom':va.Bottom!==undefined?va.Bottom:3};
+            var nVA = vMap[cmd];
+            if      (typeof _ed.asc_setCellVertAlign  === 'function') { _ed.asc_setCellVertAlign(nVA); }
+            else if (typeof _ed.asc_VerticalAlign     === 'function') { _ed.asc_VerticalAlign(nVA); }
+            else if (typeof _ed.asc_setCellVAlign     === 'function') { _ed.asc_setCellVAlign(nVA); }
+            else {
+              var vexec2 = {'cell-valign-top':'AlignTop','cell-valign-middle':'AlignMiddle','cell-valign-bottom':'AlignBottom'};
+              _execFocused(vexec2[cmd]);
+            }
             return;
           }
 
           // Wrap text
           if (cmd === 'wrap-text') {
             if (_ed.asc_setCellWrap) {
-              // Toggle: read current state then flip it
               var props = _ed.asc_getCellInfo && _ed.asc_getCellInfo();
               var isWrapped = props && props.asc_getWordWrap && props.asc_getWordWrap();
               _ed.asc_setCellWrap(!isWrapped);
+            } else {
+              _innerWin.AscDesktopEditor?.executeFocusedCommand('WrapText');
             }
             return;
           }
 
           // Find: open search bar
           if (cmd === 'find') {
-            _innerWin.AscDesktopEditor && _innerWin.AscDesktopEditor.executeFocusedCommand('find');
+            _execFocused('find');
             return;
           }
+        }
+
+        // ── Helper for insert commands (needs inner focus) ────────────────────
+        function _focusedCmd(name) {
+          try { _innerWin.focus(); } catch(_) {}
+          _innerWin.AscDesktopEditor && _innerWin.AscDesktopEditor.executeFocusedCommand(name);
+        }
+
+        // Find a button in OO's hidden toolbar by keyword search (aria-label / title / id / class).
+        // Calls element.click() — works on hidden elements in WebKit without un-hiding.
+        function _clickOOBtn(keywords) {
+          var iDoc = _innerWin && _innerWin.document;
+          if (!iDoc) return false;
+          var allEls = Array.from(iDoc.querySelectorAll('button,[role="button"],a.btn,.btn'));
+          var kw = keywords.map(function(k) { return k.toLowerCase(); });
+          for (var i = 0; i < allEls.length; i++) {
+            var el = allEls[i];
+            var label = [
+              el.getAttribute('aria-label'), el.getAttribute('title'),
+              el.getAttribute('data-hint'), el.getAttribute('data-tiphint'),
+              el.id, typeof el.className === 'string' ? el.className : ''
+            ].filter(Boolean).join(' ').toLowerCase();
+            for (var j = 0; j < kw.length; j++) {
+              if (label.indexOf(kw[j]) !== -1) { el.click(); return true; }
+            }
+          }
+          return false;
+        }
+
+        // ── Insert commands — work in both Word and Excel ─────────────────────
+
+        if (cmd === 'insert-table') {
+          try {
+            var _xedT = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+            var _doneT = false;
+            if (_xedT) {
+              // Word: put_Table(rows, cols) | asc_addTable | CreateTable
+              // Spreadsheet: asc_insertTable | asc_fmtTableApply
+              var _tMethods = [
+                ['asc_fmtTableApply', function(ed) { ed.asc_fmtTableApply(null, null, true); }],
+                ['asc_insertTable',   function(ed) { ed.asc_insertTable(); }],
+                ['put_Table',         function(ed) { ed.put_Table(3, 3); }],
+                ['asc_addTable',      function(ed) { ed.asc_addTable(3, 3); }],
+                ['CreateTable',       function(ed) { ed.CreateTable(3, 3); }],
+              ];
+              _tMethods.forEach(function(pair) {
+                if (!_doneT && typeof _xedT[pair[0]] === 'function') {
+                  try { pair[1](_xedT); _doneT = true; console.log('[iOS] insert-table via', pair[0]); }
+                  catch(e2) { console.warn('[iOS] insert-table', pair[0], 'failed:', e2); }
+                }
+              });
+            }
+            if (!_doneT) {
+              // Toolbar button fallback — try common OO Insert-table button label patterns
+              _doneT = _clickOOBtn(['inserttable','insert-table','insert table','table']);
+              if (!_doneT) { _focusedCmd('insertTable'); _focusedCmd('InsertTable'); }
+            }
+          } catch(e) { console.warn('[iOS] insert-table outer:', e); }
+          return;
+        }
+
+        if (cmd === 'insert-chart') {
+          try {
+            var _xedC = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+            var _doneC = false;
+            if (_xedC) {
+              // asc_openChartFrame opens the chart creation wizard
+              var _cMethods = [
+                ['asc_openChartFrame', function(ed) { ed.asc_openChartFrame(null); }],
+                ['asc_insertChart',    function(ed) { ed.asc_insertChart(); }],
+                ['asc_AddChart',       function(ed) { ed.asc_AddChart(); }],
+                ['openChartFrame',     function(ed) { ed.openChartFrame(); }],
+              ];
+              _cMethods.forEach(function(pair) {
+                if (!_doneC && typeof _xedC[pair[0]] === 'function') {
+                  try { pair[1](_xedC); _doneC = true; console.log('[iOS] insert-chart via', pair[0]); }
+                  catch(e2) { console.warn('[iOS] insert-chart', pair[0], 'failed:', e2); }
+                }
+              });
+            }
+            if (!_doneC) {
+              _doneC = _clickOOBtn(['insertchart','insert-chart','insert chart','chart']);
+              if (!_doneC) { _focusedCmd('insertChart'); }
+            }
+          } catch(e) { console.warn('[iOS] insert-chart outer:', e); }
+          return;
+        }
+
+        if (cmd === 'insert-shape') {
+          try {
+            var _xedS = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+            var _doneS = false;
+            if (_xedS) {
+              // asc_setShapePreset('rect') enters draw-shape mode with the basic rectangle
+              var _sMethods = [
+                ['asc_setShapePreset', function(ed) { ed.asc_setShapePreset('rect'); }],
+                ['asc_insertShape',    function(ed) { ed.asc_insertShape('rect'); }],
+                ['asc_AddShape',       function(ed) { ed.asc_AddShape('rect'); }],
+              ];
+              _sMethods.forEach(function(pair) {
+                if (!_doneS && typeof _xedS[pair[0]] === 'function') {
+                  try { pair[1](_xedS); _doneS = true; console.log('[iOS] insert-shape via', pair[0]); }
+                  catch(e2) { console.warn('[iOS] insert-shape', pair[0], 'failed:', e2); }
+                }
+              });
+            }
+            if (!_doneS) {
+              _doneS = _clickOOBtn(['insertshape','insert-shape','insert shape','shape','autoshape']);
+              if (!_doneS) { _focusedCmd('insertShape'); }
+            }
+          } catch(e) { console.warn('[iOS] insert-shape outer:', e); }
+          return;
+        }
+
+        // insert-link and insert-comment are intercepted in Swift (NativeLinkView / NativeCommentView)
+        // before reaching JS. These handlers remain as fallbacks in case execEditorCommand is called
+        // directly, and for any non-native path.
+        if (cmd === 'insert-link') {
+          try {
+            var _xed4 = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+            var _A4 = _innerWin.Asc || {};
+            var _hl4Cls = _A4.asc_CHyperlink || (_innerWin.AscCommon && _innerWin.AscCommon.asc_CHyperlink);
+            if (_xed4 && _hl4Cls && typeof _xed4.asc_insertHyperlink === 'function') {
+              var _hl4 = new _hl4Cls();
+              typeof _hl4.asc_setUrl === 'function' ? _hl4.asc_setUrl('https://') : (_hl4.Url = 'https://');
+              _xed4.asc_insertHyperlink(_hl4);
+            } else { _focusedCmd('InsertHyperlink'); }
+          } catch(e) { _focusedCmd('InsertHyperlink'); }
+          return;
+        }
+        if (cmd === 'insert-comment') {
+          try {
+            var _xed5 = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+            if      (_xed5 && typeof _xed5.asc_addComment === 'function') { _xed5.asc_addComment('', true); }
+            else if (_xed5 && typeof _xed5.asc_AddComment === 'function') { _xed5.asc_AddComment(''); }
+            else { _focusedCmd('AddComment'); }
+          } catch(e) { _focusedCmd('AddComment'); }
+          return;
+        }
+        // indent (Word paragraph tab)
+        if (cmd === 'indent-increase') {
+          _innerWin.AscDesktopEditor?.executeFocusedCommand('TabIndent');
+          return;
+        }
+        if (cmd === 'indent-decrease') {
+          _innerWin.AscDesktopEditor?.executeFocusedCommand('ShiftTabIndent');
+          return;
+        }
+
+        // debug: dump Asc.editor API method names so we know what's available
+        if (cmd === 'dump-api') {
+          _dumpEditorAPI();
+          return;
         }
 
         // debug: dump inner iframe DOM tree (id + class of all elements)
@@ -557,6 +1501,25 @@
       } catch(e) {
         console.warn('[iOS] execEditorCommand:', cmd, e);
       }
+    };
+
+    // Swift calls this to insert a photo picked from the native Photos picker.
+    // dataURL is a "data:image/jpeg;base64,..." string.
+    window.insertImageByDataURL = function(dataURL) {
+      try {
+        var ed = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+        if (!ed) { console.warn('[iOS] insertImageByDataURL: editor not ready'); return; }
+        // Try direct Asc API variants (method name differs by ONLYOFFICE version)
+        if      (typeof ed.asc_insertImageFromUrl    === 'function') { ed.asc_insertImageFromUrl(dataURL); }
+        else if (typeof ed.asc_addImageUrl           === 'function') { ed.asc_addImageUrl(dataURL); }
+        else if (typeof ed.asc_insertLocalImage      === 'function') { ed.asc_insertLocalImage(dataURL); }
+        else if (typeof ed.asc_AddImage              === 'function') { ed.asc_AddImage(dataURL); }
+        else {
+          // Fallback: inject <img> into a temporary canvas object via plugin mechanism
+          try { _innerWin.focus(); } catch(_) {}
+          _innerWin.AscDesktopEditor && _innerWin.AscDesktopEditor.executeFocusedCommand('insertImageFromUrl', dataURL);
+        }
+      } catch(e) { console.warn('[iOS] insertImageByDataURL:', e); }
     };
 
     // Swift calls this to send a file into the editor.

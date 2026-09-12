@@ -5,7 +5,7 @@ import SwiftUI
 @Observable
 @MainActor
 final class ThemeStore {
-    var appearance: AppTheme = .system
+    var appearance: AppTheme = .light
     var defaultFontSize: CGFloat = 17
     var accentColor: Color = .dsBrandPrimary
 

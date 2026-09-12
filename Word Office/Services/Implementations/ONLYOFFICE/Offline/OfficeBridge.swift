@@ -1,6 +1,13 @@
 import WebKit
 import Foundation
 
+/// A single row in the ONLYOFFICE AutoFilter dropdown, as extracted by JS.
+struct NativeFilterItem: Identifiable {
+    let id: Int        // index in the original checkbox list
+    let text: String   // display label extracted from the DOM row
+    let checked: Bool  // current checked state in the OO panel
+}
+
 /// Messages JS sends to Swift via `window.webkit.messageHandlers.editorBridge.postMessage(...)`.
 enum OfficeBridgeMessage {
     /// sdk-core module loaded; window.receiveFileFromIOS is now defined.
@@ -19,6 +26,10 @@ enum OfficeBridgeMessage {
     case openError(message: String)
     /// DOM structure dump for debugging toolbar selectors.
     case domDump(entries: [String])
+    /// API method name dump for debugging Asc.editor interface.
+    case apiDump(methods: [String])
+    /// JS intercepted the OO filter panel; show native filter UI with these rows.
+    case showNativeFilter(items: [NativeFilterItem])
     /// Unknown/unparseable message.
     case unknown(body: Any)
 }
@@ -85,6 +96,18 @@ final class OfficeBridge: NSObject, WKScriptMessageHandler {
         case "domDump":
             let entries = dict["dump"] as? [String] ?? []
             return .domDump(entries: entries)
+
+        case "apiDump":
+            let methods = dict["methods"] as? [String] ?? []
+            return .apiDump(methods: methods)
+
+        case "showNativeFilter":
+            let rawItems = dict["items"] as? [[String: Any]] ?? []
+            let items: [NativeFilterItem] = rawItems.compactMap { d in
+                guard let id = d["id"] as? Int, let text = d["text"] as? String else { return nil }
+                return NativeFilterItem(id: id, text: text, checked: d["checked"] as? Bool ?? false)
+            }
+            return .showNativeFilter(items: items)
 
         default:
             return .unknown(body: body)

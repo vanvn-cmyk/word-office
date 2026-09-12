@@ -72,22 +72,6 @@ struct SettingsView: View {
                     }
                 }
 
-                Section("Appearance") {
-                    Picker(selection: $theme.appearance) {
-                        ForEach(AppTheme.allCases, id: \.self) { t in
-                            Text(t.displayName).tag(t)
-                        }
-                    } label: {
-                        Label {
-                            Text("Theme")
-                                .font(DSFont.body)
-                                .foregroundStyle(Color.dsTextPrimary)
-                        } icon: {
-                            SettingsRowIcon(systemName: "circle.lefthalf.filled", tint: Color.dsBrandPrimary)
-                        }
-                    }
-                }
-
                 Section("General") {
                     ShareLink(item: shareAppMessage) {
                         Label {

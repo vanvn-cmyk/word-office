@@ -25,8 +25,8 @@ struct OnboardingPage: Identifiable, Hashable {
         OnboardingPage(
             id: .editOffice,
             imageName: "OnboardingEditOffice",
-            title: "Edit Office files anywhere",
-            subtitle: "Open and edit Word, Excel, and PowerPoint files while preserving every table, font, and layout.",
+            title: "Edit Word, Excel & PowerPoint on the go",
+            subtitle: "Open the file your colleague just sent, make your changes on iPhone, and send it right back — tables and formatting stay perfectly intact",
             primaryCTA: "Get Started",
             secondaryCTA: nil,
             showsPrivacyChip: false
@@ -37,8 +37,8 @@ struct OnboardingPage: Identifiable, Hashable {
         OnboardingPage(
             id: .tools,
             imageName: "OnboardingTools",
-            title: "Every tool, one tap away",
-            subtitle: "Convert to PDF and sign documents—all without switching apps.",
+            title: "Every document task, one tap away",
+            subtitle: "Split a report into pages, combine files for a client, export as PDF, or add your signature — all without leaving the app",
             primaryCTA: "Continue",
             secondaryCTA: nil,
             showsPrivacyChip: false
@@ -46,8 +46,8 @@ struct OnboardingPage: Identifiable, Hashable {
         OnboardingPage(
             id: .trackDocuments,
             imageName: "OnboardingTrackDocuments",
-            title: "Stay on top of every document",
-            subtitle: "Tag files as Draft, Reviewed, or Signed so you always know what needs attention.",
+            title: "From first draft to final signature",
+            subtitle: "Mark documents as Draft, Reviewed, or Signed so you always know what's done and what still needs attention",
             primaryCTA: "Continue",
             secondaryCTA: nil,
             showsPrivacyChip: false
@@ -55,8 +55,8 @@ struct OnboardingPage: Identifiable, Hashable {
         OnboardingPage(
             id: .chooseFolder,
             imageName: "OnboardingChooseFolder",
-            title: "Choose a folder.\nYour files stay yours.",
-            subtitle: "Grant access once to find and organize files directly on your device—nothing gets uploaded.",
+            title: "Choose a folder\nYour files stay yours",
+            subtitle: "Grant access once to find and organize files directly on your device — nothing gets uploaded",
             primaryCTA: "Choose Folder",
             secondaryCTA: "Maybe Later",
             showsPrivacyChip: true

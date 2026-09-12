@@ -1,16 +1,7 @@
 import SwiftUI
 import Network
+import PhotosUI
 
-/// Full-screen offline ONLYOFFICE editor for Office formats (DOCX, XLSX, PPTX).
-///
-/// Runs x2t.wasm + virtual document server entirely in WKWebView — no server needed.
-///
-/// Flow:
-///   1. WKWebView loads `office://host/editor.html` (from OfficeBundle in app bundle).
-///   2. After the page loads, `OfficeEditorViewController` sends the file via
-///      `callAsyncJavaScript("receiveFileFromIOS(...)")`.
-///   3. x2t.wasm converts DOCX→internal format; ONLYOFFICE editor renders.
-///   4. User saves → JS intercepts `a.click()` → Swift receives `Data` → writes to original URL.
 // UserDefaults key — set true the first time the editor fully loads (sdkjs cached).
 private let kCacheReadyKey = "officeEditorCacheReady"
 
@@ -29,8 +20,19 @@ struct OfficeEditorView: View {
     @State private var errorMessage: String? = nil
     @State private var saveCount = 0
     @State private var isDirty = false
-    @State private var showFormatStudio = false
     @State private var editorVC: OfficeEditorViewController?
+
+    // Native photo insertion
+    @State private var showImagePicker = false
+    @State private var imagePickerItem: PhotosPickerItem? = nil
+
+    // Native filter sheet (replaces ONLYOFFICE's web filter panel)
+    @State private var filterItems: [NativeFilterItem] = []
+    @State private var showFilterSheet = false
+
+    // Native insert sheets
+    @State private var showLinkSheet    = false
+    @State private var showCommentSheet = false
 
     private var fileKind: EditorTopToolbar.FileKind {
         EditorTopToolbar.FileKind(ext: ref.url.pathExtension)
@@ -48,8 +50,7 @@ struct OfficeEditorView: View {
                 VStack(spacing: 0) {
                     EditorTopToolbar(
                         kind: fileKind,
-                        onCommand: { cmd in editorVC?.execEditorCommand(cmd) },
-                        onFormat: { showFormatStudio = true }
+                        onCommand: handleCommand
                     )
 
                     _OfficeWebView(
@@ -58,18 +59,61 @@ struct OfficeEditorView: View {
                         onError: handleError,
                         onReady: handleReady,
                         onDirtyChange: { isDirty = $0 },
-                        onShowFormatStudio: { showFormatStudio = true },
-                        onVCReady: { editorVC = $0 }
+                        onVCReady: { editorVC = $0 },
+                        onFilterRequest: { items in
+                            filterItems = items
+                            showFilterSheet = true
+                        }
                     )
                     .overlay(alignment: .topTrailing) {
                         if saveCount > 0 { saveBadge }
                     }
                 }
-                .sheet(isPresented: $showFormatStudio) {
-                    let vc = editorVC
-                    FormatStudioView { cmd in
-                        vc?.execEditorCommand(cmd)
-                    }
+                // Native photo picker — triggered by "insert-image" command
+                .photosPicker(
+                    isPresented: $showImagePicker,
+                    selection: $imagePickerItem,
+                    matching: .images
+                )
+                .onChange(of: imagePickerItem) { _, item in
+                    guard let item else { return }
+                    Task { await sendPickedImage(item) }
+                }
+                // Native filter + sort sheet
+                .sheet(isPresented: $showFilterSheet) {
+                    NativeFilterView(
+                        items: filterItems,
+                        onSort: { ascending in
+                            showFilterSheet = false
+                            editorVC?.execEditorCommand(ascending ? "sort-asc" : "sort-desc")
+                            // Cancel the hidden OO filter panel (no changes to values)
+                            editorVC?.applyNativeFilter(selectedIds: [], cancel: true)
+                        },
+                        onCommit: { selectedIds, cancelled in
+                            showFilterSheet = false
+                            editorVC?.applyNativeFilter(selectedIds: selectedIds, cancel: cancelled)
+                        }
+                    )
+                }
+                // Native hyperlink insert sheet
+                .sheet(isPresented: $showLinkSheet) {
+                    NativeLinkView(
+                        onCommit: { url, text in
+                            showLinkSheet = false
+                            editorVC?.insertHyperlink(url: url, displayText: text)
+                        },
+                        onCancel: { showLinkSheet = false }
+                    )
+                }
+                // Native comment insert sheet
+                .sheet(isPresented: $showCommentSheet) {
+                    NativeCommentView(
+                        onCommit: { text in
+                            showCommentSheet = false
+                            editorVC?.addComment(text: text)
+                        },
+                        onCancel: { showCommentSheet = false }
+                    )
                 }
             }
         }
@@ -79,14 +123,49 @@ struct OfficeEditorView: View {
         .task { await checkNetworkOnFirstLaunch() }
     }
 
-    // Once the editor fires onReady the sdkjs is cached by WKWebView — mark it
-    // so subsequent launches skip the network check and work offline.
+    // MARK: - Command routing
+
+    private func handleCommand(_ cmd: String) {
+        switch cmd {
+        case "insert-image":   showImagePicker = true
+        case "insert-link":    showLinkSheet    = true
+        case "insert-comment": showCommentSheet = true
+        default:               editorVC?.execEditorCommand(cmd)
+        }
+    }
+
+    // MARK: - Image insertion
+
+    private func sendPickedImage(_ item: PhotosPickerItem) async {
+        defer { imagePickerItem = nil }
+        guard let data = try? await item.loadTransferable(type: Data.self) else { return }
+
+        // Detect MIME type from magic bytes
+        let mime: String
+        if data.prefix(2) == Data([0xFF, 0xD8]) { mime = "image/jpeg" }
+        else if data.prefix(4) == Data([0x89, 0x50, 0x4E, 0x47]) { mime = "image/png" }
+        else { mime = "image/jpeg" }
+
+        // Resize large images to stay within WKWebView JS string limit (~60 MB base64)
+        let imageData: Data
+        if data.count > 4_000_000, let img = UIImage(data: data),
+           let compressed = img.jpegData(compressionQuality: 0.7) {
+            imageData = compressed
+        } else {
+            imageData = data
+        }
+
+        let b64 = imageData.base64EncodedString()
+        let dataURL = "data:\(mime);base64,\(b64)"
+        editorVC?.insertImage(dataURL: dataURL)
+    }
+
+    // MARK: - Ready / network
+
     private func handleReady() {
         UserDefaults.standard.set(true, forKey: kCacheReadyKey)
     }
 
-    // Only block if sdkjs has never been cached AND there's no network.
-    // After the first successful launch the WKWebView disk cache covers offline use.
     @MainActor
     private func checkNetworkOnFirstLaunch() async {
         guard !UserDefaults.standard.bool(forKey: kCacheReadyKey) else { return }
@@ -102,6 +181,8 @@ struct OfficeEditorView: View {
             errorMessage = "An internet connection is required to download the editor engine (~86 MB). After downloading once, editing works fully offline."
         }
     }
+
+    // MARK: - Save / error
 
     private var saveBadge: some View {
         Label("Saved", systemImage: "checkmark.circle.fill")
@@ -120,9 +201,6 @@ struct OfficeEditorView: View {
             defer { if accessing { dest.stopAccessingSecurityScopedResource() } }
 
             var writeError: Error?
-            // NSFileCoordinator is required for iCloud Drive documents: the cloud
-            // daemon may be reading or uploading the file concurrently. Without it,
-            // writing races the provider and can produce iCloud conflict copies.
             let coordinator = NSFileCoordinator()
             var coordError: NSError?
             coordinator.coordinate(
@@ -148,9 +226,6 @@ struct OfficeEditorView: View {
     }
 
     private func handleError(_ message: String) {
-        // If the editor engine failed to load, the WKWebView cache was likely evicted
-        // (low storage, OS cleanup, app update). Reset the flag so the next launch
-        // proactively checks network instead of silently failing again.
         if message.contains("editor engine could not load") {
             UserDefaults.standard.set(false, forKey: kCacheReadyKey)
         }
@@ -166,8 +241,8 @@ private struct _OfficeWebView: UIViewControllerRepresentable {
     let onError: (String) -> Void
     let onReady: () -> Void
     let onDirtyChange: (Bool) -> Void
-    let onShowFormatStudio: () -> Void
     let onVCReady: (OfficeEditorViewController) -> Void
+    let onFilterRequest: ([NativeFilterItem]) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -177,9 +252,8 @@ private struct _OfficeWebView: UIViewControllerRepresentable {
         vc.onError = { msg in Task { @MainActor in onError(msg) } }
         vc.onReady = { Task { @MainActor in onReady() } }
         vc.onDirtyChange = { dirty in Task { @MainActor in onDirtyChange(dirty) } }
-        vc.onShowFormatStudio = { Task { @MainActor in onShowFormatStudio() } }
+        vc.onFilterRequest = { items in Task { @MainActor in onFilterRequest(items) } }
         vc.openFile(at: ref.url)
-        // Defer to avoid mutating @State during the render pass
         Task { @MainActor in onVCReady(vc) }
         return vc
     }

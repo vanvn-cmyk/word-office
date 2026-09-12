@@ -152,6 +152,21 @@ bottom padding                                                     = 16pt (md)
 - [ ] `.presentationDetents([.height(N)])` với N tính theo công thức trên
 - [ ] Đã chạy app thật hoặc simulator để xác nhận không còn dead space
 
+## 9. Không tự ý thay đổi asset / visual khi chưa được phép
+
+**KHÔNG được tự ý thay đổi** bất kỳ thứ nào sau đây khi chưa được user cho phép rõ ràng:
+
+- **Image asset** (PNG, SVG, imageset) — không thay thế bằng SwiftUI composition hay asset khác
+- **Hero content** của từng màn hình — giữ nguyên image đã confirm, chỉ thêm overlay/animation trên đó nếu được yêu cầu cụ thể
+- **Bất kỳ UI nào user đã confirm** trong session trước — không thay đổi dù thấy cách "tốt hơn"
+
+**Khi nhận yêu cầu nhỏ** ("push up a little", "adjust size", "fix position"):
+- Chỉ sửa đúng phần được yêu cầu
+- Không mở rộng sang file/component khác
+- Không thay thế asset bằng SwiftUI composition hoặc ngược lại
+
+**Vi phạm rule này**: thay S1/S2/S3/S4 hero PNG bằng `OnboardingEditHero`/`OnboardingToolsHero`/`OnboardingTrackDocumentsHero` khi user chỉ yêu cầu "push asset up a little" — phải hỏi trước nếu muốn thay asset.
+
 ---
 
 *File này là rule bắt buộc cho project Word Office — đọc trước khi bắt đầu bất kỳ phiên làm

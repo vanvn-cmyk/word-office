@@ -3,8 +3,7 @@ import SwiftUI
 /// Two-row tabbed toolbar for Excel/Word; single row for PPT/PDF.
 /// Row 1 (44 pt): tab labels + ≡ format button pinned right.
 /// Row 2 (44 pt): scrollable action buttons for the active tab.
-///                Color-picker buttons are PINNED outside the ScrollView
-///                so they are never blocked by scroll gesture recognisers.
+///                Color-picker buttons are PINNED outside the ScrollView.
 struct EditorTopToolbar: View {
 
     // MARK: - File kind
@@ -29,23 +28,24 @@ struct EditorTopToolbar: View {
         case number = "Number"
         case align  = "Align"
         case data   = "Data"
+        case insert = "Insert"
     }
 
     private enum WordTab: String, CaseIterable {
         case home      = "Home"
         case paragraph = "Paragraph"
+        case insert    = "Insert"
     }
 
     // MARK: - Inputs & state
 
     let kind: FileKind
     let onCommand: (String) -> Void
-    let onFormat: () -> Void
 
     @State private var excelTab: ExcelTab = .home
     @State private var wordTab:  WordTab  = .home
-    @State private var fontColor: Color   = .black
-    @State private var fillColor: Color   = Color(white: 0.9)
+    @State private var fontColor:     Color = .black
+    @State private var fillColor:     Color = Color(red: 1.0, green: 0.92, blue: 0.23)
     @State private var wordFontColor: Color = .black
 
     // MARK: - Body
@@ -76,6 +76,10 @@ struct EditorTopToolbar: View {
         selected: Binding<T>
     ) -> some View where T.RawValue == String {
         HStack(spacing: 0) {
+            // Undo / Redo pinned at leading edge — always visible regardless of active tab.
+            undoRedoCluster
+            vDivider()
+
             ForEach(tabs, id: \.self) { tab in
                 Button {
                     withAnimation(.easeInOut(duration: 0.12)) {
@@ -101,78 +105,132 @@ struct EditorTopToolbar: View {
                 .buttonStyle(.plain)
             }
             Spacer(minLength: 0)
-            vDivider()
-            formatButton
         }
         .frame(height: 44)
         .background(.bar)
         .overlay(alignment: .bottom) { Divider() }
     }
 
+    private var undoRedoCluster: some View {
+        HStack(spacing: 0) {
+            Button { onCommand("undo") } label: {
+                Image(systemName: "arrow.uturn.backward")
+                    .font(.system(size: 15, weight: .regular))
+                    .frame(width: 38, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .foregroundStyle(.primary)
+            .accessibilityLabel("Undo")
+
+            Button { onCommand("redo") } label: {
+                Image(systemName: "arrow.uturn.forward")
+                    .font(.system(size: 15, weight: .regular))
+                    .frame(width: 38, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .foregroundStyle(.primary)
+            .accessibilityLabel("Redo")
+        }
+    }
+
     // MARK: - Excel content row (row 2)
 
-    /// Excel Home pins color pickers OUTSIDE the ScrollView to avoid gesture conflict.
+    /// Color pickers are PINNED outside the ScrollView so the scroll's pan gesture
+    /// cannot intercept their taps.
     private var excelContentRow: some View {
         HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
+
                     switch excelTab {
                     case .home:
-                        iconBtn("arrow.uturn.backward", label: "Undo",      cmd: "undo")
-                        iconBtn("arrow.uturn.forward",  label: "Redo",      cmd: "redo")
+                        iconBtn("bold",           label: "Bold",          cmd: "bold")
+                        iconBtn("italic",         label: "Italic",        cmd: "italic")
+                        iconBtn("underline",      label: "Underline",     cmd: "underline")
+                        iconBtn("strikethrough",  label: "Strikethrough", cmd: "strikeout")
                         vDivider()
-                        iconBtn("bold",      label: "Bold",      cmd: "bold")
-                        iconBtn("italic",    label: "Italic",    cmd: "italic")
-                        iconBtn("underline", label: "Underline", cmd: "underline")
+                        textBtn("A+", label: "Increase font size", cmd: "font-size-inc")
+                        textBtn("A−", label: "Decrease font size", cmd: "font-size-dec")
                         vDivider()
-                        textBtn("Σ", label: "AutoSum", cmd: "auto-sum")
+                        textBtn("Σ",  label: "AutoSum",              cmd: "auto-sum")
+                        iconBtn("eraser",          label: "Clear cell",   cmd: "clear-cell")
+                        iconBtn("tablecells", label: "All borders", cmd: "border-all")
 
                     case .number:
-                        textBtn("$",   label: "Currency",       cmd: "number-currency")
-                        textBtn(",",   label: "Thousands",      cmd: "number-comma")
-                        textBtn("%",   label: "Percent",        cmd: "number-percent")
+                        textBtn("$",   label: "Currency",     cmd: "number-currency")
+                        textBtn(",",   label: "Thousands",    cmd: "number-comma")
+                        textBtn("%",   label: "Percent",      cmd: "number-percent")
                         vDivider()
-                        textBtn(".0↑", label: "More decimal",   cmd: "number-decimal-inc")
-                        textBtn(".0↓", label: "Less decimal",   cmd: "number-decimal-dec")
+                        textBtn(".0↑", label: "More decimal", cmd: "number-decimal-inc")
+                        textBtn(".0↓", label: "Less decimal", cmd: "number-decimal-dec")
                         vDivider()
-                        chipBtn("Date", label: "Date format",   cmd: "number-date")
-                        chipBtn("Time", label: "Time format",   cmd: "number-time")
-                        chipBtn("Text", label: "Text format",   cmd: "number-text")
+                        chipBtn("Date", label: "Date format", cmd: "number-date")
+                        chipBtn("Time", label: "Time format", cmd: "number-time")
+                        chipBtn("Text", label: "Text format", cmd: "number-text")
 
                     case .align:
-                        iconBtn("text.alignleft",        label: "Left",    cmd: "cell-align-left")
-                        iconBtn("text.aligncenter",      label: "Center",  cmd: "cell-align-center")
-                        iconBtn("text.alignright",       label: "Right",   cmd: "cell-align-right")
+                        iconBtn("text.alignleft",        label: "Left",   cmd: "cell-align-left")
+                        iconBtn("text.aligncenter",      label: "Center", cmd: "cell-align-center")
+                        iconBtn("text.alignright",       label: "Right",  cmd: "cell-align-right")
                         vDivider()
-                        iconBtn("align.vertical.top",    label: "Top",     cmd: "cell-valign-top")
-                        iconBtn("align.vertical.center", label: "Middle",  cmd: "cell-valign-middle")
-                        iconBtn("align.vertical.bottom", label: "Bottom",  cmd: "cell-valign-bottom")
+                        chipBtn("Wrap",    label: "Wrap text",       cmd: "wrap-text")
+                        chipBtn("Merge",   label: "Merge cells",     cmd: "merge-center")
+                        chipBtn("Unmerge", label: "Unmerge cells",   cmd: "merge-unmerge")
                         vDivider()
-                        iconBtn("arrow.down.left",       label: "Wrap",    cmd: "wrap-text")
-                        vDivider()
-                        textBtn("⊞", label: "Merge cells",   cmd: "merge-center")
-                        textBtn("⊟", label: "Unmerge cells", cmd: "merge-unmerge")
+                        iconBtn("rectangle.topthird.inset.filled",    label: "Top",    cmd: "cell-valign-top")
+                        iconBtn("rectangle.center.inset.filled",      label: "Middle", cmd: "cell-valign-middle")
+                        iconBtn("rectangle.bottomthird.inset.filled", label: "Bottom", cmd: "cell-valign-bottom")
 
                     case .data:
-                        chipBtn("A→Z", label: "Sort A to Z",   cmd: "sort-asc")
-                        chipBtn("Z→A", label: "Sort Z to A",   cmd: "sort-desc")
-                        vDivider()
+                        // Filter first — most used Data action
                         iconBtn("line.3.horizontal.decrease.circle",
-                                label: "Filter",               cmd: "filter-toggle")
+                                label: "Toggle AutoFilter", cmd: "filter-toggle")
                         vDivider()
-                        iconBtn("magnifyingglass", label: "Find", cmd: "find")
+                        // Sort
+                        chipBtn("A→Z", label: "Sort A to Z", cmd: "sort-asc")
+                        chipBtn("Z→A", label: "Sort Z to A", cmd: "sort-desc")
+                        vDivider()
+                        // Insert / delete rows
+                        chipBtn("Row ↑", label: "Insert row above", cmd: "row-insert-above")
+                        chipBtn("Row ↓", label: "Insert row below", cmd: "row-insert-below")
+                        chipBtn("Row −", label: "Delete row",       cmd: "row-delete")
+                        vDivider()
+                        // Insert / delete columns
+                        chipBtn("Col ←", label: "Insert column to the left",  cmd: "col-insert-left")
+                        chipBtn("Col →", label: "Insert column to the right", cmd: "col-insert-right")
+                        chipBtn("Col −", label: "Delete column",              cmd: "col-delete")
+                        vDivider()
+                        chipBtn("Freeze", label: "Freeze rows/columns at current cell", cmd: "freeze-panes")
+                        vDivider()
+                        chipBtn("Dedup",  label: "Remove duplicate rows", cmd: "remove-dup")
+
+                    case .insert:
+                        chipBtn("Table",   label: "Insert table",         cmd: "insert-table")
+                        iconBtn("photo",   label: "Insert image",         cmd: "insert-image")
+                        chipBtn("Chart",   label: "Insert chart",         cmd: "insert-chart")
+                        chipBtn("Shape",   label: "Insert shape",         cmd: "insert-shape")
+                        vDivider()
+                        iconBtn("link",           label: "Hyperlink",     cmd: "insert-link")
+                        iconBtn("text.bubble",    label: "Comment",       cmd: "insert-comment")
                     }
                 }
                 .padding(.horizontal, 4)
             }
+            // Trailing fade — hints that more buttons are available via scroll.
+            .mask(alignment: .leading) {
+                HStack(spacing: 0) {
+                    Rectangle()
+                    LinearGradient(colors: [.black, .clear],
+                                   startPoint: .leading, endPoint: .trailing)
+                        .frame(width: 24)
+                }
+            }
 
-            // ── Color pickers pinned here for Home tab only ──────────────────
-            // Outside the ScrollView: ColorPicker gesture is never blocked.
+            // Color pickers pinned here — outside ScrollView so gesture is never blocked.
             if excelTab == .home {
-                vDivider()
                 nativeColorBtn(icon: "character",   label: "Font color",
                                color: $fontColor, cmd: "font-color")
-                nativeColorBtn(icon: "paintbucket", label: "Fill color",
+                nativeColorBtn(icon: "paintbucket.fill", label: "Fill color",
                                color: $fillColor, cmd: "fill-color")
             }
         }
@@ -189,12 +247,17 @@ struct EditorTopToolbar: View {
                 HStack(spacing: 0) {
                     switch wordTab {
                     case .home:
-                        iconBtn("arrow.uturn.backward", label: "Undo",      cmd: "undo")
-                        iconBtn("arrow.uturn.forward",  label: "Redo",      cmd: "redo")
+                        iconBtn("bold",          label: "Bold",          cmd: "bold")
+                        iconBtn("italic",        label: "Italic",        cmd: "italic")
+                        iconBtn("underline",     label: "Underline",     cmd: "underline")
+                        iconBtn("strikethrough", label: "Strikethrough", cmd: "strikeout")
                         vDivider()
-                        iconBtn("bold",      label: "Bold",      cmd: "bold")
-                        iconBtn("italic",    label: "Italic",    cmd: "italic")
-                        iconBtn("underline", label: "Underline", cmd: "underline")
+                        // Paragraph styles — directly accessible without opening Format sheet
+                        chipBtn("Normal", label: "Normal style", cmd: "style:Normal")
+                        chipBtn("Title",  label: "Title style",  cmd: "style:Title")
+                        chipBtn("H1",     label: "Heading 1",    cmd: "style:Heading 1")
+                        chipBtn("H2",     label: "Heading 2",    cmd: "style:Heading 2")
+                        chipBtn("H3",     label: "Heading 3",    cmd: "style:Heading 3")
 
                     case .paragraph:
                         iconBtn("text.alignleft",    label: "Left",    cmd: "align-left")
@@ -204,13 +267,23 @@ struct EditorTopToolbar: View {
                         vDivider()
                         iconBtn("list.bullet", label: "Bullet list",   cmd: "list-bullet")
                         iconBtn("list.number", label: "Numbered list", cmd: "list-numbered")
+                        vDivider()
+                        iconBtn("increase.indent", label: "Indent",   cmd: "indent-increase")
+                        iconBtn("decrease.indent", label: "Outdent",  cmd: "indent-decrease")
+
+                    case .insert:
+                        iconBtn("photo",          label: "Insert image",   cmd: "insert-image")
+                        chipBtn("Table",          label: "Insert table",   cmd: "insert-table")
+                        chipBtn("Shape",          label: "Insert shape",   cmd: "insert-shape")
+                        vDivider()
+                        iconBtn("link",           label: "Hyperlink",      cmd: "insert-link")
+                        iconBtn("text.bubble",    label: "Comment",        cmd: "insert-comment")
                     }
                 }
                 .padding(.horizontal, 4)
             }
 
             if wordTab == .home {
-                vDivider()
                 nativeColorBtn(icon: "character", label: "Font color",
                                color: $wordFontColor, cmd: "font-color")
             }
@@ -229,9 +302,10 @@ struct EditorTopToolbar: View {
                     iconBtn("arrow.uturn.backward", label: "Undo", cmd: "undo")
                     iconBtn("arrow.uturn.forward",  label: "Redo", cmd: "redo")
                     vDivider()
-                    iconBtn("bold",      label: "Bold",      cmd: "bold")
-                    iconBtn("italic",    label: "Italic",    cmd: "italic")
-                    iconBtn("underline", label: "Underline", cmd: "underline")
+                    iconBtn("bold",           label: "Bold",          cmd: "bold")
+                    iconBtn("italic",         label: "Italic",        cmd: "italic")
+                    iconBtn("underline",      label: "Underline",     cmd: "underline")
+                    iconBtn("strikethrough",  label: "Strikethrough", cmd: "strikeout")
                     if kind == .ppt {
                         vDivider()
                         iconBtn("text.aligncenter", label: "Center", cmd: "align-center")
@@ -245,49 +319,38 @@ struct EditorTopToolbar: View {
         .overlay(alignment: .bottom) { Divider() }
     }
 
-    // MARK: - Shared format button
+    // MARK: - Native color picker
 
-    private var formatButton: some View {
-        Button(action: onFormat) {
-            Image(systemName: "slider.horizontal.3")
-                .font(.system(size: 15, weight: .regular))
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
-        }
-        .foregroundStyle(.primary)
-        .accessibilityLabel("Format panel")
-    }
-
-    // MARK: - Native color picker (must be OUTSIDE ScrollView)
-
+    /// ColorPicker is the base layer at FULL opacity so UIKit always registers taps.
+    /// Our icon + colored-bar overlay sits on top with .background(.bar) to cover
+    /// the system swatch visually, and .allowsHitTesting(false) to pass taps through.
     private func nativeColorBtn(
         icon: String,
         label: String,
         color: Binding<Color>,
         cmd: String
     ) -> some View {
-        ZStack {
-            ColorPicker(label, selection: color, supportsOpacity: false)
-                .labelsHidden()
-                .opacity(0.02)          // > 0.01 threshold so UIKit allows hit-testing
-                .frame(width: 40, height: 44)
-            VStack(spacing: 2) {
-                Image(systemName: icon)
-                    .font(.system(size: 13, weight: .regular))
-                    .foregroundStyle(.primary)
-                Rectangle()
-                    .fill(color.wrappedValue)
-                    .frame(width: 18, height: 3)
-                    .cornerRadius(1.5)
+        ColorPicker(label, selection: color, supportsOpacity: false)
+            .labelsHidden()
+            .frame(width: 44, height: 44)
+            .overlay {
+                VStack(spacing: 2) {
+                    Image(systemName: icon)
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(.primary)
+                    Rectangle()
+                        .fill(color.wrappedValue)
+                        .frame(width: 18, height: 3)
+                        .cornerRadius(1.5)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(.bar)       // covers ColorPicker's own swatch UI
+                .allowsHitTesting(false) // taps fall through to ColorPicker
             }
-            .frame(width: 40, height: 44)
-            .allowsHitTesting(false)
-        }
-        .frame(width: 40, height: 44)
-        .accessibilityLabel(label)
-        .onChange(of: color.wrappedValue) { _, newColor in
-            onCommand("\(cmd):\(newColor.hexRGB)")
-        }
+            .accessibilityLabel(label)
+            .onChange(of: color.wrappedValue) { _, newColor in
+                onCommand("\(cmd):\(newColor.hexRGB)")
+            }
     }
 
     // MARK: - Primitive components
@@ -303,7 +366,6 @@ struct EditorTopToolbar: View {
         .accessibilityLabel(label)
     }
 
-    /// Plain monospaced text button ($ % Σ ⊞ ⊟ .0↑ .0↓)
     private func textBtn(_ text: String, label: String, cmd: String) -> some View {
         Button { onCommand(cmd) } label: {
             Text(text)
@@ -315,8 +377,7 @@ struct EditorTopToolbar: View {
         .accessibilityLabel(label)
     }
 
-    /// Chip-style button with subtle pill background — used for Date/Time/Text, A→Z/Z→A.
-    /// Makes it visually clear these are interactive, not plain labels.
+    /// Chip-style button (Date/Time/Text, A→Z/Z→A, paragraph styles).
     private func chipBtn(_ text: String, label: String, cmd: String) -> some View {
         Button { onCommand(cmd) } label: {
             Text(text)

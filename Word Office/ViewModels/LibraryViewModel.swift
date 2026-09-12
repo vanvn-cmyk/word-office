@@ -18,6 +18,14 @@ final class LibraryViewModel {
     private(set) var isLoading: Bool = false
     private(set) var hasLoadedOnce: Bool = false
 
+    /// True when the user tapped "Maybe Later" on onboarding S4 and no
+    /// external folder has been granted yet — the library only contains
+    /// the app-seeded sample files. Drives `LibraryView`'s Get-Started
+    /// coachmark. Automatically false once the user grants a real folder.
+    var isGetStartedMode: Bool {
+        store.didSkipFolderOnboarding && !store.hasExternalFolder
+    }
+
     /// Active type/status filters — see `LibraryViewModel+Filtering.swift`.
     var typeFilter: DocumentTypeFilter = .all
     var statusFilter: DocumentStatus?

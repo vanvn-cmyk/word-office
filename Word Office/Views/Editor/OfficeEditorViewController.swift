@@ -38,8 +38,8 @@ final class OfficeEditorViewController: UIViewController {
     var onReady: (() -> Void)?
     /// Called whenever the document dirty state changes (true = unsaved edits, false = clean).
     var onDirtyChange: ((Bool) -> Void)?
-    /// Called when the user taps the Format button in the keyboard toolbar.
-    var onShowFormatStudio: (() -> Void)?
+    /// Called when JS intercepts the OO filter panel; present native filter UI.
+    var onFilterRequest: (([NativeFilterItem]) -> Void)?
 
     // MARK: - Lifecycle
 
@@ -77,6 +77,86 @@ final class OfficeEditorViewController: UIViewController {
         webView.evaluateJavaScript("window.execEditorCommand('\(cmd)')")
     }
 
+    func insertImage(dataURL: String) {
+        guard scriptReady else { return }
+        let escaped = dataURL.replacingOccurrences(of: "\\", with: "\\\\")
+                             .replacingOccurrences(of: "'", with: "\\'")
+        webView.evaluateJavaScript("window.insertImageByDataURL('\(escaped)')")
+    }
+
+    /// Sends the user's filter selection back to the hidden OO filter panel.
+    /// `selectedIds` are the checkbox indices the user left checked; pass empty + cancel=true to dismiss.
+    func applyNativeFilter(selectedIds: [Int], cancel: Bool) {
+        guard scriptReady else { return }
+        let idsJSON = selectedIds.map { String($0) }.joined(separator: ",")
+        let js = "window._applyNativeFilter([\(idsJSON)], \(cancel ? "true" : "false"))"
+        webView.evaluateJavaScript(js)
+    }
+
+    /// Inserts a hyperlink at the current cursor position using ONLYOFFICE's asc_insertHyperlink API.
+    func insertHyperlink(url: String, displayText: String) {
+        guard scriptReady else { return }
+        let urlJS  = jsStringLiteral(url)
+        let textJS = jsStringLiteral(displayText)
+        let js = """
+        (function(url, text) {
+          var _iw = document.querySelector('iframe[name="frameEditor"]');
+          if (!_iw) return;
+          var iwin = _iw.contentWindow;
+          var _ed = iwin.Asc && iwin.Asc.editor;
+          if (!_ed) return;
+          try {
+            var _A = iwin.Asc || {};
+            var HyperCls = _A.asc_CHyperlink
+              || (iwin.AscCommon && iwin.AscCommon.asc_CHyperlink)
+              || iwin.asc_CHyperlink;
+            if (HyperCls) {
+              var hl = new HyperCls();
+              typeof hl.asc_setUrl  === 'function' ? hl.asc_setUrl(url)   : (hl.Url  = url);
+              typeof hl.asc_setText === 'function' ? hl.asc_setText(text) : (hl.Text = text);
+              if (typeof _ed.asc_insertHyperlink === 'function') { _ed.asc_insertHyperlink(hl); return; }
+              if (typeof _ed.asc_addHyperlink    === 'function') { _ed.asc_addHyperlink(hl);    return; }
+            }
+            // Fallback: focused command
+            iwin.focus();
+            iwin.AscDesktopEditor && iwin.AscDesktopEditor.executeFocusedCommand('InsertHyperlink');
+          } catch(e) { console.warn('[iOS] insertHyperlink:', e); }
+        })(\(urlJS), \(textJS));
+        """
+        webView.evaluateJavaScript(js)
+    }
+
+    /// Adds a comment at the current selection using ONLYOFFICE's asc_addComment API.
+    func addComment(text: String) {
+        guard scriptReady else { return }
+        let textJS = jsStringLiteral(text)
+        let js = """
+        (function(text) {
+          var _iw = document.querySelector('iframe[name="frameEditor"]');
+          if (!_iw) return;
+          var iwin = _iw.contentWindow;
+          var _ed = iwin.Asc && iwin.Asc.editor;
+          if (!_ed) return;
+          try {
+            if (typeof _ed.asc_addComment === 'function') { _ed.asc_addComment(text, true); return; }
+            if (typeof _ed.asc_AddComment === 'function') { _ed.asc_AddComment(text);        return; }
+            iwin.focus();
+            iwin.AscDesktopEditor && iwin.AscDesktopEditor.executeFocusedCommand('AddComment');
+          } catch(e) { console.warn('[iOS] addComment:', e); }
+        })(\(textJS));
+        """
+        webView.evaluateJavaScript(js)
+    }
+
+    // MARK: - JS string helpers
+
+    /// Returns a JS string literal (with surrounding quotes and proper escaping) for the given Swift string.
+    private func jsStringLiteral(_ s: String) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: s),
+              let str  = String(data: data, encoding: .utf8) else { return "\"\"" }
+        return str
+    }
+
     // MARK: - Setup
 
     private func setupWebView() {
@@ -90,6 +170,15 @@ final class OfficeEditorViewController: UIViewController {
         // Capture JS errors → editorBridge so they surface in Swift UI
         let errorCapture = WKUserScript(source: """
             window.onerror = function(msg, src, line, col, err) {
+                // Cross-frame errors always arrive as "Script error." with src="" line=0.
+                // They are already caught inside the inner frame — safe to discard here.
+                if (!src && (!line || line === 0)) return true;
+                // After the editor has fully loaded, any JS error is a non-fatal
+                // feature error (insert command, unsupported API, etc.) — not engine init.
+                if (window._editorFullyLoaded) {
+                    console.warn('[editor] non-fatal post-load JS error:', msg, src + ':' + line);
+                    return true;
+                }
                 try { webkit.messageHandlers.editorBridge.postMessage(
                     { action: 'editorError', message: 'JS error: ' + msg + ' (' + src + ':' + line + ')' }
                 ); } catch(_) {}
@@ -423,6 +512,14 @@ extension OfficeEditorViewController: OfficeBridgeDelegate {
             print("=== ONLYOFFICE DOM DUMP (toolbar-related) ===")
             relevant.forEach { print("  \($0)") }
             print("=== END DOM DUMP (\(entries.count) total elements) ===")
+
+        case .apiDump(let methods):
+            print("=== ONLYOFFICE Asc.editor align/sort/merge methods ===")
+            methods.forEach { print("  \($0)") }
+            print("=== END API DUMP (\(methods.count) methods) ===")
+
+        case .showNativeFilter(let items):
+            onFilterRequest?(items)
 
         case .saved, .unknown:
             break

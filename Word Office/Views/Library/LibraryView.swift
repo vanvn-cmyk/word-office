@@ -54,6 +54,11 @@ struct LibraryView: View {
     let onOpenEditor: (DocumentRef) -> Void
 
     @AppStorage("libraryViewMode") private var viewMode: LibraryViewMode = .list
+    @AppStorage("library.getStartedCoachmarkSeen") private var getStartedCoachmarkSeen: Bool = false
+
+    private var showsGetStartedCoachmark: Bool {
+        viewModel.isGetStartedMode && !getStartedCoachmarkSeen
+    }
 
     /// Local sheet state for "Save to Files" — the `UIDocumentPickerViewController`
     /// wrapper needs only a URL (no container dependency), so it stays here
@@ -389,7 +394,7 @@ struct LibraryView: View {
             } else {
                 if !dueEntries.isEmpty {
                     Section {
-                        sectionRows(dueEntries)
+                        sectionRows(dueEntries, showsCoachmark: showsGetStartedCoachmark)
                     } header: {
                         Label("Needs Attention", systemImage: "bell.badge.fill")
                             .foregroundStyle(Color.dsStatusWarning)
@@ -398,7 +403,12 @@ struct LibraryView: View {
 
                 ForEach(groupedSections, id: \.bucket) { group in
                     Section(sectionTitle(for: group)) {
-                        sectionRows(group.entries)
+                        sectionRows(
+                            group.entries,
+                            showsCoachmark: showsGetStartedCoachmark
+                                && dueEntries.isEmpty
+                                && group.bucket == groupedSections.first?.bucket
+                        )
                     }
                 }
             }
@@ -435,7 +445,10 @@ struct LibraryView: View {
     /// a single grid "row" in `.grid` mode (Library-Home-v10 Frame 4 — same
     /// section structure, different item renderer).
     @ViewBuilder
-    private func sectionRows(_ entries: [LibraryEntry]) -> some View {
+    private func sectionRows(_ entries: [LibraryEntry], showsCoachmark: Bool = false) -> some View {
+        if showsCoachmark {
+            getStartedCoachmarkRow
+        }
         if viewMode == .grid {
             DocumentGrid(
                 entries: entries,
@@ -507,15 +520,7 @@ struct LibraryView: View {
         .padding(.vertical, DSSpacing.sm)
         .background(Color.dsBackgroundElevated, in: RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous).strokeBorder(Color.dsBorderSubtle))
-        // Apple-standard subtle list-row card shadow — Level 2 elevation
-        // (list rows in insetGrouped), NOT Level 3 (floating cards /
-        // FAB). Single subtle contact layer keeps rows grounded on the
-        // gray backdrop without the "heavily elevated" look the earlier
-        // 2-layer ambient+contact recipe produced. Materials over
-        // shadows is Apple's iOS 26 direction; the border already
-        // carries most of the row/card separation, so shadow can be
-        // dialled way back.
-        .shadow(color: .black.opacity(0.05), radius: 3, y: 1)
+        .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
         // Adds `xs=8` horizontal listRowInsets on top of insetGrouped's
@@ -597,6 +602,37 @@ struct LibraryView: View {
         }
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .combine)
+    }
+
+    // MARK: - Get Started coachmark
+
+    /// One-shot hint row that appears above the first sample file when the
+    /// user landed here via "Maybe Later" on onboarding S4. Arrow ↓ points
+    /// at the file below. Dismissed by tapping anywhere on the row; also
+    /// disappears automatically once the user grants a real folder
+    /// (isGetStartedMode → false).
+    @ViewBuilder
+    private var getStartedCoachmarkRow: some View {
+        Button {
+            getStartedCoachmarkSeen = true
+        } label: {
+            HStack(spacing: DSSpacing.xs) {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(Color.dsBrandPrimary)
+                Text("Tap the file below to open and edit")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Color.dsTextSecondary)
+                Spacer()
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Color.dsTextTertiary)
+            }
+        }
+        .buttonStyle(.plain)
+        .listRowBackground(Color.dsBrandPrimarySubtle)
+        .listRowSeparator(.hidden)
+        .accessibilityLabel("Get started hint. Tap to dismiss.")
     }
 
     // MARK: - Header content (subtitle + stat hero + type tabs + view controls)
