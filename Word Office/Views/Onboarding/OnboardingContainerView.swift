@@ -5,8 +5,7 @@ import SwiftUI
 /// `FolderPermissionOnboarding` on the fresh-install path. That view remains
 /// as the re-grant fallback after a user resets folder access from Settings.
 ///
-/// Layout (top→bottom), matching the approved mockup
-/// (`onboarding-exports/S1-S4`):
+/// Layout (top→bottom):
 /// - Top bar: pill-dot progress indicator, leading, + "Skip" trailing (hidden on S4)
 /// - Pager: swipeable `TabView(.page)` with per-page hero art + text
 /// - Footer: primary CTA + (S4 only) "Maybe Later"
