@@ -221,10 +221,9 @@ class $ {
     const s = b(this.fileType);
     this.id = k(), this.file = A, this.title = E;
     const P = await A.arrayBuffer();
-    return this.loadPromise = this.loadDocument(P, this.fileType), {
-      id: this.id,
-      documentType: s
-    };
+    this.loadPromise = this.loadDocument(P, this.fileType);
+    this.loadPromise.catch(() => {});
+    return { id: this.id, documentType: s };
   }
   openNew(A) {
     this.fileType = A || "docx", this.id = this.id || k(), this.title = "New Document";
@@ -282,7 +281,9 @@ class $ {
       const s = await this.converter.convert({
         data: A,
         fileFrom: "doc." + B,
-        fileTo: "Editor.bin"
+        fileTo: "Editor.bin",
+        formatFrom: ({ docx: 65, doc: 66, odt: 67, rtf: 68, txt: 69, html: 70, epub: 72, fb2: 73, docm: 75, dotx: 76, dotm: 77, xlsx: 257, xls: 258, ods: 259, csv: 260, xlsm: 261, xltx: 262, xltm: 263, pptx: 129, ppt: 130, odp: 131, ppsx: 132, pptm: 133 })[B.toLowerCase()],
+        formatTo: ({ docx: 8193, doc: 8193, odt: 8193, rtf: 8193, txt: 8193, html: 8193, epub: 8193, fb2: 8193, docm: 8193, dotx: 8193, dotm: 8193, xlsx: 8194, xls: 8194, ods: 8194, csv: 8194, xlsm: 8194, xltx: 8194, xltm: 8194, pptx: 8195, ppt: 8195, odp: 8195, ppsx: 8195, pptm: 8195 })[B.toLowerCase()]
       });
       Q = s.output, E = s.media;
     }

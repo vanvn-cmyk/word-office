@@ -40,6 +40,8 @@ final class OfficeEditorViewController: UIViewController {
     var onDirtyChange: ((Bool) -> Void)?
     /// Called when JS intercepts the OO filter panel; present native filter UI.
     var onFilterRequest: (([NativeFilterItem]) -> Void)?
+    /// Called when the active slide changes in PPT. Provides 1-based current index and total count.
+    var onSlideChange: ((Int, Int) -> Void)?
 
     // MARK: - Lifecycle
 
@@ -77,11 +79,27 @@ final class OfficeEditorViewController: UIViewController {
         webView.evaluateJavaScript("window.execEditorCommand('\(cmd)')")
     }
 
-    func insertImage(dataURL: String) {
+    /// Prints the current document using iOS UIPrintInteractionController.
+    /// Uses WKWebView's viewPrintFormatter() which captures the canvas-rendered OO content.
+    func printDocument() {
+        let printInfo = UIPrintInfo.printInfo()
+        printInfo.outputType = .general
+        printInfo.jobName = documentURL?.lastPathComponent ?? "Document"
+
+        let pc = UIPrintInteractionController.shared
+        pc.printInfo = printInfo
+        pc.printFormatter = webView.viewPrintFormatter()
+        pc.present(animated: true, completionHandler: nil)
+    }
+
+    /// Store image bytes in OfficeSchemeHandler and tell JS to insert via
+    /// `office://host/img/<uuid>` URL — avoids passing large base64 through the
+    /// JS bridge, which spikes WKWebView memory and triggers iOS OOM kills.
+    func insertImage(data: Data, mimeType: String = "image/jpeg") {
         guard scriptReady else { return }
-        let escaped = dataURL.replacingOccurrences(of: "\\", with: "\\\\")
-                             .replacingOccurrences(of: "'", with: "\\'")
-        webView.evaluateJavaScript("window.insertImageByDataURL('\(escaped)')")
+        let officeURL = OfficeSchemeHandler.storeImage(data: data, mimeType: mimeType)
+        let urlJS = jsStringLiteral(officeURL)
+        webView.evaluateJavaScript("window.insertImageByURL(\(urlJS));")
     }
 
     /// Sends the user's filter selection back to the hidden OO filter panel.
@@ -93,59 +111,35 @@ final class OfficeEditorViewController: UIViewController {
         webView.evaluateJavaScript(js)
     }
 
-    /// Inserts a hyperlink at the current cursor position using ONLYOFFICE's asc_insertHyperlink API.
+    /// Inserts a hyperlink via window._insertHyperlink defined in editor.html.
+    /// That helper uses the cached _innerWin reference and restores OO cursor focus
+    /// before calling the API, avoiding the cross-frame querySelector + lost-cursor issue.
     func insertHyperlink(url: String, displayText: String) {
         guard scriptReady else { return }
         let urlJS  = jsStringLiteral(url)
         let textJS = jsStringLiteral(displayText)
-        let js = """
-        (function(url, text) {
-          var _iw = document.querySelector('iframe[name="frameEditor"]');
-          if (!_iw) return;
-          var iwin = _iw.contentWindow;
-          var _ed = iwin.Asc && iwin.Asc.editor;
-          if (!_ed) return;
-          try {
-            var _A = iwin.Asc || {};
-            var HyperCls = _A.asc_CHyperlink
-              || (iwin.AscCommon && iwin.AscCommon.asc_CHyperlink)
-              || iwin.asc_CHyperlink;
-            if (HyperCls) {
-              var hl = new HyperCls();
-              typeof hl.asc_setUrl  === 'function' ? hl.asc_setUrl(url)   : (hl.Url  = url);
-              typeof hl.asc_setText === 'function' ? hl.asc_setText(text) : (hl.Text = text);
-              if (typeof _ed.asc_insertHyperlink === 'function') { _ed.asc_insertHyperlink(hl); return; }
-              if (typeof _ed.asc_addHyperlink    === 'function') { _ed.asc_addHyperlink(hl);    return; }
-            }
-            // Fallback: focused command
-            iwin.focus();
-            iwin.AscDesktopEditor && iwin.AscDesktopEditor.executeFocusedCommand('InsertHyperlink');
-          } catch(e) { console.warn('[iOS] insertHyperlink:', e); }
-        })(\(urlJS), \(textJS));
-        """
-        webView.evaluateJavaScript(js)
+        webView.evaluateJavaScript("window._insertHyperlink(\(urlJS), \(textJS));")
     }
 
-    /// Adds a comment at the current selection using ONLYOFFICE's asc_addComment API.
+    /// Adds a comment via window._addComment defined in editor.html.
     func addComment(text: String) {
         guard scriptReady else { return }
         let textJS = jsStringLiteral(text)
-        let js = """
-        (function(text) {
-          var _iw = document.querySelector('iframe[name="frameEditor"]');
-          if (!_iw) return;
-          var iwin = _iw.contentWindow;
-          var _ed = iwin.Asc && iwin.Asc.editor;
-          if (!_ed) return;
-          try {
-            if (typeof _ed.asc_addComment === 'function') { _ed.asc_addComment(text, true); return; }
-            if (typeof _ed.asc_AddComment === 'function') { _ed.asc_AddComment(text);        return; }
-            iwin.focus();
-            iwin.AscDesktopEditor && iwin.AscDesktopEditor.executeFocusedCommand('AddComment');
-          } catch(e) { console.warn('[iOS] addComment:', e); }
-        })(\(textJS));
-        """
-        webView.evaluateJavaScript(js)
+        webView.evaluateJavaScript("window._addComment(\(textJS));")
+    }
+
+    /// Inserts a chart via window._insertChart. The type string maps to OO chart type constants in editor.html.
+    func insertChart(type: String) {
+        guard scriptReady else { return }
+        let typeJS = jsStringLiteral(type)
+        webView.evaluateJavaScript("window._insertChart(\(typeJS));")
+    }
+
+    /// Inserts a shape via window._insertShape. The type is an OO shape preset name (rect, ellipse, etc.).
+    func insertShape(type: String) {
+        guard scriptReady else { return }
+        let typeJS = jsStringLiteral(type)
+        webView.evaluateJavaScript("window._insertShape(\(typeJS));")
     }
 
     // MARK: - JS string helpers
@@ -206,6 +200,12 @@ final class OfficeEditorViewController: UIViewController {
         // Kept: #cell-editing-box (formula bar), #statusbar (sheet tabs/page info).
         let ooUIScript = WKUserScript(source: #"""
             (function() {
+                // Injection guard — editor.html sets window._ooInjectEnabled = false on
+                // _innerWin before each insert operation and restores it afterwards.
+                // When false, the MutationObserver skips all querySelectorAll work,
+                // preventing O(n²) JS-thread saturation during heavy OO DOM mutations.
+                window._ooInjectEnabled = true;
+
                 var CSS = [
                     /* ── Ribbon: File/Home/Insert tab row + all formatting buttons ── */
                     /* Replaced by the native EditorTopToolbar above the WebView.     */
@@ -258,8 +258,18 @@ final class OfficeEditorViewController: UIViewController {
                 document.addEventListener('DOMContentLoaded', inject);
                 window.addEventListener('load', inject);
 
-                var obs = new MutationObserver(inject);
+                // Throttled observer: coalesce rapid DOM bursts (spreadsheet scroll
+                // fires hundreds of childList mutations/second) into one inject() per 250ms.
+                // Auto-disconnects after 30s — by then all OO chrome is permanently hidden
+                // via the <style> tag and repeated querySelectorAll is wasted work.
+                var _obsTimer = null;
+                var obs = new MutationObserver(function() {
+                    if (!window._ooInjectEnabled) return;
+                    if (_obsTimer) return;
+                    _obsTimer = setTimeout(function() { _obsTimer = null; inject(); }, 250);
+                });
                 obs.observe(document.documentElement, { childList: true, subtree: true });
+                setTimeout(function() { try { obs.disconnect(); } catch(_) {} }, 30000);
 
                 var n = 0;
                 var t = setInterval(function() { inject(); if (++n >= 20) clearInterval(t); }, 500);
@@ -405,6 +415,14 @@ final class OfficeEditorViewController: UIViewController {
 // MARK: - WKNavigationDelegate
 
 extension OfficeEditorViewController: WKNavigationDelegate {
+    // iOS killed the WebContent process (OOM or watchdog). Reload so the editor
+    // comes back; if scriptReady was true the file will be re-sent automatically.
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        scriptReady  = false
+        editorLoaded = false
+        webView.reload()
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         webViewReady = true
         // Do NOT send file here — wait for scriptReady from JS (dynamic import is async).
@@ -477,11 +495,11 @@ extension OfficeEditorViewController: OfficeBridgeDelegate {
             onFileSaved?(data, fileName)
 
         case .editorError(let msg):
-            // Fatal only while the editor is still initialising (engine load failure,
-            // api.js error, etc.). Once the editor UI is visible (`editorLoaded`),
-            // these are runtime feature errors from ONLYOFFICE internals (offline
-            // modules, unsupported operations, clipboard access) — swallow silently
-            // so the user keeps their unsaved edits.
+            // Fatal only if it fires BEFORE onAppReady (engine load failure, api.js
+            // missing, sdkCore import error). onAppReady now posts 'ready' immediately,
+            // so editorLoaded = true before any OO document-loading or feature error fires.
+            // Document-loading errors (x2t failure, unsupported format) show OO's own
+            // native error dialog inside the editor — no need to kill the editor view.
             if !editorLoaded {
                 onError?(msg)
             }
@@ -493,6 +511,11 @@ extension OfficeEditorViewController: OfficeBridgeDelegate {
         case .ready:
             editorLoaded = true
             onReady?()
+            // Delay filter interception by 3s so OO can restore any saved state
+            // (auto-opened filter panels, view settings) without triggering native sheet.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                self?.webView?.evaluateJavaScript("window._filterInterceptEnabled = true;")
+            }
             // Dump live DOM 4s after ready so ONLYOFFICE has finished rendering toolbar.
             DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
                 self?.webView.evaluateJavaScript("window.execEditorCommand('dump-dom')")
@@ -505,11 +528,16 @@ extension OfficeEditorViewController: OfficeBridgeDelegate {
             let relevant = entries.filter { line in
                 let lower = line.lowercased()
                 return lower.contains("toolbar") || lower.contains("header") ||
-                       lower.contains("tabbar") || lower.contains("statusbar") ||
+                       lower.contains("tabbar")  || lower.contains("statusbar") ||
                        lower.contains("formula") || lower.contains("ribbon") ||
-                       lower.contains("tabs-") || lower.contains("cell-edit")
+                       lower.contains("tabs-")   || lower.contains("cell-edit") ||
+                       // Document page area selectors (for mobile view CSS)
+                       lower.contains("scroll")  || lower.contains("page") ||
+                       lower.contains("canvas")  || lower.contains("ms-con") ||
+                       lower.contains("layout")  || lower.contains("holder") ||
+                       lower.contains("editor-main") || lower.contains("slide")
             }
-            print("=== ONLYOFFICE DOM DUMP (toolbar-related) ===")
+            print("=== ONLYOFFICE DOM DUMP (toolbar + page area) ===")
             relevant.forEach { print("  \($0)") }
             print("=== END DOM DUMP (\(entries.count) total elements) ===")
 
@@ -520,6 +548,9 @@ extension OfficeEditorViewController: OfficeBridgeDelegate {
 
         case .showNativeFilter(let items):
             onFilterRequest?(items)
+
+        case .slideChange(let current, let total):
+            onSlideChange?(current, total)
 
         case .saved, .unknown:
             break

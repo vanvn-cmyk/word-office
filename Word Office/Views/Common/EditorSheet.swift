@@ -1,5 +1,9 @@
 import SwiftUI
 
+extension Notification.Name {
+    static let editorSaveRequested = Notification.Name("editorSaveRequested")
+}
+
 /// Full-screen cover wrapper for `EditorPlaceholderView`.
 ///
 /// Owns dismiss so the Done button closes via `dismiss()` (swiftui-expert-skill
@@ -15,6 +19,8 @@ import SwiftUI
 struct EditorSheet: View {
     let container: DependencyContainer
     let ref: DocumentRef
+    /// Called immediately before dismiss — use to record status changes.
+    var onDone: (() -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
     @Environment(DSToastPresenter.self) private var toaster
@@ -26,24 +32,25 @@ struct EditorSheet: View {
         NavigationStack {
             EditorPlaceholderView(container: container, ref: ref)
                 .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") {
-                            if isDirty { showDiscardAlert = true } else { dismiss() }
+                    // x — plain icon, no extra background (nav bar already provides hit area)
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button {
+                            if isDirty { showDiscardAlert = true } else { closeEditor() }
+                        } label: {
+                            Image(systemName: "xmark")
+                                .fontWeight(.light)
                         }
-                        .fontWeight(.semibold)
                     }
                 }
         }
-        // Disable swipe-to-dismiss gesture when there are unsaved changes.
         .interactiveDismissDisabled(isDirty)
-        // Receive dirty state bubbled up from OfficeEditorView.
         .onPreferenceChange(EditorDirtyPreferenceKey.self) { isDirty = $0 }
         .confirmationDialog(
             "Discard Changes?",
             isPresented: $showDiscardAlert,
             titleVisibility: .visible
         ) {
-            Button("Discard Changes", role: .destructive) { dismiss() }
+            Button("Discard Changes", role: .destructive) { closeEditor() }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Your unsaved edits will be lost.")
@@ -51,5 +58,10 @@ struct EditorSheet: View {
         .toastHost(toaster)
         .onAppear { OrientationManager.shared.allowAll() }
         .onDisappear { OrientationManager.shared.lockToPortrait() }
+    }
+
+    private func closeEditor() {
+        onDone?()
+        dismiss()
     }
 }

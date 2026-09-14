@@ -230,7 +230,11 @@ struct RootView: View {
             // interaction.
             .onChange(of: selectedTab) { $isFABMenuOpen.closeMenuAnimated(reduceMotion: reduceMotion) }
             .fullScreenCover(item: $editingRef) { ref in
-                EditorSheet(container: container, ref: ref)
+                EditorSheet(container: container, ref: ref, onDone: {
+                    guard let entry = libraryVM.store.entries.first(where: { $0.document.url == ref.url })
+                    else { return }
+                    Task { await libraryVM.setStatus(.done, for: entry.id) }
+                })
             }
         } else {
             checkingView

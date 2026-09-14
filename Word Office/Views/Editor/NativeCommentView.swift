@@ -49,12 +49,10 @@ struct NativeCommentView: View {
                 }
             }
 
-            Spacer()
-
             actionBar
         }
         .background(Color(.systemBackground))
-        .presentationDetents([.medium])
+        .presentationDetents([.height(350)])
         .presentationDragIndicator(.hidden)
         .presentationCornerRadius(20)
         .onAppear { textFocused = true }

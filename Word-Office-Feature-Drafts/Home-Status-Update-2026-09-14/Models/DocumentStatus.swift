@@ -45,6 +45,13 @@ enum DocumentStatus: String, Codable, Hashable, Sendable, CaseIterable, Identifi
     var tintColor: Color {
         switch self {
         case .draft:    Color.dsStatusWarning
+        // Was `dsTextSecondary` (neutral gray) — matched the original
+        // `StatusPill` scheme, but reads as "inactive/no color" rather
+        // than a real category, and the Draft→Reviewed segment of
+        // `libraryList`'s connector gradient blended orange + gray into
+        // a muddy brown (user-flagged: "gì thế này"). Brand blue gives a
+        // clean, vivid 3-color set (orange/blue/green) with no gradient
+        // segment landing on a dull color.
         case .reviewed: Color.dsBrandPrimary
         case .done:     Color.dsStatusSuccess
         }

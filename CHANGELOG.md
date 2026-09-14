@@ -6,6 +6,38 @@ Format tham khảo [Keep a Changelog](https://keepachangelog.com/). Entry mới 
 
 ---
 
+## [Unreleased] — 2026-09-14 (Library polish: statusTabHeader, filter badge, TemplateGallery anti-AI)
+
+### ✅ EditorSheet `onDone` callback
+**Files:** `Views/Common/EditorSheet.swift`, `Views/Root/RootView.swift`
+- Thêm `var onDone: (() -> Void)? = nil` vào `EditorSheet`
+- Extracted `closeEditor()` — gọi `onDone?()` trước `dismiss()`, cả clean-close và Discard path
+- RootView wire `onDone:` → `vm.setStatus(.done, for: entry.id)` — fix bug Done button không ghi nhận status
+
+### 🎨 `statusTabHeader` — folder-tab pill section headers
+**File:** `Views/Library/LibraryView.swift`
+- Thay plain `Text(...)` bằng pill: icon + displayName + count + pulsing dot
+- DS semantic backgrounds: `.dsStatusWarningBackground` / `.dsBrandPrimarySubtle` / `.dsStatusSuccessBackground`
+- Pulsing dot 7pt cho Draft/Reviewed (respects `reduceMotion`), static dot nếu reduce motion on
+- Applied trong cả `timelineGroupedContent` (list) và `timelineGroupedGrid` (grid)
+- Bottom padding: `DSSpacing.sm` (12pt) giữa header pill và cards
+
+### 🎨 TemplateGallery anti-AI cleanup
+**File:** `Views/TemplateGallery/TemplateGalleryView.swift`
+- `BlankTemplateCard`: bỏ blue gradient hero → dashed outline white page + ultraLight `+` icon (dsDocumentPage fill + dsBorderSubtle stroke + dsTextTertiary icon)
+- `TemplateCard`: bỏ `KindBadge` overlay — tab đã hiển thị kind, badge redundant
+
+### 🐛 Filter button floating badge removed
+**File:** `Views/Library/LibraryView.swift`
+- Bỏ `.overlay(alignment: .topTrailing)` badge số (activeFilterCount ≥ 2) — trông như bug
+- Thay bằng: `roundIconButtonSurface(isActive: isFilterPopoverPresented || activeFilterCount > 0)` — button tint sáng khi có filter active
+
+### 🐛 "Clear favourites filter" button removed
+**File:** `Views/Library/LibraryView.swift`
+- Bỏ `Button("Clear favourites filter")` — text link trần trông không native, filter clear được qua popover
+
+---
+
 ## [Unreleased] — 2026-09-12 (Onboarding polish: layout, animations, copy, dark mode lock)
 
 ### 🎨 Hero clip fix — badge overflow (S2/S3)

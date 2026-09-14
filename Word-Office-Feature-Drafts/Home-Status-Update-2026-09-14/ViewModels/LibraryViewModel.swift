@@ -17,14 +17,6 @@ final class LibraryViewModel {
     var errorMessage: String?
     private(set) var isLoading: Bool = false
 
-    /// True when the user tapped "Maybe Later" on onboarding S4 and no
-    /// external folder has been granted yet — the library only contains
-    /// the app-seeded sample files. Drives `LibraryView`'s Get-Started
-    /// coachmark. Automatically false once the user grants a real folder.
-    var isGetStartedMode: Bool {
-        store.didSkipFolderOnboarding && !store.hasExternalFolder
-    }
-
     /// Active type/date filters — see `LibraryViewModel+Filtering.swift`.
     /// `statusFilter` was here too until 2026-09-13; status is now the
     /// primary grouping (`LibraryViewModel+Grouping.groupedByStatus`), so a
@@ -272,16 +264,14 @@ final class LibraryViewModel {
                 store.clear()
                 return
             }
-        } else {
-            // No external bookmark — always fall through to the app's own
-            // Documents/ sandbox. After "Maybe Later" in onboarding the user
-            // should land on the Library with seeded files visible, not an
-            // empty "No folder yet" gate. If Documents/ is also empty they see
-            // "No documents yet" with an add-files CTA — still better than a
-            // dead end. The .notGranted state is now reserved for .revoked only
-            // (external folder access lost).
+        } else if UserDefaults.standard.bool(forKey: SampleFileSeeder.didSeedDefaultsKey) {
             folderURL = documentsURL
             hasExternalBookmark = false
+        } else {
+            guard generation == loadGeneration else { return }
+            store.folderPermissionState = .notGranted
+            store.clear()
+            return
         }
 
         defer {
@@ -398,10 +388,15 @@ final class LibraryViewModel {
         return .deleted
     }
 
-    /// Bump `lastOpenedAt` and promote a Draft to Reviewed on first open.
-    /// Only fires from `.draft` — opening an already-Reviewed or -Done file
-    /// is a no-op on status (no downgrade, no redundant write), so re-opening
-    /// something already past this stage can't accidentally regress or double-fire.
+    /// Bump `lastOpenedAt` — best-effort; failure is silent (not user-facing).
+    ///
+    /// **2026-09-14 — deliberately reverses Library-Architecture.md §9 risk
+    /// #2** ("auto-infer status from behaviour → core loop dies"). User's
+    /// explicit call after being shown that tradeoff: opening a Draft file
+    /// now marks it Reviewed. Only fires from `.draft` — opening an
+    /// already-Reviewed or -Done file is a no-op on status (no downgrade,
+    /// no redundant write), so re-opening something already past this
+    /// stage can't accidentally regress or double-fire.
     func recordOpen(_ entryID: String) async {
         guard var entry = store.entries.first(where: { $0.id == entryID }) else { return }
         entry.metadata.lastOpenedAt = Date()

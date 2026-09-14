@@ -185,7 +185,8 @@ struct FileActionsMenu: View {
     /// Current status — only used to hide "Mark as Done" once the file is
     /// already there (2026-09-14). Status otherwise only changes via the
     /// long-press "Change status" context menu (all 3 statuses); this is a
-    /// one-tap shortcut for the single most common transition.
+    /// one-tap shortcut for the single most common transition, not a
+    /// replacement for that menu.
     let currentStatus: DocumentStatus
     let onMarkDone: () -> Void
     /// Fires only after the user confirms the destructive alert below —
@@ -671,7 +672,7 @@ private struct StatusPill: View {
     private var foreground: Color {
         switch status {
         case .draft:    Color.dsStatusWarning
-        case .reviewed: Color.dsBrandPrimary
+        case .reviewed: Color.dsTextSecondary
         case .done:     Color.dsStatusSuccess
         }
     }
@@ -679,7 +680,7 @@ private struct StatusPill: View {
     private var background: Color {
         switch status {
         case .draft:    Color.dsStatusWarningBackground
-        case .reviewed: Color.dsBrandPrimarySubtle
+        case .reviewed: Color.dsSurfaceSecondary
         case .done:     Color.dsStatusSuccessBackground
         }
     }

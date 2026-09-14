@@ -7,11 +7,14 @@ import SwiftUI
 ///
 /// Content order matches UC16: an optional "Needs Attention" section
 /// (`dueReminderEntries()`) always floats to the top, then non-due entries
-/// grouped into date buckets (`groupedEntries()`) — both computed in
-/// `LibraryViewModel+Grouping.swift`. The type-tab strip + favourite/view-mode/
-/// filter row narrow the entry set before either of those run
-/// (`LibraryViewModel+Filtering.swift`). Search bypasses both and shows a flat
-/// match list (Library-Home-v10 mockup, Frame 3).
+/// grouped by `DocumentStatus` (`groupedByStatus()`, 2026-09-13 — was
+/// `DateBucket`; status is now the primary grouping so Home actually
+/// delivers the onboarding's "every file tagged Draft/Reviewed/Done"
+/// promise) — both computed in `LibraryViewModel+Grouping.swift`. The
+/// type-tab strip + favourite/date/view-mode/filter row narrow the entry
+/// set before either of those run (`LibraryViewModel+Filtering.swift`).
+/// Search bypasses both and shows a flat match list (Library-Home-v10
+/// mockup, Frame 3).
 ///
 /// No `.navigationSubtitle` — not a confirmed-available API for this target,
 /// so the adaptive subtitle is rendered as ordinary list content instead of
@@ -44,7 +47,7 @@ struct LibraryView: View {
     // click-lag the user flagged.
 
     /// Invoked from the no-folder-yet empty state's CTA — only reachable when the
-    /// user tapped "Maybe Later" on onboarding S4.
+    /// user skipped folder onboarding earlier (Root/FolderPermissionOnboarding).
     let onRequestPermission: () async -> Void
 
     /// Invoked from a row's kebab menu "Edit" — the parent (`RootView`)
@@ -54,11 +57,6 @@ struct LibraryView: View {
     let onOpenEditor: (DocumentRef) -> Void
 
     @AppStorage("libraryViewMode") private var viewMode: LibraryViewMode = .list
-    @AppStorage("library.getStartedCoachmarkSeen") private var getStartedCoachmarkSeen: Bool = false
-
-    private var showsGetStartedCoachmark: Bool {
-        viewModel.isGetStartedMode && !getStartedCoachmarkSeen
-    }
 
     /// Local sheet state for "Save to Files" — the `UIDocumentPickerViewController`
     /// wrapper needs only a URL (no container dependency), so it stays here
@@ -100,9 +98,6 @@ struct LibraryView: View {
     /// TODO(paywall): route through a shared `PaywallCoordinator` if the
     /// crown ever fires from more than these two screens.
     @State private var isPaywallPresented = false
-    /// Drives the shimmer light that travels down the timeline rail (0 → section count, looping).
-    @State private var railShimmerProgress: CGFloat = 0
-    @State private var badgePulse = false
 
     var body: some View {
         NavigationStack {
@@ -328,7 +323,6 @@ struct LibraryView: View {
     // MARK: - List
 
     private var dueEntries: [LibraryEntry] { viewModel.dueReminderEntries() }
-
     /// Home's primary grouping (2026-09-13) — was `DateBucket` (Today/
     /// Previous 7 Days/...), now `DocumentStatus` (Draft/Reviewed/Done) so
     /// the list actually delivers on the onboarding's "every file tagged
@@ -396,32 +390,49 @@ struct LibraryView: View {
             } else {
                 if !dueEntries.isEmpty {
                     Section {
-                        sectionRows(dueEntries, showsCoachmark: showsGetStartedCoachmark)
+                        sectionRows(dueEntries)
                     } header: {
                         Label("Needs Attention", systemImage: "bell.badge.fill")
                             .foregroundStyle(Color.dsStatusWarning)
                     }
                 }
 
-                if viewMode == .list {
-                    // List mode: one big row with the continuous timeline rail.
-                    // timelineGroupedContent owns all sections, labels, and animation.
+                ForEach(groupedSections, id: \.status) { group in
                     Section {
-                        timelineGroupedContent
-                            .listRowInsets(EdgeInsets())
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                    }
-                } else {
-                    // Grid mode: same single-row timeline spine as list mode,
-                    // but each section renders a DocumentGrid instead of cards.
-                    Section {
-                        timelineGroupedGrid
-                            .listRowInsets(EdgeInsets())
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
+                        sectionRows(group.entries)
+                    } header: {
+                        // 2026-09-14 — per user's hand sketch: label + live
+                        // count in one line ("Draft (2)") with a colored
+                        // accent bar, matching the same accent bar each row
+                        // in this section carries (`row(for:)` / `DocumentTile`).
+                        //
+                        // A cross-section connector spanning the REAL gap
+                        // between headers (via anchor preferences) was tried
+                        // and looked right in static screenshots, but broke
+                        // exactly as `List`'s laziness predicted: scrolling
+                        // the top header far enough off-screen dropped its
+                        // anchor, and the whole connector vanished mid-scroll
+                        // (user-confirmed on device). Reverted to each
+                        // header owning a short, fixed-length stub of its
+                        // own — never depends on a sibling header's anchor,
+                        // so it can't disappear this way, at the cost of not
+                        // being one literal continuous line across a large
+                        // gap.
+                        StatusSectionHeader(
+                            status: group.status,
+                            count: group.entries.count,
+                            isFirst: group.status == groupedSections.first?.status,
+                            isLast: group.status == groupedSections.last?.status
+                        )
                     }
                 }
+                // Drives `StatusSectionHeader`'s `.growDownward` reveal —
+                // keyed on which statuses currently have a visible section,
+                // exactly the event that inserts/removes a header. Without
+                // this, the transition has no active animation transaction
+                // to run in (none of `setStatus`/`recordOpen` wrap their
+                // mutation in `withAnimation`).
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.5), value: groupedSections.map(\.status))
             }
 
             // Fake trailing spacer section — reserves 120pt of
@@ -448,21 +459,21 @@ struct LibraryView: View {
         // scroll content starts flush); Library uses a custom large
         // title in-content, so we tighten manually here.
         .contentMargins(.top, 0, for: .scrollContent)
+        // Custom numeric value, not `.compact` — `.compact` was still
+        // "xa quá" between the type-chip strip and the "Today" header
+        // (per Apple's docs, `.listSectionSpacing(_:)` takes a raw
+        // `CGFloat` directly, not just the `.default`/`.compact` enum
+        // cases). `sm` pulls it in further while staying a real,
+        // deliberate gap rather than zero.
         .listSectionSpacing(DSSpacing.sm)
         .autoHidesTabBarOnScroll()
-        .navigationDestination(for: DocumentStatus.self) { status in
-            statusAllFilesDestination(status: status)
-        }
     }
 
     /// One section's items, rendered as native `List` rows in `.list` mode or as
     /// a single grid "row" in `.grid` mode (Library-Home-v10 Frame 4 — same
     /// section structure, different item renderer).
     @ViewBuilder
-    private func sectionRows(_ entries: [LibraryEntry], showsCoachmark: Bool = false) -> some View {
-        if showsCoachmark {
-            getStartedCoachmarkRow
-        }
+    private func sectionRows(_ entries: [LibraryEntry]) -> some View {
         if viewMode == .grid {
             DocumentGrid(
                 entries: entries,
@@ -499,76 +510,7 @@ struct LibraryView: View {
         }
     }
 
-    /// Full-screen "View all" destination for one status bucket.
-    /// Data comes from `viewModel.groupedByStatus()` which already respects
-    /// `dateFilter`, `typeFilter`, and `favouritesOnly` — so whatever window
-    /// the user has active in the parent screen carries over here automatically.
-    @ViewBuilder
-    private func statusAllFilesDestination(status: DocumentStatus) -> some View {
-        let entries = viewModel.groupedByStatus()
-            .first(where: { $0.status == status })?.entries ?? []
-
-        List {
-            if viewMode == .list {
-                Section {
-                    ForEach(entries) { entry in
-                        cardContent(for: entry)
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                            .listRowInsets(EdgeInsets(top: DSSpacing.xxs, leading: DSSpacing.md,
-                                                      bottom: DSSpacing.xxs, trailing: DSSpacing.xs))
-                    }
-                }
-            } else {
-                Section {
-                    DocumentGrid(
-                        entries: entries,
-                        onTap: { entry in
-                            Task { await viewModel.recordOpen(entry.id) }
-                            onOpenEditor(entry.document)
-                        },
-                        onSaveExport: { entry in exportingRef = entry.document },
-                        onToggleFavourite: { entry in Task { await performToggleFavourite(entry: entry) } },
-                        onRename: { entry, newStem in await performRename(entryID: entry.id, to: newStem) },
-                        onConvertToZip: { entry in performConvertToZip(entryID: entry.id, name: entry.document.name) },
-                        onMarkDone: { entry in Task { await performMarkDone(entry: entry) } },
-                        onDeleteFile: { entry in Task { await performDeleteFile(entryID: entry.id, name: entry.document.name) } }
-                    )
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                }
-            }
-            Section {
-                Color.clear
-                    .frame(height: DSTabBarMetrics.listContentTrailingSpacer)
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-            }
-        }
-        .listStyle(.insetGrouped)
-        .contentMargins(.top, 0, for: .scrollContent)
-        .listSectionSpacing(DSSpacing.sm)
-        .navigationTitle(status.displayName)
-        .navigationBarTitleDisplayMode(.large)
-        .overlay {
-            if entries.isEmpty {
-                ContentUnavailableView(
-                    "No \(status.displayName) documents",
-                    systemImage: "doc.text",
-                    description: Text(viewModel.dateFilter != nil
-                        ? "No files in this window — try a different date filter"
-                        : "No files here yet")
-                )
-            }
-        }
-    }
-
-    /// Core card visual — no listRow modifiers, no per-card rail.
-    /// Used by both `row(for:)` (search results / single-item List rows) and
-    /// `timelineGroupedContent` (where the rail is drawn at the section level).
-    private func cardContent(for entry: LibraryEntry) -> some View {
+    private func row(for entry: LibraryEntry) -> some View {
         DocumentCard(
             entry: entry,
             onTap: {
@@ -594,230 +536,41 @@ struct LibraryView: View {
                 Task { await performDeleteFile(entryID: entry.id, name: entry.document.name) }
             }
         )
+        // Turn each row into its own rounded card with vertical breathing
+        // room instead of a shared insetGrouped section card with divider
+        // lines. `listRowBackground(.clear)` removes the system card fill;
+        // the inner `.background(...)` paints an individual card per row.
+        //
+        // Horizontal `sm = 12` moved from row wrapper INSIDE the card
+        // (background wraps the padded content, so the card frame — not
+        // its content — now sits at the row edge). Combined with zero
+        // `listRowInsets.leading/trailing`, the card visible edge sits at
+        // insetGrouped's default 20pt gutter → matches Tools' `lg = 20`
+        // horizontal padding standard.
         .padding(.horizontal, DSSpacing.sm)
         .padding(.vertical, DSSpacing.sm)
         .background(Color.dsBackgroundElevated, in: RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous).strokeBorder(Color.dsBorderSubtle))
+        // Apple-standard subtle list-row card shadow — Level 2 elevation
+        // (list rows in insetGrouped), NOT Level 3 (floating cards /
+        // FAB). Single subtle contact layer keeps rows grounded on the
+        // gray backdrop without the "heavily elevated" look the earlier
+        // 2-layer ambient+contact recipe produced. Materials over
+        // shadows is Apple's iOS 26 direction; the border already
+        // carries most of the row/card separation, so shadow can be
+        // dialled way back.
         .shadow(color: .black.opacity(0.05), radius: 3, y: 1)
-        .contextMenu { contextMenu(for: entry) }
-    }
-
-    private func row(for entry: LibraryEntry) -> some View {
-        cardContent(for: entry)
-        .overlay(alignment: .leading) {
-            Capsule()
-                .fill(entry.metadata.status.tintColor)
-                .frame(width: 3)
-                .padding(.vertical, DSRadius.card)
-        }
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
+        // Leading bumped `xs=8` → `sm=12` (2026-09-14) on top of
+        // insetGrouped's own ~20pt gutter — cards were sitting almost
+        // flush against `libraryList`'s Draft→Reviewed→Done connector
+        // line (user: "đừng để sát thế này"), which itself moved further
+        // left in the same pass (see `StatusSectionHeader`'s negative
+        // leading padding) — so the two changes compound into a real gap
+        // instead of fighting each other. Trailing stays `xs`.
         .listRowInsets(EdgeInsets(top: DSSpacing.xxs, leading: DSSpacing.md, bottom: DSSpacing.xxs, trailing: DSSpacing.xs))
-    }
-
-    /// Grouped list rendered as a continuous timeline spine.
-    ///
-    /// Layout: each section's content VStack has a `.background(alignment: .leading)`
-    /// that draws a 3 pt `Rectangle` behind its leading edge. The Rectangle's height
-    /// Folder-divider tab header — plain label sticker style:
-    /// name left, count right, subtle rectangular tinted background.
-    /// No icon, no nested badges, small corner radius so it reads as
-    /// a label rather than a UI pill.
-    @ViewBuilder
-    private func statusTabHeader(status: DocumentStatus, count: Int) -> some View {
-        let bg: Color = switch status {
-        case .draft:    .dsStatusWarningBackground
-        case .reviewed: .dsBrandPrimarySubtle
-        case .done:     .dsStatusSuccessBackground
-        }
-        let needsAttention = count > 0 && status != .done
-
-        HStack(spacing: 7) {
-            Image(systemName: status.systemImage)
-                .font(.system(size: 17, weight: .semibold))
-            Text(status.displayName)
-                .font(.system(size: 17, weight: .semibold))
-            Spacer(minLength: 0)
-
-            // Pulsing dot — only for Draft/Reviewed when non-empty
-            if needsAttention && !reduceMotion {
-                Circle()
-                    .fill(status.tintColor)
-                    .frame(width: 7, height: 7)
-                    .scaleEffect(badgePulse ? 1.35 : 1.0)
-                    .opacity(badgePulse ? 0.5 : 1.0)
-                    .animation(
-                        .easeInOut(duration: 1.2).repeatForever(autoreverses: true),
-                        value: badgePulse
-                    )
-            } else if needsAttention {
-                Circle()
-                    .fill(status.tintColor)
-                    .frame(width: 7, height: 7)
-            }
-
-            Text("\(count)")
-                .font(.system(size: 13, weight: .medium))
-                .monospacedDigit()
-                .foregroundStyle(status.tintColor.opacity(0.6))
-        }
-        .foregroundStyle(status.tintColor)
-        .padding(.horizontal, DSSpacing.sm)
-        .padding(.vertical, 7)
-        .background(bg, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-        .padding(.bottom, DSSpacing.sm)
-        .onAppear { badgePulse = true }
-    }
-
-    /// equals the content's height automatically (background fills parent frame).
-    /// `VStack(spacing: 0)` ensures adjacent section rectangles are flush with zero
-    /// gap → Draft orange → Reviewed blue → Done green with no break in the bar.
-    ///
-    /// A shimmer light (`railShimmerProgress`) travels the full rail length once every
-    /// 3 s, suggesting documents flowing forward through the pipeline.
-    private var timelineGroupedContent: some View {
-        VStack(spacing: 0) {
-            ForEach(groupedSections, id: \.status) { group in
-                let sectionIndex = groupedSections.firstIndex(where: { $0.status == group.status }) ?? 0
-                let isFirst = sectionIndex == 0
-                // Local shimmer phase in [0, 1] for this section's rail segment.
-                // `railShimmerProgress` increments from 0 → section count continuously.
-                let localPhase = railShimmerProgress - CGFloat(sectionIndex)
-
-                VStack(alignment: .leading, spacing: 0) {
-                    statusTabHeader(status: group.status, count: group.entries.count)
-
-                    VStack(spacing: DSSpacing.xs) {
-                        if showsGetStartedCoachmark && dueEntries.isEmpty && isFirst {
-                            getStartedCoachmarkRow
-                        }
-                        ForEach(group.entries.prefix(4)) { entry in
-                            cardContent(for: entry)
-                        }
-                    }
-
-                    if group.entries.count > 4 {
-                        NavigationLink(value: group.status) {
-                            Text("View all \(group.entries.count)")
-                                .font(DSFont.subheadline.weight(.semibold))
-                                .foregroundStyle(group.status.tintColor)
-                                .frame(maxWidth: .infinity, alignment: .trailing)
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.top, DSSpacing.xxs)
-                    }
-
-                    Color.clear.frame(height: DSSpacing.xxs)
-                }
-                .padding(.leading, 3 + DSSpacing.xs)
-                .background(alignment: .leading) {
-                    ZStack(alignment: .top) {
-                        Rectangle()
-                            .fill(group.status.tintColor)
-                        if !reduceMotion && localPhase > -0.15 && localPhase < 1.15 {
-                            LinearGradient(
-                                stops: [
-                                    .init(color: .clear,              location: max(0,  localPhase - 0.12)),
-                                    .init(color: .white.opacity(0.55), location: max(0, min(1, localPhase))),
-                                    .init(color: .clear,              location: min(1,  localPhase + 0.12)),
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        }
-                    }
-                    .frame(width: 3)
-                }
-            }
-        }
-        .padding(.trailing, DSSpacing.xs)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.5), value: groupedSections.map(\.status))
-        .onAppear {
-            guard !reduceMotion else { return }
-            railShimmerProgress = 0
-            withAnimation(.linear(duration: 3.0).repeatForever(autoreverses: false)) {
-                railShimmerProgress = CGFloat(groupedSections.count)
-            }
-        }
-    }
-
-    /// Grouped grid rendered as a continuous timeline spine — same rail pattern
-    /// as `timelineGroupedContent` but uses `DocumentGrid` (LazyVGrid) per section.
-    private var timelineGroupedGrid: some View {
-        VStack(spacing: 0) {
-            ForEach(groupedSections, id: \.status) { group in
-                let sectionIndex = groupedSections.firstIndex(where: { $0.status == group.status }) ?? 0
-                let isFirst = sectionIndex == 0
-                let localPhase = railShimmerProgress - CGFloat(sectionIndex)
-
-                VStack(alignment: .leading, spacing: 0) {
-                    statusTabHeader(status: group.status, count: group.entries.count)
-
-                    if showsGetStartedCoachmark && dueEntries.isEmpty && isFirst {
-                        getStartedCoachmarkRow
-                            .padding(.bottom, DSSpacing.xs)
-                    }
-
-                    DocumentGrid(
-                        entries: Array(group.entries.prefix(4)),
-                        onTap: { entry in
-                            Task { await viewModel.recordOpen(entry.id) }
-                            onOpenEditor(entry.document)
-                        },
-                        onSaveExport: { entry in exportingRef = entry.document },
-                        onToggleFavourite: { entry in Task { await performToggleFavourite(entry: entry) } },
-                        onRename: { entry, newStem in await performRename(entryID: entry.id, to: newStem) },
-                        onConvertToZip: { entry in performConvertToZip(entryID: entry.id, name: entry.document.name) },
-                        onMarkDone: { entry in Task { await performMarkDone(entry: entry) } },
-                        onDeleteFile: { entry in Task { await performDeleteFile(entryID: entry.id, name: entry.document.name) } },
-                        leadingPadding: 0
-                    )
-
-                    if group.entries.count > 4 {
-                        NavigationLink(value: group.status) {
-                            Text("View all \(group.entries.count)")
-                                .font(DSFont.subheadline.weight(.semibold))
-                                .foregroundStyle(group.status.tintColor)
-                                .frame(maxWidth: .infinity, alignment: .trailing)
-                                .padding(.trailing, DSSpacing.xs)
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.top, DSSpacing.xxs)
-                        .padding(.bottom, DSSpacing.xs)
-                    } else {
-                        Color.clear.frame(height: DSSpacing.xxs)
-                    }
-                }
-                .padding(.leading, 3 + DSSpacing.xs)
-                .background(alignment: .leading) {
-                    ZStack(alignment: .top) {
-                        Rectangle()
-                            .fill(group.status.tintColor)
-                        if !reduceMotion && localPhase > -0.15 && localPhase < 1.15 {
-                            LinearGradient(
-                                stops: [
-                                    .init(color: .clear,               location: max(0,  localPhase - 0.12)),
-                                    .init(color: .white.opacity(0.55), location: max(0, min(1, localPhase))),
-                                    .init(color: .clear,               location: min(1,  localPhase + 0.12)),
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        }
-                    }
-                    .frame(width: 3)
-                }
-            }
-        }
-        .padding(.trailing, DSSpacing.xs)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.5), value: groupedSections.map(\.status))
-        .onAppear {
-            guard !reduceMotion else { return }
-            railShimmerProgress = 0
-            withAnimation(.linear(duration: 3.0).repeatForever(autoreverses: false)) {
-                railShimmerProgress = CGFloat(groupedSections.count)
-            }
-        }
+        .contextMenu { contextMenu(for: entry) }
     }
 
     /// Inline no-result content for search (dropped into the main list
@@ -867,7 +620,7 @@ struct LibraryView: View {
                 .font(DSFont.headline)
                 .foregroundStyle(Color.dsTextPrimary)
 
-            Text("No documents match the current filter. Try a different tab or clear the date filter")
+            Text("No documents match the current filter. Try a different tab or clear the status filter")
                 .font(DSFont.subheadline)
                 .foregroundStyle(Color.dsTextSecondary)
                 .multilineTextAlignment(.center)
@@ -882,6 +635,9 @@ struct LibraryView: View {
                 if viewModel.dateFilter != nil {
                     Button("Clear date filter") { viewModel.dateFilter = nil }
                 }
+                if viewModel.favouritesOnly {
+                    Button("Clear favourites filter") { viewModel.favouritesOnly = false }
+                }
             }
             .padding(.top, DSSpacing.xs)
         }
@@ -889,42 +645,52 @@ struct LibraryView: View {
         .accessibilityElement(children: .combine)
     }
 
-    // MARK: - Get Started coachmark
-
-    /// One-shot hint row that appears above the first sample file when the
-    /// user landed here via "Maybe Later" on onboarding S4. Arrow ↓ points
-    /// at the file below. Dismissed by tapping anywhere on the row; also
-    /// disappears automatically once the user grants a real folder
-    /// (isGetStartedMode → false).
-    @ViewBuilder
-    private var getStartedCoachmarkRow: some View {
-        Button {
-            getStartedCoachmarkSeen = true
-        } label: {
-            HStack(spacing: DSSpacing.xs) {
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(Color.dsBrandPrimary)
-                Text("Tap the file below to open and edit")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Color.dsTextSecondary)
-                Spacer()
-                Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Color.dsTextTertiary)
-            }
-        }
-        .buttonStyle(.plain)
-        .listRowBackground(Color.dsBrandPrimarySubtle)
-        .listRowSeparator(.hidden)
-        .accessibilityLabel("Get started hint. Tap to dismiss.")
-    }
-
     // MARK: - Header content (subtitle + stat hero + type tabs + view controls)
 
+    private var listHeader: some View {
+        // `md = 16`, not `sm = 12` — the search pill (`.roundIconButtonSurface`
+        // / its own capsule) and `LibraryHeroCard` each carry the shared
+        // "2-layer ambient shadow" recipe (`radius: 14, y: 6`, same values
+        // as `ToolCardSurface`), which reaches ~20pt below the element it's
+        // on. At `sm = 12` that shadow from the search row bled into the
+        // hero card's top edge right below it — read as a dark seam between
+        // the two, same failure class as the "odd dark bands" the user
+        // flagged in `typeTabs` (see that comment), just from stacked
+        // per-view shadows overlapping instead of a shared Liquid Glass
+        // sampling region. `md` gives the shadow room to fall off before
+        // the next element starts, without touching the shared shadow
+        // recipe other screens rely on.
+        VStack(alignment: .leading, spacing: DSSpacing.md) {
+            // Title + hero + chip strip stay mounted at every state.
+            // Previous attempts to collapse them on search focus forced
+            // the enclosing insetGrouped List to reflow row heights, and
+            // no timing curve masked that reflow — it always read as
+            // choppy pause. Keeping the header mounted is the
+            // one animation-free path: only `searchAndActionsRow` itself
+            // animates its own icon → Cancel swap, and the results below
+            // just re-populate as the query changes. The chip strip
+            // staying visible is a bonus — the user can narrow by type
+            // and search at the same time without breaking flow.
+            titleRow
+            searchAndActionsRow
+            // `LibraryHeroCard` ("Documents tracked") and `sampleLibraryBanner`
+            // stay paused (see 2026-09-13 note in CHANGELOG.md). A standalone
+            // `DocumentStatusTimeline` summary card was tried here too and
+            // corrected out — the user wants the Draft→Reviewed→Done timeline
+            // woven into the REAL section headers below (`groupedSections`),
+            // not a separate floating widget. See `StatusTimelineHeader`.
+            typeTabs
+        }
+        .padding(.vertical, DSSpacing.xs)
+    }
+
     /// "You're viewing sample files" — surfaces the "Change folder…" action
-    /// right where a first-run user actually needs it: looking at the 3
-    /// Session-19-seeded tour files, with no signal they aren't their own docs.
+    /// (previously buried in Settings → Library) right where a first-run
+    /// user actually needs it: looking at the 3 Session-19-seeded tour
+    /// files, with no other signal they aren't the user's own documents.
+    /// Same `onRequestPermission` closure `EmptyStateView`'s "Choose
+    /// folder" CTA already uses — one action, two entry points, not a
+    /// second permission-request path to keep in sync.
     private var sampleLibraryBanner: some View {
         HStack(spacing: DSSpacing.sm) {
             Image(systemName: "sparkles")
@@ -962,41 +728,6 @@ struct LibraryView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private var listHeader: some View {
-        // `md = 16`, not `sm = 12` — the search pill (`.roundIconButtonSurface`
-        // / its own capsule) and `LibraryHeroCard` each carry the shared
-        // "2-layer ambient shadow" recipe (`radius: 14, y: 6`, same values
-        // as `ToolCardSurface`), which reaches ~20pt below the element it's
-        // on. At `sm = 12` that shadow from the search row bled into the
-        // hero card's top edge right below it — read as a dark seam between
-        // the two, same failure class as the "odd dark bands" the user
-        // flagged in `typeTabs` (see that comment), just from stacked
-        // per-view shadows overlapping instead of a shared Liquid Glass
-        // sampling region. `md` gives the shadow room to fall off before
-        // the next element starts, without touching the shared shadow
-        // recipe other screens rely on.
-        VStack(alignment: .leading, spacing: DSSpacing.md) {
-            // Title + hero + chip strip stay mounted at every state.
-            // Previous attempts to collapse them on search focus forced
-            // the enclosing insetGrouped List to reflow row heights, and
-            // no timing curve masked that reflow — it always read as
-            // choppy pause. Keeping the header mounted is the
-            // one animation-free path: only `searchAndActionsRow` itself
-            // animates its own icon → Cancel swap, and the results below
-            // just re-populate as the query changes. The chip strip
-            // staying visible is a bonus — the user can narrow by type
-            // and search at the same time without breaking flow.
-            titleRow
-            searchAndActionsRow
-            // `LibraryHeroCard` ("Documents tracked") and `sampleLibraryBanner`
-            // stay paused (2026-09-13). The Draft→Reviewed→Done timeline is now
-            // woven into the real section headers below (`groupedSections`), not
-            // a separate floating widget. See `StatusSectionHeader`.
-            typeTabs
-        }
-        .padding(.vertical, DSSpacing.xs)
-    }
-
     private var typeTabs: some View {
         // `GlassEffectContainer` groups every chip's Liquid Glass surface
         // into one shared sampling region — without it, adjacent chips
@@ -1031,6 +762,7 @@ struct LibraryView: View {
                     }
                 }
             }
+            .padding(.horizontal, DSSpacing.xs)
             .animation(reduceMotion ? nil : .smooth(duration: 0.28), value: sortedTypeFilters)
         }
         .textCase(nil)
@@ -1193,11 +925,30 @@ struct LibraryView: View {
                 // Tinted while the popover is open so the tap is
                 // visually acknowledged even in the split second before
                 // the popover slides in.
-                .roundIconButtonSurface(isActive: isFilterPopoverPresented || activeFilterCount > 0)
+                .roundIconButtonSurface(isActive: isFilterPopoverPresented)
+                .overlay(alignment: .topTrailing) {
+                    if activeFilterCount >= 2 {
+                        Text("\(activeFilterCount)")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(Color.dsTextOnBrand)
+                            .frame(minWidth: 14, minHeight: 14)
+                            .padding(.horizontal, 2)
+                            .background(Color.dsBrandPrimary, in: Capsule())
+                            .overlay(
+                                // Ring against the button surface so the
+                                // badge stays distinct even when the icon
+                                // fill runs close to brand primary.
+                                Capsule().stroke(Color.dsBackgroundPrimary, lineWidth: 1.5)
+                            )
+                            .offset(x: 6, y: -6)
+                            .transition(.scale(scale: 0.6).combined(with: .opacity))
+                            .accessibilityHidden(true)
+                    }
+                }
         }
         .buttonStyle(.plain)
         // Single implicit animation for BOTH values so state changes
-        // driven from the popover selection (statusFilter set → popover
+        // driven from the popover selection (dateFilter set → popover
         // dismiss → isActive flip → icon swap) all share one curve
         // matching iOS's popover ~0.3s system animation.
         .animation(reduceMotion ? nil : .smooth(duration: 0.28), value: activeFilterCount)
@@ -1234,8 +985,8 @@ struct LibraryView: View {
             // Status used to live here as a filter, but the Home list is
             // now grouped BY status (`groupedByStatus`) — a status filter
             // on top of status sections would just hide 2 of the 3 section
-            // headers, so it was removed. Date narrows WITHIN whichever
-            // sections are showing instead.
+            // headers, so it was removed rather than kept redundant. Date
+            // narrows WITHIN whichever sections are showing instead.
             popoverSectionHeader("Date")
             // `list.bullet` (not `checkmark`) — the trailing checkmark on
             // the right is already SwiftUI's "selected" indicator, so a
@@ -1312,7 +1063,9 @@ struct LibraryView: View {
     /// One-tap "Mark as Done" from the kebab menu (2026-09-14) — a shortcut
     /// for the single most common status transition, alongside the
     /// existing long-press "Change status" context menu which still
-    /// exposes all 3 statuses.
+    /// exposes all 3 statuses. Same manual-only path as every other status
+    /// change (`setStatus`) — no auto-inference from behaviour, per
+    /// Library-Architecture.md §9 risk #2.
     private func performMarkDone(entry: LibraryEntry) async {
         await viewModel.setStatus(.done, for: entry.id)
         toaster.show(.success, title: "Marked as Done", filename: entry.document.name)
@@ -1587,26 +1340,96 @@ private struct LibraryHeroCard: View {
     }
 }
 
-/// Section header for `groupedSections` — plain "Draft (2)" (label + live count)
-/// with a thin colored accent bar on the leading edge. The same `tintColor` bar
-/// runs along each card's leading edge in `row(for:)`, so "these rows belong
-/// together" comes from repeated color within a section.
+/// Section header for `groupedSections` — a circle badge (matching
+/// `OnboardingTrackDocumentsHero.timelineBadge`'s neutral/blue/green
+/// palette: neutral draft, brand-blue reviewed, success-green done) with a
+/// short connector stub overlaid above/below, so consecutive Draft →
+/// Reviewed → Done section headers read as one timeline running down the
+/// real content instead of 3 unrelated text labels.
+///
+/// The stub deliberately does NOT try to span the full gap between one
+/// section's last row and the next section's header — `List`'s own
+/// `.listSectionSpacing` there is system-managed and any row count/height
+/// changes as entries move between sections, so a stub sized to bridge it
+/// exactly would drift out of alignment constantly. It overshoots the
+/// header's own bounds by a fixed, modest amount instead: enough to read as
+/// "this connects to something above/below" without claiming to be a
+/// perfectly continuous line the way `DocumentStatusTimeline`'s (rejected)
+/// standalone version could, where all 3 badges shared one parent stack.
+/// Section header for `groupedSections` — matches the user's hand sketch:
+/// plain "Draft (2)" (label + live count in the same line, not a separate
+/// badge) with a thin colored accent bar on the leading edge. The sketch
+/// draws one continuous bracket enclosing a section's header AND all its
+/// rows, but `List`/`Section` gives no shared canvas to paint one shape
+/// across separately-laid-out row cells — the accent bar is applied here
+/// AND per-row (`row(for:)` / `DocumentTile`) in the same `tintColor`
+/// instead, so the "these rows belong together" read comes from repeated
+/// color, not one literal continuous line.
+///
+/// **2nd correction (2026-09-14, confirmed on-device)**: a cross-section
+/// connector spanning the REAL measured gap between headers (via
+/// `.anchorPreference`) was tried — it rendered correctly in static
+/// screenshots, but broke exactly as `List`'s laziness predicted: scrolling
+/// the top header far enough off-screen dropped its anchor from the
+/// preference dictionary, and the whole connector vanished mid-scroll.
+/// Reverted to each header owning a short, FIXED-length stub of its own —
+/// self-contained, so it can never depend on (or break because of) a
+/// sibling header's render state, at the cost of not being one literal
+/// continuous line across a large gap. `isFirst`/`isLast` hide the
+/// stub that would otherwise point at a neighbour that doesn't exist.
 private struct StatusSectionHeader: View {
     let status: DocumentStatus
     let count: Int
+    let isFirst: Bool
+    let isLast: Bool
+
+    private static let stubLength: CGFloat = 10
 
     var body: some View {
         HStack(spacing: 0) {
             Capsule()
                 .fill(status.tintColor)
                 .frame(width: 3)
+                .overlay(alignment: .top) {
+                    if !isFirst {
+                        Capsule()
+                            .fill(status.tintColor.opacity(0.4))
+                            .frame(width: 3, height: Self.stubLength)
+                            .offset(y: -Self.stubLength)
+                    }
+                }
+                .overlay(alignment: .bottom) {
+                    if !isLast {
+                        Capsule()
+                            .fill(status.tintColor.opacity(0.4))
+                            .frame(width: 3, height: Self.stubLength)
+                            .offset(y: Self.stubLength)
+                    }
+                }
+            // Pushed out to roughly line up with the card/chip content
+            // below it (`DocumentGrid.railLeadingInset`) instead of
+            // hugging the bar — the bar marks the timeline, the label
+            // reads as part of the content column (user-flagged: text sat
+            // too close to the line, out of step with everything below
+            // it). Bumped from `.subheadline` to `.title3` per user
+            // request ("chữ to lên").
             Text("\(status.displayName) (\(count))")
                 .font(DSFont.title3.weight(.bold))
                 .foregroundStyle(status.tintColor)
                 .padding(.leading, DSSpacing.md)
         }
+        // Shifts the bar left, off `List`'s own default section-header
+        // inset — user asked for the line moved further left, and for
+        // row/grid content (see `row(for:)` / `DocumentGrid
+        // .railLeadingInset`) to keep a real gap from it rather than
+        // sitting flush against it.
         .padding(.leading, -DSSpacing.lg)
         .fixedSize(horizontal: false, vertical: true)
+        // Grows in from the top when this header/status first appears
+        // (e.g. the first document becomes Reviewed, so a "Reviewed"
+        // section exists for the first time) — same reveal originally
+        // built for the (since-reverted) cross-section connector, now
+        // applied to each header's own self-contained bar+stub instead.
         .transition(.growDownward.combined(with: .opacity))
     }
 }
@@ -1658,14 +1481,18 @@ private struct TypeTabButton: View {
             .foregroundStyle(isSelected ? Color.dsTextOnBrand : Color.dsTextPrimary)
         }
         // Flat solid fill, no Liquid Glass (2026-09-14 — glass dropped
-        // entirely here). Two earlier fixes already tried and failed to
-        // fully clear a dark smudge at the seam between the selected chip
-        // and its neighbour: removing an explicit `.shadow`, then removing
-        // a shared `GlassEffectContainer` — both left comments claiming
-        // the smudge was gone, but the user's actual screenshot still
-        // showed it. The material's own built-in ambient occlusion turned
-        // out to be the real source, so the fix is to not use glass on this
-        // strip at all. CLAUDE.md's own "glassmorphism as a default" caution
+        // entirely here, was `.glassEffect(.regular.tint(...).interactive())`
+        // on the selected chip only). Two earlier fixes already tried and
+        // failed to fully clear a dark smudge at the seam between the
+        // selected chip and its neighbour: removing an explicit `.shadow`,
+        // then removing a shared `GlassEffectContainer` — both left comments
+        // in this file's history claiming the smudge was gone, but the
+        // user's actual screenshot still showed it. The material's own
+        // built-in ambient occlusion (not anything this file adds
+        // explicitly) turned out to be the real source, so the fix is to
+        // not use glass on this strip at all — same call already made for
+        // `TemplateGalleryView`'s kind-segmented-control for the same
+        // reason. CLAUDE.md's own "glassmorphism as a default" caution
         // agrees: reach for it deliberately, not by default.
         .background {
             Capsule().fill(isSelected ? Color.dsBrandPrimary : Color.dsBackgroundElevated)
@@ -1744,11 +1571,18 @@ private struct RoundIconButtonSurface: ViewModifier {
                     lineWidth: isActive ? 1 : 0.5
                 )
             )
-            // 2-layer shadow — same values as `ToolCardSurface` in
-            // `ToolsTabView` so buttons across screens share one
-            // elevation vocabulary.
+            // 2-layer shadow — same tight contact layer as `ToolCardSurface`
+            // in `ToolsTabView`, but the wide ambient layer is tightened
+            // (was radius 14/opacity 0.06, matching `ToolCardSurface`
+            // exactly) — this button sits shoulder-to-shoulder with
+            // `searchFieldPill` and its sibling icon button in
+            // `searchAndActionsRow`, close enough that 3 independent
+            // radius-14 soft shadows overlapped into one dark smudged
+            // patch between them (user-flagged). `ToolCardSurface`'s own
+            // cards have real gaps between them, so that radius never had
+            // the same overlap problem — left unchanged there.
             .shadow(color: .black.opacity(0.05), radius: 2, y: 1)
-            .shadow(color: .black.opacity(0.06), radius: 14, y: 6)
+            .shadow(color: .black.opacity(0.04), radius: 8, y: 4)
     }
 }
 
@@ -1844,8 +1678,10 @@ private struct LibrarySearchAndActionsBar<Trailing: View>: View {
                 lineWidth: isFocused ? 1.2 : 0.5
             )
         )
+        // Same de-smudging tweak as `RoundIconButtonSurface` — see its
+        // comment for why (this pill sits right next to those buttons).
         .shadow(color: .black.opacity(0.05), radius: 2, y: 1)
-        .shadow(color: .black.opacity(0.06), radius: 14, y: 6)
+        .shadow(color: .black.opacity(0.04), radius: 8, y: 4)
     }
 
     private var cancelButton: some View {

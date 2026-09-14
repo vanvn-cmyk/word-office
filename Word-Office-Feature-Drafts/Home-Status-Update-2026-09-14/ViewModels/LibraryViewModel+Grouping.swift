@@ -21,7 +21,7 @@ extension LibraryViewModel {
 
     /// Entries with `remindAt <= now`, sorted by remindAt ascending (soonest first).
     /// Rendered as the "Needs attention" section on top of `LibraryView`.
-    /// Reads `filteredEntries` (not `store.entries`) so the active type/date
+    /// Reads `filteredEntries` (not `store.entries`) so the active type/status
     /// filter narrows the set before due-sorting runs — see `+Filtering`.
     func dueReminderEntries(now: Date = .now) -> [LibraryEntry] {
         filteredEntries

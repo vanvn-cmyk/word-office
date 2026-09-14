@@ -117,8 +117,8 @@ struct LibraryViewModelTests {
         await vm.loadLibrary()
 
         #expect(store.entries.count == 2)
-        let done  = store.entries.first { $0.metadata.status == .done }
-        let draft = store.entries.first { $0.metadata.status == .draft }
+        let done = store.entries.first { $0.metadata.status == .done }
+        let draft  = store.entries.first { $0.metadata.status == .draft }
         #expect(done != nil)
         #expect(draft != nil)
     }

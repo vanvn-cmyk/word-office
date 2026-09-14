@@ -49,12 +49,10 @@ struct NativeLinkView: View {
                     .autocorrectionDisabled()
             }
 
-            Spacer()
-
             actionBar
         }
         .background(Color(.systemBackground))
-        .presentationDetents([.medium])
+        .presentationDetents([.height(300)])
         .presentationDragIndicator(.hidden)
         .presentationCornerRadius(20)
         .onAppear { urlFocused = true }

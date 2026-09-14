@@ -13,12 +13,23 @@ struct DocumentGrid: View {
     var onConvertToZip: (LibraryEntry) -> Void
     var onMarkDone: (LibraryEntry) -> Void
     var onDeleteFile: (LibraryEntry) -> Void
-    var leadingPadding: CGFloat = DSSpacing.lg
 
-    // `xs = 8` outer padding + `xs = 8` column spacing widen each tile
-    // vs. the previous `sm = 12` — user asked for wider grid cards.
-    // Compact but not edge-to-edge so shadows don't collide with the
-    // list's own insetGrouped gutter.
+    // `xs = 8` column spacing widens each tile vs. the previous `sm = 12` —
+    // user asked for wider grid cards originally. Outer padding is no
+    // longer symmetric (2026-09-14): the grid now reserves a wider
+    // `railLeadingInset` on the LEFT so it doesn't run edge-to-edge past
+    // where `libraryList`'s Draft→Reviewed→Done connector line renders,
+    // pulling tiles inward per the user's sketch ("card bé lại, co vào
+    // bên trong"). `sectionRows` gives this grid ZERO `listRowInsets`
+    // (unlike list-mode rows, which still get insetGrouped's own ~20pt
+    // base gutter on top of their own explicit inset) — so this value is
+    // the grid's ONLY inset, not additive on top of a system default.
+    // Bumped `lg` (20) → `xxl` (32) after a live screenshot showed cards
+    // still touching the connector line, pulled back to `xl` (24)
+    // ("align right sâu quá"), then back down to `lg` (20) once compared
+    // side-by-side against list mode's own inset — grid was still sitting
+    // further right than list-mode rows at `xl`.
+    private static let railLeadingInset: CGFloat = DSSpacing.lg
     private let columns = [GridItem(.flexible(), spacing: DSSpacing.xs), GridItem(.flexible(), spacing: DSSpacing.xs)]
 
     var body: some View {
@@ -36,7 +47,7 @@ struct DocumentGrid: View {
                 )
             }
         }
-        .padding(.leading, leadingPadding)
+        .padding(.leading, Self.railLeadingInset)
         .padding(.trailing, DSSpacing.xs)
         .padding(.bottom, DSSpacing.sm)
     }
@@ -72,11 +83,10 @@ private struct DocumentTile: View {
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
 
-                // Push everything to the top so a short (single-line)
-                // filename leaves the extra room BELOW the pill rather
-                // than centring content vertically — reads more like a
-                // stable card layout with the pill anchored just under
-                // the name.
+                // `StatusPillTag` paused from rendering here 2026-09-13 —
+                // same reasoning as `DocumentCard`: Home now groups tiles
+                // by status section, so the pill repeated it redundantly.
+                // Stays defined below, unused.
                 Spacer(minLength: 0)
             }
             .padding(DSSpacing.sm)
@@ -130,3 +140,37 @@ private struct DocumentTile: View {
     }
 }
 
+/// `StatusPill` in `DocumentCard.swift` is `private` — same visual, kept as its
+/// own small type here rather than widening that file's access just for reuse.
+private struct StatusPillTag: View {
+    let status: DocumentStatus
+
+    var body: some View {
+        HStack(spacing: DSSpacing.xxs) {
+            Image(systemName: status.systemImage)
+                .font(.system(size: 10, weight: .semibold))
+            Text(status.displayName)
+                .font(DSFont.caption)
+        }
+        .padding(.horizontal, DSSpacing.xs)
+        .padding(.vertical, 2)
+        .foregroundStyle(foreground)
+        .background(background, in: Capsule())
+    }
+
+    private var foreground: Color {
+        switch status {
+        case .draft:    Color.dsStatusWarning
+        case .reviewed: Color.dsTextSecondary
+        case .done:     Color.dsStatusSuccess
+        }
+    }
+
+    private var background: Color {
+        switch status {
+        case .draft:    Color.dsStatusWarningBackground
+        case .reviewed: Color.dsSurfaceSecondary
+        case .done:     Color.dsStatusSuccessBackground
+        }
+    }
+}

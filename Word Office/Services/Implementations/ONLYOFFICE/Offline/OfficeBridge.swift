@@ -30,6 +30,8 @@ enum OfficeBridgeMessage {
     case apiDump(methods: [String])
     /// JS intercepted the OO filter panel; show native filter UI with these rows.
     case showNativeFilter(items: [NativeFilterItem])
+    /// Slide navigation changed; provides 1-based current slide and total count.
+    case slideChange(current: Int, total: Int)
     /// Unknown/unparseable message.
     case unknown(body: Any)
 }
@@ -108,6 +110,11 @@ final class OfficeBridge: NSObject, WKScriptMessageHandler {
                 return NativeFilterItem(id: id, text: text, checked: d["checked"] as? Bool ?? false)
             }
             return .showNativeFilter(items: items)
+
+        case "slideChange":
+            let current = dict["current"] as? Int ?? 1
+            let total   = dict["total"]   as? Int ?? 1
+            return .slideChange(current: current, total: total)
 
         default:
             return .unknown(body: body)

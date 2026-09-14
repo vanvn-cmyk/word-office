@@ -6,12 +6,33 @@ import WebKit
 /// Registered on the WKWebViewConfiguration as the scheme handler for "office".
 /// Allows the editor HTML, JS, WASM and ONLYOFFICE scaffold to be served
 /// locally without a server, enabling true offline editing.
+///
+/// Also serves dynamically-uploaded images at `office://host/img/<uuid>.<ext>`.
+/// This avoids passing large base64 strings through the JS bridge (which spikes
+/// memory in the WKWebView content process and can trigger an iOS OOM kill).
 final class OfficeSchemeHandler: NSObject, WKURLSchemeHandler {
 
     // MARK: - Bundle root
 
     // Optional — nil if OfficeBundle was not copied into the .app bundle (returns 503 for every request instead of crashing).
     private let bundleURL: URL? = Bundle.main.url(forResource: "OfficeBundle", withExtension: nil)
+
+    // MARK: - Temporary image store (office://host/img/<uuid>)
+    // Keys are the path component after "img/" — e.g. "img/abc-123.jpg".
+    // Cleared when the scheme handler is released (editor closed).
+    // Lock protects against storeImage being called off the main thread.
+    private static let _lock = NSLock()
+    private static var _images: [String: (data: Data, mime: String)] = [:]
+
+    /// Store `data` and return an `office://host/img/<uuid>.<ext>` URL the JS
+    /// layer can pass directly to `asc_insertImageFromUrl` without base64 encoding.
+    static func storeImage(data: Data, mimeType: String) -> String {
+        let ext  = mimeType == "image/png" ? "png" : "jpg"
+        let uuid = UUID().uuidString.lowercased()
+        let key  = "\(uuid).\(ext)"
+        _lock.lock(); _images[key] = (data, mimeType); _lock.unlock()
+        return "office://host/img/\(key)"
+    }
 
     // MARK: - Active tasks
     // WKURLSchemeHandler callbacks are always on the main thread (documented by Apple),
@@ -33,6 +54,24 @@ final class OfficeSchemeHandler: NSObject, WKURLSchemeHandler {
         }
         let url = requestURL
 
+        // ── Temporary images (office://host/img/<uuid>.<ext>) ────────────────────
+        var rawPath = url.path
+        if rawPath.hasPrefix("/") { rawPath = String(rawPath.dropFirst()) }
+
+        if rawPath.hasPrefix("img/") {
+            let key = String(rawPath.dropFirst(4))
+            Self._lock.lock()
+            let entry = Self._images[key]
+            Self._lock.unlock()
+            if let (data, mime) = entry {
+                respond(to: urlSchemeTask, url: url, status: 200, mimeType: mime, data: data)
+            } else {
+                respond(to: urlSchemeTask, url: url, status: 404, body: "Image not found: \(key)")
+            }
+            activeTasks.remove(taskId)
+            return
+        }
+
         guard let bundleURL else {
             respond(to: urlSchemeTask, url: url, status: 503, body: "OfficeBundle missing from app bundle")
             activeTasks.remove(taskId)
@@ -40,8 +79,7 @@ final class OfficeSchemeHandler: NSObject, WKURLSchemeHandler {
         }
 
         // Strip `office://host` prefix → relative file path
-        var path = url.path
-        if path.hasPrefix("/") { path = String(path.dropFirst()) }
+        let path = rawPath
         let fileURL = bundleURL.appendingPathComponent(path)
         let mime = mimeType(for: fileURL.pathExtension)
 
