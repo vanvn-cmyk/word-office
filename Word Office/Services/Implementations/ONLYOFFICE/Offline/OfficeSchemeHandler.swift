@@ -7,26 +7,28 @@ import WebKit
 /// Allows the editor HTML, JS, WASM and ONLYOFFICE scaffold to be served
 /// locally without a server, enabling true offline editing.
 ///
-/// Also serves dynamically-uploaded images at `office://host/img/<uuid>.<ext>`.
-/// This avoids passing large base64 strings through the JS bridge (which spikes
-/// memory in the WKWebView content process and can trigger an iOS OOM kill).
+/// Serves dynamically-stored images at `office://host/img/<uuid>.<ext>` and
+/// documents at `office://host/doc/<uuid>.<ext>`. Both stores are instance-based
+/// so all in-memory data is freed automatically when the editor is closed.
 final class OfficeSchemeHandler: NSObject, WKURLSchemeHandler {
 
     // MARK: - Bundle root
 
-    // Optional — nil if OfficeBundle was not copied into the .app bundle (returns 503 for every request instead of crashing).
     private let bundleURL: URL? = Bundle.main.url(forResource: "OfficeBundle", withExtension: nil)
 
-    // MARK: - Temporary image store (office://host/img/<uuid>)
-    // Keys are the path component after "img/" — e.g. "img/abc-123.jpg".
-    // Cleared when the scheme handler is released (editor closed).
-    // Lock protects against storeImage being called off the main thread.
-    private static let _lock = NSLock()
-    private static var _images: [String: (data: Data, mime: String)] = [:]
+    // MARK: - In-memory stores (instance — freed when editor closes)
+    // Keys are the path component after "img/" or "doc/".
+    // Lock protects storeImage/storeDocument which may be called off-main.
+
+    private let _lock = NSLock()
+    private var _images: [String: (data: Data, mime: String)] = [:]
+    private var _docs:   [String: Data] = [:]
+
+    // MARK: - Image store
 
     /// Store `data` and return an `office://host/img/<uuid>.<ext>` URL the JS
     /// layer can pass directly to `asc_insertImageFromUrl` without base64 encoding.
-    static func storeImage(data: Data, mimeType: String) -> String {
+    func storeImage(data: Data, mimeType: String) -> String {
         let ext  = mimeType == "image/png" ? "png" : "jpg"
         let uuid = UUID().uuidString.lowercased()
         let key  = "\(uuid).\(ext)"
@@ -34,9 +36,20 @@ final class OfficeSchemeHandler: NSObject, WKURLSchemeHandler {
         return "office://host/img/\(key)"
     }
 
+    // MARK: - Document store
+
+    /// Store `data` and return an `office://host/doc/<uuid>.<ext>` URL.
+    /// JS fetches this URL as an ArrayBuffer — no base64 bridge, no 45 MB cap.
+    /// The entry lives until the handler is deallocated (editor closed).
+    func storeDocument(data: Data, fileName: String) -> String {
+        let ext  = (fileName as NSString).pathExtension.lowercased()
+        let uuid = UUID().uuidString.lowercased()
+        let key  = ext.isEmpty ? uuid : "\(uuid).\(ext)"
+        _lock.lock(); _docs[key] = data; _lock.unlock()
+        return "office://host/doc/\(key)"
+    }
+
     // MARK: - Active tasks
-    // WKURLSchemeHandler callbacks are always on the main thread (documented by Apple),
-    // so no additional synchronisation is needed for activeTasks.
 
     private var activeTasks: Set<ObjectIdentifier> = []
     private let ioQueue = DispatchQueue(label: "com.wordoffice.OfficeSchemeHandler.io", qos: .userInitiated)
@@ -54,19 +67,35 @@ final class OfficeSchemeHandler: NSObject, WKURLSchemeHandler {
         }
         let url = requestURL
 
-        // ── Temporary images (office://host/img/<uuid>.<ext>) ────────────────────
         var rawPath = url.path
         if rawPath.hasPrefix("/") { rawPath = String(rawPath.dropFirst()) }
 
+        // ── Temporary images (office://host/img/<uuid>.<ext>) ────────────────────
         if rawPath.hasPrefix("img/") {
             let key = String(rawPath.dropFirst(4))
-            Self._lock.lock()
-            let entry = Self._images[key]
-            Self._lock.unlock()
+            _lock.lock()
+            let entry = _images[key]
+            _lock.unlock()
             if let (data, mime) = entry {
                 respond(to: urlSchemeTask, url: url, status: 200, mimeType: mime, data: data)
             } else {
                 respond(to: urlSchemeTask, url: url, status: 404, body: "Image not found: \(key)")
+            }
+            activeTasks.remove(taskId)
+            return
+        }
+
+        // ── Document store (office://host/doc/<uuid>.<ext>) ──────────────────────
+        if rawPath.hasPrefix("doc/") {
+            let key = String(rawPath.dropFirst(4))
+            _lock.lock()
+            let docData = _docs[key]
+            _lock.unlock()
+            if let data = docData {
+                respond(to: urlSchemeTask, url: url, status: 200,
+                        mimeType: "application/octet-stream", data: data, noCache: true)
+            } else {
+                respond(to: urlSchemeTask, url: url, status: 404, body: "Document not found: \(key)")
             }
             activeTasks.remove(taskId)
             return
@@ -106,14 +135,17 @@ final class OfficeSchemeHandler: NSObject, WKURLSchemeHandler {
         url: URL,
         status: Int,
         mimeType: String = "text/plain; charset=utf-8",
-        data: Data
+        data: Data,
+        noCache: Bool = false
     ) {
         var headers: [String: String] = [
             "Content-Type": mimeType,
             "Content-Length": "\(data.count)",
             "Access-Control-Allow-Origin": "*",
         ]
-        if status == 200 { headers["Cache-Control"] = "public, max-age=86400" }
+        if status == 200 {
+            headers["Cache-Control"] = noCache ? "no-store" : "public, max-age=86400"
+        }
         guard let response = HTTPURLResponse(
             url: url, statusCode: status,
             httpVersion: "HTTP/1.1", headerFields: headers

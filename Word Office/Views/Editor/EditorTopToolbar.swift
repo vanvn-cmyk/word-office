@@ -85,13 +85,58 @@ struct EditorTopToolbar: View {
             }
         case .ppt:
             VStack(spacing: 0) {
-                tabBar(tabs: PPTTab.allCases, selected: $pptTab)
+                pptTabBar
                 pptContentRow
                     .animation(.easeInOut(duration: 0.12), value: pptTab)
             }
         default:
             singleRow
         }
+    }
+
+    // MARK: - PPT tab bar (fixed 3-col, red accent, slide counter)
+
+    /// Red accent matching PowerPoint's brand color.
+    private static let pptAccent = Color(red: 0.84, green: 0.22, blue: 0.18)
+
+    /// Custom PPT tab bar — fixed three equal columns (no scroll needed) with filled
+    /// active-state pill and a persistent slide counter at the trailing edge.
+    private var pptTabBar: some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 4) {
+                ForEach(PPTTab.allCases, id: \.self) { tab in
+                    let active = pptTab == tab
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.12)) { pptTab = tab }
+                    } label: {
+                        Text(tab.rawValue)
+                            .font(.system(size: 13, weight: active ? .semibold : .regular))
+                            .foregroundStyle(active ? .white : Color.secondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 5)
+                            .background(
+                                active ? Self.pptAccent : Color.clear,
+                                in: RoundedRectangle(cornerRadius: 7)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(EdgeInsets(top: 6, leading: 10, bottom: 6, trailing: slideInfo != nil ? 4 : 10))
+
+            if let info = slideInfo {
+                Text("\(info.current)/\(info.total)")
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.secondary.opacity(0.1), in: Capsule())
+                    .padding(.trailing, 10)
+            }
+        }
+        .frame(height: 44)
+        .background(.bar)
+        .overlay(alignment: .bottom) { Divider() }
     }
 
     // MARK: - Tab bar (row 1)
@@ -381,26 +426,22 @@ struct EditorTopToolbar: View {
                         chipBtn("Text Box",      label: "Insert text box", cmd: "ppt-insert-textbox")
 
                     case .slide:
-                        chipBtn("+ Slide",   label: "Add slide",       cmd: "slide-add")
-                        chipBtn("Duplicate", label: "Duplicate slide", cmd: "slide-duplicate")
-                        chipBtn("Delete",    label: "Delete slide",    cmd: "slide-delete")
+                        // Slide management
+                        accentChipBtn("+ Slide",   label: "Add slide",       cmd: "slide-add")
+                        chipBtn("Duplicate",       label: "Duplicate slide", cmd: "slide-duplicate")
+                        destructiveChipBtn("Delete", label: "Delete slide",  cmd: "slide-delete")
                         vDivider()
+                        // Navigation — counter is in the tab bar, so just prev/next here
                         iconBtn("chevron.left",  label: "Previous slide", cmd: "slide-prev")
-                        if let info = slideInfo {
-                            Text("\(info.current)/\(info.total)")
-                                .font(.system(size: 12, weight: .medium, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                                .frame(minWidth: 36, minHeight: 44)
-                                .padding(.horizontal, 2)
-                        }
                         iconBtn("chevron.right", label: "Next slide",     cmd: "slide-next")
                         vDivider()
-                        chipBtn("Blank",       label: "Blank layout",            cmd: "slide-layout:0")
-                        chipBtn("Title",       label: "Title layout",            cmd: "slide-layout:1")
-                        chipBtn("Content",     label: "Title+Content layout",    cmd: "slide-layout:2")
-                        chipBtn("2 Content",   label: "Two Content layout",      cmd: "slide-layout:3")
-                        chipBtn("Title Only",  label: "Title Only layout",       cmd: "slide-layout:5")
-                        chipBtn("Centered",    label: "Centered Text layout",    cmd: "slide-layout:6")
+                        // Layouts
+                        layoutChipBtn("Blank",   icon: "rectangle",                   cmd: "slide-layout:0")
+                        layoutChipBtn("Title",   icon: "rectangle.topthird.inset.filled", cmd: "slide-layout:1")
+                        layoutChipBtn("Content", icon: "rectangle.split.2x1",          cmd: "slide-layout:2")
+                        layoutChipBtn("2 Col",   icon: "rectangle.split.3x1",          cmd: "slide-layout:3")
+                        layoutChipBtn("Title Only", icon: "rectangle.topthird.inset.filled", cmd: "slide-layout:5")
+                        layoutChipBtn("Center",  icon: "text.aligncenter",             cmd: "slide-layout:6")
                     }
                 }
                 .padding(.horizontal, 4)
@@ -576,6 +617,57 @@ struct EditorTopToolbar: View {
             .contentShape(Rectangle())
         }
         .accessibilityLabel(accessibility)
+    }
+
+    /// Chip with the PPT red accent fill — used for primary actions like "+ Slide".
+    private func accentChipBtn(_ text: String, label: String, cmd: String) -> some View {
+        Button { onCommand(cmd) } label: {
+            Text(text)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(Self.pptAccent, in: RoundedRectangle(cornerRadius: 7))
+                .frame(minHeight: 44)
+                .padding(.horizontal, 3)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel(label)
+    }
+
+    /// Chip tinted red for destructive slide actions (Delete).
+    private func destructiveChipBtn(_ text: String, label: String, cmd: String) -> some View {
+        Button { onCommand(cmd) } label: {
+            Text(text)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Self.pptAccent)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(Self.pptAccent.opacity(0.1), in: RoundedRectangle(cornerRadius: 7))
+                .frame(minHeight: 44)
+                .padding(.horizontal, 3)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel(label)
+    }
+
+    /// Layout chip with a small SF Symbol preview above the label.
+    private func layoutChipBtn(_ text: String, icon: String, cmd: String) -> some View {
+        Button { onCommand(cmd) } label: {
+            VStack(spacing: 2) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .regular))
+                Text(text)
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .foregroundStyle(.primary)
+            .frame(minWidth: 46, minHeight: 44)
+            .padding(.horizontal, 4)
+            .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 7))
+            .padding(.horizontal, 2)
+            .contentShape(Rectangle())
+        }
+        .accessibilityLabel("\(text) layout")
     }
 
     private func vDivider() -> some View {

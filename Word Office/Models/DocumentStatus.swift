@@ -49,4 +49,13 @@ enum DocumentStatus: String, Codable, Hashable, Sendable, CaseIterable, Identifi
         case .done:     Color.dsStatusSuccess
         }
     }
+
+    /// Cycles forward: Draft → Reviewed → Done → Draft.
+    var next: DocumentStatus {
+        switch self {
+        case .draft:    .reviewed
+        case .reviewed: .done
+        case .done:     .draft
+        }
+    }
 }

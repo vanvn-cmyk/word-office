@@ -1,4 +1,4 @@
-import Foundation
+ import Foundation
 
 struct DocumentRef: Identifiable, Hashable, Sendable {
     let id: UUID

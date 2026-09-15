@@ -32,6 +32,8 @@ enum OfficeBridgeMessage {
     case showNativeFilter(items: [NativeFilterItem])
     /// Slide navigation changed; provides 1-based current slide and total count.
     case slideChange(current: Int, total: Int)
+    /// Thumbnail image captured from OO's rendering canvas for a slide.
+    case slideThumbnail(slideNum: Int, data: Data)
     /// Unknown/unparseable message.
     case unknown(body: Any)
 }
@@ -115,6 +117,19 @@ final class OfficeBridge: NSObject, WKScriptMessageHandler {
             let current = dict["current"] as? Int ?? 1
             let total   = dict["total"]   as? Int ?? 1
             return .slideChange(current: current, total: total)
+
+        case "slideThumbnail":
+            let num = dict["slideNum"] as? Int ?? 1
+            guard let b64 = dict["data"] as? String,
+                  let data = Data(base64Encoded: b64)
+            else { return .unknown(body: body) }
+            return .slideThumbnail(slideNum: num, data: data)
+
+        case "debug":
+            if let msg = dict["msg"] as? String {
+                NSLog("[OO-DEBUG] %@", msg)
+            }
+            return .saved // silent no-op in UI
 
         default:
             return .unknown(body: body)

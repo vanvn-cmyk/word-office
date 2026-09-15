@@ -16,6 +16,7 @@ final class OfficeEditorViewController: UIViewController {
 
     private var webView: WKWebView!
     private let bridge = OfficeBridge()
+    private let schemeHandler = OfficeSchemeHandler()
     private var documentURL: URL?
     private var webViewReady = false
     // True after JS posts scriptReady — means window.receiveFileFromIOS is defined.
@@ -42,6 +43,8 @@ final class OfficeEditorViewController: UIViewController {
     var onFilterRequest: (([NativeFilterItem]) -> Void)?
     /// Called when the active slide changes in PPT. Provides 1-based current index and total count.
     var onSlideChange: ((Int, Int) -> Void)?
+    /// Called when JS captures a slide thumbnail from OO's render canvas.
+    var onSlideThumbnail: ((Int, Data) -> Void)?
 
     // MARK: - Lifecycle
 
@@ -97,7 +100,7 @@ final class OfficeEditorViewController: UIViewController {
     /// JS bridge, which spikes WKWebView memory and triggers iOS OOM kills.
     func insertImage(data: Data, mimeType: String = "image/jpeg") {
         guard scriptReady else { return }
-        let officeURL = OfficeSchemeHandler.storeImage(data: data, mimeType: mimeType)
+        let officeURL = schemeHandler.storeImage(data: data, mimeType: mimeType)
         let urlJS = jsStringLiteral(officeURL)
         webView.evaluateJavaScript("window.insertImageByURL(\(urlJS));")
     }
@@ -156,8 +159,8 @@ final class OfficeEditorViewController: UIViewController {
     private func setupWebView() {
         let config = WKWebViewConfiguration()
 
-        // Register `office://` custom scheme for local bundle assets
-        config.setURLSchemeHandler(OfficeSchemeHandler(), forURLScheme: "office")
+        // Register `office://` custom scheme for local bundle assets + in-memory stores
+        config.setURLSchemeHandler(schemeHandler, forURLScheme: "office")
 
         // JS bridge
         bridge.delegate = self
@@ -195,47 +198,156 @@ final class OfficeEditorViewController: UIViewController {
         config.userContentController.add(bridge, name: "editorBridge")
         config.userContentController.addUserScript(errorCapture)
 
-        // Injected into every frame. Hides ONLYOFFICE chrome in the inner iframe.
-        // #toolbar = entire ONLYOFFICE ribbon (File/Home/Insert tabs + formatting row).
-        // Kept: #cell-editing-box (formula bar), #statusbar (sheet tabs/page info).
+        // Injected into every frame (forMainFrameOnly:false) — runs both in editor.html
+        // AND directly inside OO's inner "frameEditor" iframe. When running in the inner
+        // frame, document IS the OO editor document — no cross-frame _d gymnastics needed.
         let ooUIScript = WKUserScript(source: #"""
             (function() {
-                // Injection guard — editor.html sets window._ooInjectEnabled = false on
-                // _innerWin before each insert operation and restores it afterwards.
-                // When false, the MutationObserver skips all querySelectorAll work,
-                // preventing O(n²) JS-thread saturation during heavy OO DOM mutations.
                 window._ooInjectEnabled = true;
 
                 var CSS = [
-                    /* ── Ribbon: File/Home/Insert tab row + all formatting buttons ── */
-                    /* Replaced by the native EditorTopToolbar above the WebView.     */
+                    /* Ribbon toolbar */
                     '#toolbar{display:none!important;height:0!important;min-height:0!important;overflow:hidden!important}',
-                    /* ── Info / collaboration / co-author floating buttons ── */
+                    /* Coauthor / info badges */
                     '#id-btn-coauthors,#btn-coauthors,#btn-info,#id-btn-info,.btn-header-info,',
                     '#id-spreadsheet-info,.icon-info-container,#collaboration-info,',
                     '.asc-info-icon,.coauthors-btn,.btn-icon-info{display:none!important}',
-                    /* ── Right panel / insert sidebar (table, shape, image, chart…) ── */
+                    /* Right sidebar */
                     '#right-panel,#id-right-panel,.right-panel,.rightpanel,',
                     '#id-right-panel-spreadsheet,#spreadsheetRightPanel,',
                     '[id*="right-panel"],[class*="right-panel"]{display:none!important}',
-                    /* ── Left sidebar icon strip (search / spell / info buttons) ── */
+                    /* Left icon strip */
                     '#leftmenu,.leftmenu,#id-sidebar,.asc-leftmenu,',
                     '[id*="leftmenu"],[class*="leftmenu"],',
                     '#id-toolbar-left,[id*="left-panel-btn"]{display:none!important}',
-                    /* ── Scrollbars (touch scrolling handled by WKWebView) ── */
+                    /* PPT splitters */
+                    '.resizer,.splitter{display:none!important}',
+                    /* PPT thumbnail panel — OO 9.x VERIFIED ID (underscore, not hyphen) */
+                    '#id_panel_thumbnails',
+                    '{display:none!important;width:0!important;min-width:0!important;max-width:0!important;overflow:hidden!important}',
+                    '#id_panel_notes{display:none!important;height:0!important;overflow:hidden!important}',
+                    /* Legacy/fallback selectors for other OO versions */
+                    '#id-pe-panel-aside,.pe-panel-aside,',
+                    '[id*="pe-panel-aside"],[class*="pe-panel-aside"],',
+                    '.slide-panel-left,[class*="slide-panel"],',
+                    '#slides-panel,#id-slides-panel,.slides-panel,.slidesPanel,',
+                    '.presenter-panel,.presenterPanel,.leftThumbPanel',
+                    '{display:none!important;width:0!important;min-width:0!important;max-width:0!important;flex:0 0 0!important;overflow:hidden!important}',
+                    /* PPT notes panel — legacy names */
+                    '#id-pe-notes,[id*="pe-notes"],[class*="pe-notes"],',
+                    '#id-notes-panel,.notes-panel,[id*="notes-panel"],[class*="notes-panel"]',
+                    '{display:none!important}',
+                    /* Scrollbars */
                     '#ws-v-scrollbar,#ws-h-scrollbar,#ws-scrollbar-corner{display:none!important}',
                     '::-webkit-scrollbar{width:0!important;height:0!important}'
-                    /* Formula bar (#cell-editing-box) and status bar (#statusbar)   */
-                    /* are intentionally kept — editing features on mobile.          */
                 ].join('');
 
                 var SELECTORS = [
                     '#toolbar',
-                    '#id-btn-coauthors', '#btn-coauthors', '#btn-info', '#id-btn-info',
-                    '.btn-header-info', '.asc-info-icon', '.coauthors-btn', '.btn-icon-info',
-                    '#right-panel', '#id-right-panel', '.right-panel', '.rightpanel',
-                    '#leftmenu', '.leftmenu', '#id-sidebar', '.asc-leftmenu'
+                    '#id-btn-coauthors','#btn-info','#id-btn-info',
+                    '.btn-header-info','.asc-info-icon','.coauthors-btn',
+                    '#right-panel','#id-right-panel','.right-panel',
+                    '#leftmenu','.leftmenu','#id-sidebar','.asc-leftmenu'
                 ];
+
+                // PPT panel hide — targets OO 9.x verified element IDs (underscores).
+                // #id_panel_thumbnails = slide thumbnails panel (left sidebar)
+                // #id_panel_notes      = speaker notes panel (bottom)
+                // OO SDK auto-recalculates canvas bounds when panel display=none.
+                function _pptHideByID() {
+                    var panelEl = document.getElementById('id_panel_thumbnails');
+                    var notesEl = document.getElementById('id_panel_notes');
+                    if (!panelEl) return false; // OO not rendered yet
+                    panelEl.style.setProperty('display',   'none',   'important');
+                    panelEl.style.setProperty('width',     '0',      'important');
+                    panelEl.style.setProperty('min-width', '0',      'important');
+                    panelEl.style.setProperty('overflow',  'hidden', 'important');
+                    if (notesEl) {
+                        notesEl.style.setProperty('display',  'none',   'important');
+                        notesEl.style.setProperty('height',   '0',      'important');
+                        notesEl.style.setProperty('overflow', 'hidden', 'important');
+                    }
+                    // Let OO SDK recalculate canvas bounds (it checks panel display internally)
+                    try { window.dispatchEvent(new Event('resize')); } catch(_) {}
+                    try { window.webkit.messageHandlers.editorBridge.postMessage({
+                        action: 'debug',
+                        msg: '[PPT-BYID] panel=FOUND+HIDDEN'
+                    }); } catch(_) {}
+                    return true;
+                }
+
+                function pptHide() {
+                    // Primary: direct ID targeting (OO 9.x verified)
+                    if (_pptHideByID()) return;
+
+                    // OO JS API (inner frame only) — try panel API methods
+                    if (typeof window.Asc !== 'undefined') {
+                        try {
+                            var _oed = window.Asc && window.Asc.editor;
+                            if (_oed) {
+                                ['asc_SetThumbPanelVisible','asc_setThumbPanelVisible','setThumbPanelVisible'].forEach(function(fn) {
+                                    if (typeof _oed[fn] === 'function') { try { _oed[fn](false); } catch(_) {} }
+                                });
+                                ['asc_SetNotesPanelVisible','asc_setNotesPanelVisible'].forEach(function(fn) {
+                                    if (typeof _oed[fn] === 'function') { try { _oed[fn](false); } catch(_) {} }
+                                });
+                            }
+                        } catch(_) {}
+                    }
+
+                    // Geometry fallback — used when OO not yet rendered or different version
+                    var w = window.innerWidth  || 390;
+                    var h = window.innerHeight || 700;
+                    var maxPanelW = w * 0.45;
+                    var didHide = false;
+                    try {
+                        document.querySelectorAll('*').forEach(function(el) {
+                            try {
+                                var tag = el.tagName.toLowerCase();
+                                if (tag === 'canvas' || tag === 'script' || tag === 'style' ||
+                                    tag === 'html'   || tag === 'body'   || tag === 'iframe') return;
+                                var r = el.getBoundingClientRect();
+                                if (r.width <= 0 || r.height <= 0) return;
+                                if (el.querySelectorAll) {
+                                    var _hasMain = false;
+                                    el.querySelectorAll('canvas').forEach(function(c) {
+                                        var cw = c.width || c.offsetWidth || 0;
+                                        var ch = c.height || c.offsetHeight || 0;
+                                        if (cw > 200 && ch > 100) _hasMain = true;
+                                    });
+                                    if (_hasMain) return;
+                                }
+                                if (r.left <= 150 && r.width >= 40 && r.width < maxPanelW && r.height > h * 0.5) {
+                                    el.style.setProperty('display',   'none',    'important');
+                                    el.style.setProperty('width',     '0',       'important');
+                                    el.style.setProperty('overflow',  'hidden',  'important');
+                                    didHide = true;
+                                    var par = el.parentElement;
+                                    if (par) {
+                                        for (var ki = 0; ki < par.children.length; ki++) {
+                                            var sib = par.children[ki];
+                                            if (sib === el) continue;
+                                            var sr = sib.getBoundingClientRect();
+                                            if (sr.width > w * 0.1 || sr.height > h * 0.1) {
+                                                sib.style.setProperty('left',  '0',    'important');
+                                                sib.style.setProperty('width', '100%', 'important');
+                                            }
+                                        }
+                                        par.style.setProperty('padding-left', '0', 'important');
+                                    }
+                                    return;
+                                }
+                                if (r.bottom >= h - 10 && r.height > 10 && r.height < h * 0.4 && r.width > w * 0.25) {
+                                    el.style.setProperty('display',  'none',   'important');
+                                    el.style.setProperty('height',   '0',      'important');
+                                    el.style.setProperty('overflow', 'hidden', 'important');
+                                    didHide = true;
+                                }
+                            } catch(_) {}
+                        });
+                    } catch(_) {}
+                    if (didHide) { try { window.dispatchEvent(new Event('resize')); } catch(_) {} }
+                }
 
                 function inject() {
                     var head = document.head || document.documentElement;
@@ -252,27 +364,217 @@ final class OfficeEditorViewController: UIViewController {
                                 el.style.setProperty('display', 'none', 'important');
                         }); } catch(e) {}
                     });
+                    pptHide();
                 }
+
+                // Slide count reporter — works in both outer (cross-frame) and inner frame contexts.
+                function reportSlides() {
+                    try {
+                        var _innerFr2 = document.querySelector('iframe[name="frameEditor"]');
+                        var _ooWin = _innerFr2 ? _innerFr2.contentWindow : window;
+                        var ed = _ooWin && _ooWin.Asc && _ooWin.Asc.editor;
+                        if (!ed) return;
+
+                        var cur = 1, tot = 1;
+                        var curFns = ['asc_getCurrentSlide','asc_getCurrentPage',
+                                      'asc_getCurrentPageIndex','getCurrentPageIndex'];
+                        for (var i = 0; i < curFns.length; i++) {
+                            if (typeof ed[curFns[i]] === 'function') {
+                                try { cur = (ed[curFns[i]]() || 0) + 1; break; } catch(_) {}
+                            }
+                        }
+                        var totFns = ['asc_getSlidesCount','asc_getSlideCount',
+                                      'asc_getCountPages','asc_getPagesCount','getSlideCount'];
+                        for (var j = 0; j < totFns.length; j++) {
+                            if (typeof ed[totFns[j]] === 'function') {
+                                try { tot = ed[totFns[j]]() || 1; break; } catch(_) {}
+                            }
+                        }
+                        // Brute-force: try ALL methods containing "count"/"pages"/"slides"
+                        if (tot <= 1) {
+                            try {
+                                var _obj2 = ed;
+                                for (var _qi = 0; _qi < 5 && _obj2 && tot <= 1; _qi++) {
+                                    Object.getOwnPropertyNames(_obj2).forEach(function(m) {
+                                        if (tot > 1) return;
+                                        if (!/count|pages|slides/i.test(m)) return;
+                                        if (typeof _obj2[m] !== 'function') return;
+                                        try {
+                                            var v = ed[m]();
+                                            if (typeof v === 'number' && v > 1) tot = v;
+                                        } catch(_) {}
+                                    });
+                                    _obj2 = Object.getPrototypeOf(_obj2);
+                                }
+                            } catch(_) {}
+                        }
+                        // Dump available slide/page/panel methods to Xcode console
+                        try {
+                            var _meths = []; var _o = ed;
+                            for (var _pi = 0; _pi < 5 && _o; _pi++) {
+                                Object.getOwnPropertyNames(_o).forEach(function(m) {
+                                    if (/slide|page|count|thumb|note|panel|view/i.test(m)) _meths.push(m);
+                                });
+                                _o = Object.getPrototypeOf(_o);
+                            }
+                            window.webkit.messageHandlers.editorBridge.postMessage(
+                                {action:'debug', msg:'[OO-methods] tot='+tot+' cur='+cur+' | '+_meths.join(' ')}
+                            );
+                        } catch(_) {}
+                        // Always post (even if tot=1, so strip updates)
+                        try { window.webkit.messageHandlers.editorBridge.postMessage(
+                            {action: 'slideChange', current: cur, total: tot}
+                        ); } catch(_) {}
+                        // Capture thumbnail for current slide from OO's render canvas
+                        captureThumb(cur);
+                    } catch(_) {}
+                }
+
+                // Capture OO's main rendering canvas as a thumbnail for the given slide.
+                // Finds the largest canvas in the document (= OO's slide render canvas),
+                // downscales to 192×108 (2× our 96×54 strip card), and bridges as JPEG.
+                // Works from both the outer frame (via frameEditor contentDocument) and from
+                // inside the inner OO frame when ooUIScript runs there (forMainFrameOnly:false).
+                function captureThumb(slideNum) {
+                    try {
+                        // Resolve the document containing OO's canvases
+                        var targetDoc;
+                        var _fr = document.querySelector('iframe[name="frameEditor"]');
+                        if (_fr && _fr.contentDocument && _fr.contentDocument.body) {
+                            targetDoc = _fr.contentDocument;  // running in outer frame
+                        } else if (typeof window.Asc !== 'undefined' || !_fr) {
+                            targetDoc = document;  // running inside the OO inner frame itself
+                        }
+                        if (!targetDoc) return;
+
+                        // Find the largest canvas — OO's main slide render canvas.
+                        // Skips tiny canvases (icons, rulers) by requiring > 100×60.
+                        var biggest = null, bigArea = 0;
+                        targetDoc.querySelectorAll('canvas').forEach(function(c) {
+                            var w = c.width || c.offsetWidth || 0;
+                            var h = c.height || c.offsetHeight || 0;
+                            var area = w * h;
+                            if (area > bigArea && w > 100 && h > 60) { bigArea = area; biggest = c; }
+                        });
+                        if (!biggest) return;
+
+                        // Downscale to 192×108 (2× native strip card 96×54, sharp on Retina)
+                        var out = document.createElement('canvas');
+                        out.width  = 192;
+                        out.height = 108;
+                        var ctx = out.getContext('2d');
+                        if (!ctx) return;
+                        ctx.drawImage(biggest, 0, 0, biggest.width, biggest.height, 0, 0, 192, 108);
+                        var b64 = out.toDataURL('image/jpeg', 0.6).split(',')[1];
+                        if (!b64) return;
+                        window.webkit.messageHandlers.editorBridge.postMessage(
+                            { action: 'slideThumbnail', slideNum: slideNum, data: b64 }
+                        );
+                    } catch(_) {}
+                }
+
+                // Targeted PPT observer — fires with zero debounce whenever an element
+                // matching known panel patterns is added or has its class/id changed.
+                // Complements CSS (which handles elements already in DOM at inject time)
+                // without the cost of a full querySelectorAll scan on every mutation.
+                // Underscore IDs are OO 9.x verified; hyphen patterns are legacy fallback
+                var _pptRE = /id_panel_thumbnails|id_panel_notes|pe-panel-aside|panel-thumbnails|pe-thumbnails|pe-left-panel|pe-panel-left|slide-panel|thumbnails-panel|slides-panel|slidesPanel|thumbnail-panel|thumbnailPanel|pe-notes|notes-panel/i;
+                function _hidePPTEl(el) {
+                    if (!el || el.nodeType !== 1) return;
+                    var elId = el.id || '';
+                    // Direct underscore-ID match (OO 9.x verified thumbnail panel)
+                    if (elId === 'id_panel_thumbnails') {
+                        el.style.setProperty('display',   'none',   'important');
+                        el.style.setProperty('width',     '0',      'important');
+                        el.style.setProperty('min-width', '0',      'important');
+                        el.style.setProperty('overflow',  'hidden', 'important');
+                        // OO SDK recalculates canvas bounds automatically on resize
+                        try { window.dispatchEvent(new Event('resize')); } catch(_) {}
+                        return;
+                    }
+                    if (elId === 'id_panel_notes') {
+                        el.style.setProperty('display',  'none',   'important');
+                        el.style.setProperty('height',   '0',      'important');
+                        el.style.setProperty('overflow', 'hidden', 'important');
+                        return;
+                    }
+                    var sig = ' ' + elId + ' ' + (typeof el.className === 'string' ? el.className : '');
+                    if (!_pptRE.test(sig)) return;
+                    el.style.setProperty('display',   'none',    'important');
+                    el.style.setProperty('width',     '0',       'important');
+                    el.style.setProperty('min-width', '0',       'important');
+                    el.style.setProperty('flex',      '0 0 0',   'important');
+                    el.style.setProperty('overflow',  'hidden',  'important');
+                }
+                var _pptObs = new MutationObserver(function(muts) {
+                    muts.forEach(function(m) {
+                        m.addedNodes.forEach(function(n) {
+                            if (n.nodeType !== 1) return;
+                            _hidePPTEl(n);
+                            try { n.querySelectorAll('*').forEach(_hidePPTEl); } catch(_) {}
+                        });
+                        if (m.type === 'attributes' && m.target) _hidePPTEl(m.target);
+                    });
+                });
+                // Dedicated watcher for id_panel_thumbnails style attribute changes —
+                // re-hides the panel if OO's JS re-shows it after our initial hide.
+                function _watchPanelEl() {
+                    var panelEl = document.getElementById('id_panel_thumbnails');
+                    if (!panelEl || panelEl._watched) return;
+                    panelEl._watched = true;
+                    var watcher = new MutationObserver(function() {
+                        var d = panelEl.style.display;
+                        if (d !== 'none' && d !== '') {
+                            panelEl.style.setProperty('display',   'none',   'important');
+                            panelEl.style.setProperty('width',     '0',      'important');
+                            panelEl.style.setProperty('overflow',  'hidden', 'important');
+                            try { window.dispatchEvent(new Event('resize')); } catch(_) {}
+                        }
+                    });
+                    watcher.observe(panelEl, { attributes: true, attributeFilter: ['style'] });
+                    setTimeout(function() { try { watcher.disconnect(); } catch(_) {} }, 60000);
+                }
+
 
                 inject();
                 document.addEventListener('DOMContentLoaded', inject);
                 window.addEventListener('load', inject);
 
-                // Throttled observer: coalesce rapid DOM bursts (spreadsheet scroll
-                // fires hundreds of childList mutations/second) into one inject() per 250ms.
-                // Auto-disconnects after 30s — by then all OO chrome is permanently hidden
-                // via the <style> tag and repeated querySelectorAll is wasted work.
                 var _obsTimer = null;
                 var obs = new MutationObserver(function() {
                     if (!window._ooInjectEnabled) return;
                     if (_obsTimer) return;
-                    _obsTimer = setTimeout(function() { _obsTimer = null; inject(); }, 250);
+                    _obsTimer = setTimeout(function() {
+                        _obsTimer = null;
+                        inject();
+                    }, 300);
                 });
-                obs.observe(document.documentElement, { childList: true, subtree: true });
-                setTimeout(function() { try { obs.disconnect(); } catch(_) {} }, 30000);
+                obs.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
+                setTimeout(function() { try { obs.disconnect(); } catch(_) {} }, 180000);
+                try {
+                    _pptObs.observe(document.body || document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'id', 'style'] });
+                    setTimeout(function() { try { _pptObs.disconnect(); } catch(_) {} }, 30000);
+                } catch(_) {}
 
+                // Interval: short burst after load (5s), then stop — observer + CSS cover the rest
                 var n = 0;
-                var t = setInterval(function() { inject(); if (++n >= 20) clearInterval(t); }, 500);
+                var t = setInterval(function() {
+                    inject();
+                    if (++n >= 10) clearInterval(t);
+                }, 500);
+                // Late-fire slide count (PPT may load slides slowly)
+                setTimeout(reportSlides, 3000);
+                setTimeout(reportSlides, 6000);
+                setTimeout(reportSlides, 10000);
+                setTimeout(reportSlides, 20000);
+                setTimeout(reportSlides, 30000);
+                // PPT geometry fallback — CSS + observer cover most cases; these two
+                // catch panels that appeared before the observer attached or escaped CSS.
+                setTimeout(pptHide, 300);
+                setTimeout(pptHide, 2000);
+                setTimeout(_watchPanelEl, 1000);
+                setTimeout(_watchPanelEl, 3000);
+                setTimeout(_watchPanelEl, 8000);
             })();
             """#, injectionTime: .atDocumentStart, forMainFrameOnly: false)
         config.userContentController.addUserScript(ooUIScript)
@@ -308,21 +610,8 @@ final class OfficeEditorViewController: UIViewController {
 
     // MARK: - File I/O
 
-    // callAsyncJavaScript serialises its script as a UTF-16 JS string before passing
-    // it to WebKit. The engine rejects strings larger than ~128 MB (JSC limit), and
-    // iOS crashes the process around 64 MB in practice. Base64 expands ~33%, so a
-    // 48 MB source file produces a ~64 MB string — right at the threshold.
-    // The proper long-term fix is to upload the file via the office:// scheme handler
-    // (serve it as office://host/tmp/<uuid>/<name> and pass only the URL to JS).
-    // Until then, guard here so users get a readable error instead of a silent crash.
-    private static let base64SafeLimit = 45 * 1_024 * 1_024  // 45 MB raw → ~60 MB base64
-
     private func sendFileToEditor(url: URL) async {
-        // Read the document on a background thread — this function is called from
-        // @MainActor context and Data(contentsOf:) would otherwise block the main thread.
         let accessing = url.startAccessingSecurityScopedResource()
-        // defer fires when this async function returns (after all awaits), so
-        // the security scope covers both the background read and base64 encoding.
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }
 
         let fileName = url.lastPathComponent
@@ -337,37 +626,20 @@ final class OfficeEditorViewController: UIViewController {
             return
         }
 
-        // Guard before base64 encoding: very large files exceed the JS string size limit
-        // and cause a silent crash or an opaque WKError.
-        if data.count > Self.base64SafeLimit {
-            let mb = data.count / (1_024 * 1_024)
-            onError?(
-                "\"\(fileName)\" is \(mb) MB — files larger than 45 MB cannot be " +
-                "opened in the editor yet. Support for large files is coming in a future update."
-            )
-            return
-        }
+        // Store doc bytes in the scheme handler; JS fetches via office:// URL.
+        // No base64 encoding — eliminates the 33% memory overhead and the 45 MB cap.
+        let docURL = schemeHandler.storeDocument(data: data, fileName: fileName)
 
-        let base64 = await Task.detached(priority: .userInitiated) {
-            data.base64EncodedString()
-        }.value
-
-        // Build the JS call manually; the payload is passed as a JS object literal
-        // to avoid double-encoding issues with callAsyncJavaScript arguments dict.
-        let escapedName = jsonEscape(fileName)
-        let escapedType = jsonEscape(fileType)
-        // base64 contains only [A-Za-z0-9+/=] — safe to interpolate
-        let js = "receiveFileFromIOS({ fileName: \(escapedName), fileType: \(escapedType), base64data: \"\(base64)\" })"
+        let escapedName   = jsonEscape(fileName)
+        let escapedType   = jsonEscape(fileType)
+        let escapedDocURL = jsonEscape(docURL)
+        let js = "receiveFileFromIOS({ fileName: \(escapedName), fileType: \(escapedType), fileURL: \(escapedDocURL) })"
 
         do {
             try await webView.callAsyncJavaScript(
-                js,
-                arguments: [:],
-                in: nil,
-                contentWorld: .page
+                js, arguments: [:], in: nil, contentWorld: .page
             )
         } catch {
-            // Extract JS exception detail from WKError userInfo when available
             let nsError = error as NSError
             let jsMessage = nsError.userInfo["WKJavaScriptExceptionMessage"] as? String
                 ?? nsError.userInfo["NSLocalizedDescription"] as? String
@@ -525,21 +797,10 @@ extension OfficeEditorViewController: OfficeBridgeDelegate {
             onDirtyChange?(dirty)
 
         case .domDump(let entries):
-            let relevant = entries.filter { line in
-                let lower = line.lowercased()
-                return lower.contains("toolbar") || lower.contains("header") ||
-                       lower.contains("tabbar")  || lower.contains("statusbar") ||
-                       lower.contains("formula") || lower.contains("ribbon") ||
-                       lower.contains("tabs-")   || lower.contains("cell-edit") ||
-                       // Document page area selectors (for mobile view CSS)
-                       lower.contains("scroll")  || lower.contains("page") ||
-                       lower.contains("canvas")  || lower.contains("ms-con") ||
-                       lower.contains("layout")  || lower.contains("holder") ||
-                       lower.contains("editor-main") || lower.contains("slide")
-            }
-            print("=== ONLYOFFICE DOM DUMP (toolbar + page area) ===")
-            relevant.forEach { print("  \($0)") }
-            print("=== END DOM DUMP (\(entries.count) total elements) ===")
+            // Print ALL edge elements unfiltered — JS already pre-filters to right/bottom/corner
+            NSLog("=== OO EDGE DUMP (%d elements) ===", entries.count)
+            entries.forEach { NSLog("  %@", $0) }
+            NSLog("=== END EDGE DUMP ===")
 
         case .apiDump(let methods):
             print("=== ONLYOFFICE Asc.editor align/sort/merge methods ===")
@@ -551,6 +812,9 @@ extension OfficeEditorViewController: OfficeBridgeDelegate {
 
         case .slideChange(let current, let total):
             onSlideChange?(current, total)
+
+        case .slideThumbnail(let slideNum, let data):
+            onSlideThumbnail?(slideNum, data)
 
         case .saved, .unknown:
             break

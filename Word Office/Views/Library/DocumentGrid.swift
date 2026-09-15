@@ -13,16 +13,21 @@ struct DocumentGrid: View {
     var onConvertToZip: (LibraryEntry) -> Void
     var onMarkDone: (LibraryEntry) -> Void
     var onDeleteFile: (LibraryEntry) -> Void
-    var leadingPadding: CGFloat = DSSpacing.lg
+    var onChangeStatus: (LibraryEntry, DocumentStatus) -> Void = { _, _ in }
+    var leadingPadding: CGFloat = DSSpacing.xxl
 
-    // `xs = 8` outer padding + `xs = 8` column spacing widen each tile
-    // vs. the previous `sm = 12` — user asked for wider grid cards.
-    // Compact but not edge-to-edge so shadows don't collide with the
-    // list's own insetGrouped gutter.
-    private let columns = [GridItem(.flexible(), spacing: DSSpacing.xs), GridItem(.flexible(), spacing: DSSpacing.xs)]
+    private let columns = [GridItem(.flexible(), spacing: DSSpacing.sm), GridItem(.flexible(), spacing: DSSpacing.sm)]
+
+    // Long-press target — set by a tile's onLongPress, cleared when the
+    // sheet dismisses. Kept at DocumentGrid level so the fullScreenCover
+    // attaches to the LazyVGrid container rather than to individual tiles
+    // (a context menu on tiles inside a LazyVGrid inside a List row
+    // causes iOS to highlight the whole row — kept as comment so this
+    // choice is never re-debated).
+    @State private var statusPickerEntry: LibraryEntry?
 
     var body: some View {
-        LazyVGrid(columns: columns, spacing: DSSpacing.sm) {
+        LazyVGrid(columns: columns, spacing: DSSpacing.md) {
             ForEach(entries) { entry in
                 DocumentTile(
                     entry: entry,
@@ -32,15 +37,181 @@ struct DocumentGrid: View {
                     onRename: { newStem in await onRename(entry, newStem) },
                     onConvertToZip: { onConvertToZip(entry) },
                     onMarkDone: { onMarkDone(entry) },
-                    onDeleteFile: { onDeleteFile(entry) }
+                    onDeleteFile: { onDeleteFile(entry) },
+                    onLongPress: { statusPickerEntry = entry }
                 )
             }
         }
         .padding(.leading, leadingPadding)
         .padding(.trailing, DSSpacing.xs)
         .padding(.bottom, DSSpacing.sm)
+        .fullScreenCover(isPresented: Binding(
+            get: { statusPickerEntry != nil },
+            set: { if !$0 { statusPickerEntry = nil } }
+        )) {
+            if let entry = statusPickerEntry {
+                StatusPickerSheet(
+                    entry: entry,
+                    onSelect: { status in onChangeStatus(entry, status) },
+                    onDismiss: { statusPickerEntry = nil }
+                )
+                .presentationBackground(Color.clear)
+            }
+        }
     }
 }
+
+// MARK: - Status picker sheet
+
+/// Bottom sheet for changing a document's status from the grid tile long-press.
+/// Mirrors the FileActionsMenu pattern: fullScreenCover + scrim + slide-up card
+/// + drag pill. Icon rows match the list view's context menu visual language.
+private struct StatusPickerSheet: View {
+    let entry: LibraryEntry
+    var onSelect: (DocumentStatus) -> Void
+    var onDismiss: () -> Void
+
+    @State private var cardIsPresented = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(cardIsPresented ? 0.28 : 0)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture { dismiss() }
+
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                if cardIsPresented {
+                    sheetCard.transition(.move(edge: .bottom))
+                }
+            }
+            .ignoresSafeArea(.container, edges: .bottom)
+        }
+        .onAppear {
+            guard !cardIsPresented else { return }
+            withAnimation(reduceMotion ? nil : .smooth(duration: 0.32)) {
+                cardIsPresented = true
+            }
+        }
+    }
+
+    private func dismiss() {
+        withAnimation(reduceMotion ? nil : .smooth(duration: 0.24)) {
+            cardIsPresented = false
+        }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(240))
+            // Dismiss cover instantly — no system transition animation —
+            // same reason as FileActionsMenu: avoids the dark background
+            // flash from iOS's default fullScreenCover transition.
+            withTransaction(Transaction(animation: nil)) { onDismiss() }
+        }
+    }
+
+    private var sheetCard: some View {
+        VStack(spacing: 0) {
+            // Drag pill — HIG standard 36×5pt
+            Capsule()
+                .fill(Color.dsTextTertiary.opacity(0.5))
+                .frame(width: 36, height: 5)
+                .padding(.top, DSSpacing.xs)
+                .padding(.bottom, DSSpacing.sm)
+                .accessibilityHidden(true)
+
+            // Document identity header
+            HStack(spacing: DSSpacing.sm) {
+                DocumentKindIcon(kind: entry.document.kind)
+                    .frame(width: 28, height: 28)
+                Text(entry.document.name)
+                    .font(DSFont.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.dsTextPrimary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, DSSpacing.md)
+            .padding(.bottom, DSSpacing.sm)
+
+            Rectangle()
+                .fill(Color.dsBorderSubtle.opacity(0.7))
+                .frame(height: 0.5)
+                .padding(.horizontal, DSSpacing.md)
+
+            // Section label
+            Text("Change status")
+                .font(DSFont.caption)
+                .foregroundStyle(Color.dsTextSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, DSSpacing.md)
+                .padding(.top, DSSpacing.xs)
+
+            // Status rows
+            VStack(spacing: 0) {
+                ForEach(DocumentStatus.allCases) { status in
+                    statusRow(status)
+                    if status != DocumentStatus.allCases.last {
+                        Rectangle()
+                            .fill(Color.dsBorderSubtle.opacity(0.7))
+                            .frame(height: 0.5)
+                            .padding(.leading, 30 + DSSpacing.sm)
+                    }
+                }
+            }
+            .padding(.horizontal, DSSpacing.md)
+            .padding(.bottom, DSSpacing.sm)
+        }
+        .background(
+            UnevenRoundedRectangle(
+                topLeadingRadius: DSRadius.large,
+                bottomLeadingRadius: 0,
+                bottomTrailingRadius: 0,
+                topTrailingRadius: DSRadius.large,
+                style: .continuous
+            )
+            .fill(Color.dsBackgroundPrimary)
+            .ignoresSafeArea(edges: .bottom)
+        )
+        .shadow(color: .black.opacity(0.14), radius: 24, y: -4)
+    }
+
+    private func statusRow(_ status: DocumentStatus) -> some View {
+        let isCurrent = status == entry.metadata.status
+        return Button {
+            onSelect(status)
+            dismiss()
+        } label: {
+            HStack(spacing: DSSpacing.sm) {
+                Image(systemName: status.systemImage)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(isCurrent ? Color.dsTextTertiary : status.tintColor)
+                    .frame(width: 30, height: 30)
+                    .background(
+                        isCurrent ? Color.dsSurfaceSecondary : status.tintColor.opacity(0.12),
+                        in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    )
+
+                Text(status.displayName)
+                    .font(DSFont.body)
+                    .foregroundStyle(isCurrent ? Color.dsTextTertiary : Color.dsTextPrimary)
+
+                Spacer(minLength: DSSpacing.md)
+
+                if isCurrent {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color.dsTextTertiary)
+                }
+            }
+            .padding(.vertical, DSSpacing.sm)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(StatusRowButtonStyle())
+        .disabled(isCurrent)
+    }
+}
+
+// MARK: - DocumentTile
 
 private struct DocumentTile: View {
     let entry: LibraryEntry
@@ -51,12 +222,9 @@ private struct DocumentTile: View {
     var onConvertToZip: () -> Void
     var onMarkDone: () -> Void
     var onDeleteFile: () -> Void
+    /// Fires on long-press; parent (DocumentGrid) owns the status picker UI.
+    var onLongPress: () -> Void = {}
 
-    /// Fixed tile height so a rename that changes the filename from
-    /// 2 lines to 1 line (or the reverse) doesn't reflow the whole grid.
-    /// Tight budget (icon 44 + xs 8 + 2-line subheadline ~40 + xs 8 +
-    /// pill ~24 + sm 12 × 2 = 148pt) plus ~4pt breathing. Trimmed from
-    /// 176 per user request.
     private static let tileHeight: CGFloat = 152
 
     var body: some View {
@@ -72,25 +240,23 @@ private struct DocumentTile: View {
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
 
-                // Push everything to the top so a short (single-line)
-                // filename leaves the extra room BELOW the pill rather
-                // than centring content vertically — reads more like a
-                // stable card layout with the pill anchored just under
-                // the name.
                 Spacer(minLength: 0)
             }
             .padding(DSSpacing.sm)
             .frame(maxWidth: .infinity, minHeight: Self.tileHeight, alignment: .topLeading)
             .background(Color.dsBackgroundElevated, in: RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous).strokeBorder(Color.dsBorderSubtle))
+            .overlay(RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous).strokeBorder(Color.dsBorderSubtle.opacity(0.6), lineWidth: 0.5))
             .contentShape(RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous))
+            .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
+            .shadow(color: .black.opacity(0.06), radius: 14, x: 0, y: 6)
         }
         .buttonStyle(.plain)
+        // `.simultaneousGesture` runs alongside the List scroll recognizer
+        // and the tile's own tap — no conflict.
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.5).onEnded { _ in onLongPress() }
+        )
         .overlay(alignment: .bottomTrailing) {
-            // Kebab stays bottom-right (shares the row with the status
-            // pill on the leading edge — see the history above); the
-            // favourite star (added back below) takes the now-free
-            // top-right corner instead of competing for this spot.
             FileActionsMenu(
                 shareURL: entry.document.url,
                 onSaveExport: onSaveExport,
@@ -108,10 +274,6 @@ private struct DocumentTile: View {
         }
     }
 
-    /// Same visual language as `DocumentCard.favouriteButton` (list rows)
-    /// — outline star untinted, filled gold star in a soft tinted circle
-    /// once favourited, so the state reads the same across both view
-    /// modes ("áp dụng cho cả view ngang và dọc").
     private var favouriteButton: some View {
         Button(action: onToggleFavourite) {
             Image(systemName: entry.metadata.isFavourite ? "star.fill" : "star")
@@ -130,3 +292,12 @@ private struct DocumentTile: View {
     }
 }
 
+// MARK: - Button style
+
+private struct StatusRowButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(configuration.isPressed ? Color.dsSurfacePressed : Color.clear)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}

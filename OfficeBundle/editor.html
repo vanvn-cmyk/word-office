@@ -6,7 +6,7 @@
   <title>Office Editor</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body, #placeholder { width: 100%; height: 100%; overflow: hidden; background: #f0f0f0; }
+    html, body, #placeholder { width: 100%; height: 100%; overflow: hidden; background: #fff; }
     #loading {
       position: fixed; inset: 0; display: flex; flex-direction: column;
       align-items: center; justify-content: center; background: #f0f0f0; z-index: 9999;
@@ -142,12 +142,37 @@
         var _ed = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
         if (!_ed) return;
         var _cur = 1, _tot = 1;
-        // current slide (0-based internally → add 1)
-        if      (typeof _ed.asc_getCurrentSlide === 'function') _cur = (_ed.asc_getCurrentSlide() || 0) + 1;
-        else if (typeof _ed.asc_getCurrentPage  === 'function') _cur = (_ed.asc_getCurrentPage()  || 0) + 1;
+        // current slide (0-based internally → +1). Try every known OO 9.x API name.
+        if      (typeof _ed.asc_getCurrentSlide         === 'function') _cur = (_ed.asc_getCurrentSlide()         || 0) + 1;
+        else if (typeof _ed.asc_getCurrentPage          === 'function') _cur = (_ed.asc_getCurrentPage()          || 0) + 1;
+        else if (typeof _ed.asc_getCurrentPageIndex     === 'function') _cur = (_ed.asc_getCurrentPageIndex()     || 0) + 1;
+        else if (typeof _ed.getCurrentPageIndex         === 'function') _cur = (_ed.getCurrentPageIndex()         || 0) + 1;
         // total slides
-        if      (typeof _ed.asc_getSlidesCount  === 'function') _tot = _ed.asc_getSlidesCount()  || 1;
-        else if (typeof _ed.asc_getCountPages   === 'function') _tot = _ed.asc_getCountPages()   || 1;
+        if      (typeof _ed.asc_getSlidesCount          === 'function') _tot = _ed.asc_getSlidesCount()          || 1;
+        else if (typeof _ed.asc_getSlideCount           === 'function') _tot = _ed.asc_getSlideCount()           || 1;
+        else if (typeof _ed.asc_getCountPages           === 'function') _tot = _ed.asc_getCountPages()           || 1;
+        else if (typeof _ed.asc_getPagesCount           === 'function') _tot = _ed.asc_getPagesCount()           || 1;
+        else if (typeof _ed.getSlideCount               === 'function') _tot = _ed.getSlideCount()               || 1;
+        else if (typeof _ed.getPresentationInfo         === 'function') { try { _tot = (_ed.getPresentationInfo() || {}).slides || 1; } catch(_) {} }
+        // DOM fallback: count slide thumbnail elements rendered by OO in the inner frame
+        if (_tot <= 1) {
+          try {
+            var _fr3 = document.querySelector('iframe[name="frameEditor"]');
+            var _doc3 = _fr3 && _fr3.contentDocument;
+            if (_doc3) {
+              var _thumbSelectors = [
+                '[id*="-slide-"]:not(body):not(html)',
+                '[class*="slide-item"]','[class*="pe-slide"]',
+                '[class*="thumbnail-item"]','[data-slide-index]',
+                'li[class*="slide"]','div[class*="slide"]'
+              ];
+              for (var _tsi = 0; _tsi < _thumbSelectors.length; _tsi++) {
+                var _thumbs = _doc3.querySelectorAll(_thumbSelectors[_tsi]);
+                if (_thumbs.length > 1) { _tot = _thumbs.length; break; }
+              }
+            }
+          } catch(_) {}
+        }
         window.webkit.messageHandlers.editorBridge.postMessage({
           action: 'slideChange', current: _cur, total: _tot
         });
@@ -195,6 +220,8 @@
           user: { ...USER },
           customization: {
             uiTheme: window.matchMedia('(prefers-color-scheme: dark)').matches ? 'theme-dark' : 'theme-light',
+            zoom: 100,
+            ...(documentType === 'word' ? { hideRulers: true } : {}),
             features: { spellcheck: { change: false } },
             toolbar: { turnOffHeaderFooter: false },
             compactHeader: true,
@@ -207,6 +234,18 @@
             hideRightMenu: true,
             featuresTips: false,
             macrosMode: 'disable',
+            // PPT: hide left slide-thumbnail panel + bottom notes panel via OO's
+            // documented config options (verified in api.js bundled in OfficeBundle).
+            //   layout.leftMenu.mode: false  → start with left panel hidden (slide thumbnails)
+            //   hideNotes: true              → hide notes panel on first load (PPT-only option)
+            // These are declarative init-time options — OO applies them before any rendering,
+            // so they cannot conflict with zoom/canvas and cannot be timed incorrectly.
+            ...(documentType === 'slide' ? {
+              layout: {
+                leftMenu: false,   // completely disables left panel (thumbnails) in PPT
+              },
+              hideNotes: true,     // hide notes bar on first load (PPT-only option)
+            } : {}),
           },
         },
         events: {
@@ -612,26 +651,63 @@
       #id-de-v-scrollbar, #id-de-h-scrollbar,
       [id*="de-scrollbar"], [class*="de-scrollbar"],
       [id*="de-v-scroll"], [id*="de-h-scroll"],
-      [id*="v-scrollbar"], [id*="h-scrollbar"] { display: none !important; }
+      [id*="v-scrollbar"], [id*="h-scrollbar"],
+      [id*="scrollbar"], [class*="scrollbar"] { display: none !important; }
       #id-de-statusbar, .de-statusbar,
       [id*="de-statusbar"], [class*="de-statusbar"],
-      [id*="de-status"], [class*="de-status"] { display: none !important; }
+      [id*="de-status"], [class*="de-status"],
+      [id*="statusbar"], [class*="statusbar"] { display: none !important; }
       ::-webkit-scrollbar { width: 0 !important; height: 0 !important; display: none !important; }
       `,
 
-      /* ── Presentation Editor: hide desktop statusbar, slide panel, scrollbars ── */
+      /* ── Presentation Editor: hide desktop statusbar, slide panel, notes, scrollbars ── */
       `
+      /* Status bar */
       #id-pe-statusbar, .pe-statusbar,
       [id*="pe-statusbar"], [class*="pe-statusbar"],
       [id*="pe-status"], [class*="pe-status"] { display: none !important; }
-      #id-pe-panel-aside, .pe-panel-aside,
-      [id*="pe-panel-aside"], [class*="pe-panel-aside"] {
-        display: none !important; width: 0 !important; min-width: 0 !important; overflow: hidden !important;
+      /* Slide thumbnail panel — OO 9.x VERIFIED ID uses underscore */
+      #id_panel_thumbnails {
+        display: none !important;
+        width: 0 !important;
+        min-width: 0 !important;
+        max-width: 0 !important;
+        overflow: hidden !important;
       }
+      /* Notes panel — OO 9.x */
+      #id_panel_notes { display: none !important; height: 0 !important; overflow: hidden !important; }
+      /* Legacy/fallback selectors for other OO versions */
+      #id-pe-panel-aside, .pe-panel-aside,
+      [id*="pe-panel-aside"], [class*="pe-panel-aside"],
+      #id-panel-thumbnails, [id*="panel-thumbnails"], [class*="panel-thumbnails"],
+      #id-pe-thumbnails, [id*="pe-thumbnails"], [class*="pe-thumbnails"],
+      #id-pe-left-panel, [id*="pe-left-panel"], [class*="pe-left-panel"],
+      #id-pe-panel-left, [id*="pe-panel-left"], [class*="pe-panel-left"],
+      .slide-panel-left, [class*="slide-panel"],
+      [id*="thumbnails-panel"], [class*="thumbnails-panel"] {
+        display: none !important;
+        width: 0 !important;
+        min-width: 0 !important;
+        max-width: 0 !important;
+        overflow: hidden !important;
+        flex: 0 0 0 !important;
+      }
+      /* Notes panel (bottom) — legacy */
+      #id-pe-notes, [id*="pe-notes"], [class*="pe-notes"],
+      #id-notes-panel, .notes-panel, [id*="notes-panel"], [class*="notes-panel"],
+      #id-pe-notes-panel, [id*="pe-notes-panel"] { display: none !important; }
+      /* Rulers */
       [id*="pe-ruler"], [class*="pe-ruler"] { display: none !important; }
+      /* Scrollbars */
       #id-pe-v-scrollbar, #id-pe-h-scrollbar,
       [id*="pe-scrollbar"], [class*="pe-scrollbar"],
       [id*="pe-v-scroll"], [id*="pe-h-scroll"] { display: none !important; }
+      /* Force slide canvas to use full width after panels are hidden */
+      #id-pe-editor, [id*="pe-editor"], .pe-editor-main,
+      #id-pe-editor-box, [id*="pe-editor-box"] {
+        left: 0 !important; right: 0 !important;
+        width: 100% !important; min-width: 0 !important;
+      }
       `,
 
     ].join('');
@@ -794,7 +870,11 @@
                         'plugin-panel','sidebar-btn','panel-left','panel-info','about-panel',
                         'left-panel','leftpanel','lft-panel','side-bar',
                         'rightmenu','right-menu','righttoolbar','asc-rightmenu',
-                        'right-panel','rightpanel','rgt-panel','right-sidebar'];
+                        'right-panel','rightpanel','rgt-panel','right-sidebar',
+                        // PPT-specific: slide thumbnails + notes
+                        'pe-panel-aside','panel-aside','panel-thumbnails','pe-thumbnails',
+                        'thumbnails-panel','pe-left-panel','pe-panel-left','slide-panel',
+                        'pe-notes','notes-panel','pe-notes-panel'];
         iDoc.querySelectorAll('*').forEach(function(el) {
           var id = (el.id || '').toLowerCase();
           var cls = (typeof el.className === 'string' ? el.className : '').toLowerCase();
@@ -808,24 +888,54 @@
           }
         });
         // Geometry: any narrow left-positioned full-height strip = left sidebar.
-        // Only scan top-level children — scanning all descendants hides internal OO elements.
         var winW = iDoc.documentElement.clientWidth || (iDoc.body && iDoc.body.clientWidth) || 375;
-        var _candidates = Array.from(
-          iDoc.querySelectorAll('body > *, #app-container > *, .app-container > *')
-        );
+        var winH = iDoc.documentElement.clientHeight || (iDoc.body && iDoc.body.clientHeight) || 700;
+        // For PPT scan ALL elements (panel may be nested); for Word/Excel only top-level.
+        var _candidates = (_currentDocType === 'slide')
+          ? Array.from(iDoc.querySelectorAll('*'))
+          : Array.from(iDoc.querySelectorAll('body > *, #app-container > *, .app-container > *'));
+        var maxLeftW = (_currentDocType === 'slide') ? Math.floor(winW * 0.45) : 80;
         var _geoHidCount = 0;
         _candidates.forEach(function(el) {
-          var r = el.getBoundingClientRect();
-          if (r.width > 1 && r.width < 80 && r.left < 10 && r.height > 150) {
-            el.style.setProperty('display', 'none', 'important');
-            _geoHidCount++;
-            console.log('[OO-geo-hide-L]', el.tagName, '#' + el.id, el.className, r.width + 'x' + r.height);
-          }
-          if (r.width > 1 && r.width < 80 && r.right > winW - 10 && r.height > 150) {
-            el.style.setProperty('display', 'none', 'important');
-            _geoHidCount++;
-            console.log('[OO-geo-hide-R]', el.tagName, '#' + el.id, el.className, r.width + 'x' + r.height);
-          }
+          try {
+            var tag = el.tagName.toLowerCase();
+            if (tag === 'canvas' || tag === 'script' || tag === 'style' || tag === 'html' || tag === 'body') return;
+            var r = el.getBoundingClientRect();
+            // PPT: slide thumbnail panel — may be offset if OO has a left icon strip.
+            // Only skip elements that contain a LARGE canvas (>200×100px) — the main slide
+            // editing canvas. Thumbnail preview canvases inside the slide panel are small
+            // (~96×54px) and must not protect their parent from being hidden.
+            if (_currentDocType === 'slide' && r.left <= 150 && r.width >= 40 && r.width < winW * 0.45 && r.height > winH * 0.25) {
+              var _hasLargeCanvas = false;
+              if (el.querySelectorAll) {
+                el.querySelectorAll('canvas').forEach(function(c) {
+                  var cw = c.width || c.offsetWidth || 0;
+                  var ch = c.height || c.offsetHeight || 0;
+                  if (cw > 200 && ch > 100) _hasLargeCanvas = true;
+                });
+              }
+              if (!_hasLargeCanvas) {
+                el.style.setProperty('display','none','important');
+                el.style.setProperty('width','0','important');
+                el.style.setProperty('overflow','hidden','important');
+                _geoHidCount++;
+                console.log('[OO-geo-ppt-L]', tag, '#'+el.id, el.className.toString().slice(0,40), r.width+'x'+r.height);
+                return;
+              }
+            }
+            // Left-anchored panel: hide if narrower than maxLeftW, starts at left edge, tall
+            if (r.width > 1 && r.width < maxLeftW && r.left < 10 && r.height > 150) {
+              el.style.setProperty('display', 'none', 'important');
+              _geoHidCount++;
+              console.log('[OO-geo-hide-L]', tag, '#' + el.id, el.className.toString().slice(0,40), r.width + 'x' + r.height);
+            }
+            // Right-anchored panel: still use 80 (right panels are always narrow icon strips)
+            if (r.width > 1 && r.width < 80 && r.right > winW - 10 && r.height > 150) {
+              el.style.setProperty('display', 'none', 'important');
+              _geoHidCount++;
+              console.log('[OO-geo-hide-R]', tag, '#' + el.id, el.className.toString().slice(0,40), r.width + 'x' + r.height);
+            }
+          } catch(_) {}
         });
         // Always dispatch resize so OO recalculates canvas width after sidebar is hidden.
         // Even when _geoHidCount=0 (CSS already collapsed sidebar), OO's JS-calculated
@@ -866,6 +976,7 @@
       [500, 1500].forEach(function(delay) {
         setTimeout(function() {
           var winW2 = iDoc.documentElement.clientWidth || (iDoc.body && iDoc.body.clientWidth) || 375;
+          var winH2 = iDoc.documentElement.clientHeight || (iDoc.body && iDoc.body.clientHeight) || 700;
           var _early = Array.from(iDoc.querySelectorAll('body > *, #app-container > *, .app-container > *'));
           var _earlyHid = 0;
           _early.forEach(function(el) {
@@ -886,6 +997,39 @@
           // Always dispatch resize — CSS may have already collapsed the sidebar to 0
           // but OO's canvas width was calculated before CSS applied; force reflow now.
           try { iDoc.defaultView.dispatchEvent(new Event('resize')); } catch(_) {}
+
+          // ── PPT deep geometry scan (runs at both 500ms and 1500ms) ───────────────
+          // Scans ALL elements (not just body > *) for left-anchored thumbnail panel.
+          // The 4000ms pass is the authoritative deep scan; this is an early copy that
+          // catches panels which finish rendering before 4s.
+          if (_currentDocType === 'slide') {
+            try {
+              Array.from(iDoc.querySelectorAll('*')).forEach(function(el) {
+                try {
+                  var tag = el.tagName.toLowerCase();
+                  if (tag === 'canvas' || tag === 'script' || tag === 'style' || tag === 'html' || tag === 'body') return;
+                  var r = el.getBoundingClientRect();
+                  if (r.width <= 0 || r.height <= 0) return;
+                  if (r.left <= 150 && r.width >= 40 && r.width < winW2 * 0.45 && r.height > winH2 * 0.25) {
+                    var _hasLarge = false;
+                    if (el.querySelectorAll) {
+                      el.querySelectorAll('canvas').forEach(function(c) {
+                        var cw = c.width || c.offsetWidth || 0;
+                        var ch = c.height || c.offsetHeight || 0;
+                        if (cw > 200 && ch > 100) _hasLarge = true;
+                      });
+                    }
+                    if (!_hasLarge) {
+                      el.style.setProperty('display',   'none',    'important');
+                      el.style.setProperty('width',     '0',       'important');
+                      el.style.setProperty('overflow',  'hidden',  'important');
+                      console.log('[OO-geo-ppt-early]', delay+'ms', tag, '#'+el.id, el.className.toString().slice(0,40), r.width+'x'+r.height);
+                    }
+                  }
+                } catch(_) {}
+              });
+            } catch(_) {}
+          }
 
           // ── Spreadsheet bottom bar cleanup (1500ms pass only) ──────────────────
           // Hide status text ("All changes saved"), filter indicator ("Filter mode"),
@@ -1111,6 +1255,24 @@
           if (panel._ooOkBtn) panel._ooOkBtn.click();
         };
 
+        // Shows a brief toast in the OO inner frame (user-visible feedback for failed inserts).
+        // Promoted to window so insertImageByURL (outer scope) can also call it.
+        window._showInsertToast = function(msg) {
+          try {
+            var _tDoc = _innerWin && _innerWin.document;
+            if (!_tDoc || !_tDoc.body) return;
+            var _t = _tDoc.createElement('div');
+            _t.textContent = msg;
+            _t.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);' +
+              'background:rgba(0,0,0,0.78);color:#fff;padding:11px 20px;border-radius:22px;' +
+              'font:14px -apple-system,system-ui;z-index:99999;pointer-events:none;' +
+              'white-space:nowrap;max-width:85vw;text-align:center;';
+            _tDoc.body.appendChild(_t);
+            setTimeout(function() { try { _tDoc.body.removeChild(_t); } catch(_e) {} }, 2800);
+          } catch(_te) {}
+        };
+        var _showInsertToast = window._showInsertToast;
+
         // Called by Swift's onDismiss after the native link sheet closes.
         // Disables filter interception for 1.5s so OO's own confirmation dialog / floating
         // combo-dataview that appears post-insert is NOT intercepted as a filter panel.
@@ -1124,15 +1286,19 @@
           // O(n²) querySelectorAll calls from saturating the JS thread during OO's
           // heavy post-insert DOM work, which was the root cause of the screen freeze.
           try { _innerWin._ooInjectEnabled = false; } catch(_) {}
+          // 200ms: gives OO time to restore cell selection after the native sheet
+          // dismisses and WKWebView regains focus (80ms was too tight in practice).
           setTimeout(function() {
             try { _innerWin.focus(); } catch(_) {}
             var _ed = _innerWin.Asc && _innerWin.Asc.editor;
             var _A  = _innerWin.Asc || {};
             var HyperCls = _A.asc_CHyperlink
               || (_innerWin.AscCommon && _innerWin.AscCommon.asc_CHyperlink)
+              || (_innerWin.AscCommonExcel && _innerWin.AscCommonExcel.asc_CHyperlink)
               || _innerWin.asc_CHyperlink;
-            if (!_ed || !HyperCls) {
-              console.warn('[iOS] _insertHyperlink: OO API not available');
+            if (!_ed) {
+              console.warn('[iOS] _insertHyperlink: editor not available');
+              _showInsertToast('Editor not ready — please try again');
               setTimeout(function() {
                 window._filterInterceptEnabled = true;
                 try { _innerWin._ooInjectEnabled = true; } catch(_) {}
@@ -1140,22 +1306,32 @@
               return;
             }
             try {
-              var hl = new HyperCls();
-              typeof hl.asc_setUrl          === 'function' ? hl.asc_setUrl(url)          : (hl.Url  = url);
-              // asc_setTextToInsert is the correct OO API; asc_setText is a fallback alias
-              typeof hl.asc_setTextToInsert === 'function' ? hl.asc_setTextToInsert(text)
-                : typeof hl.asc_setText     === 'function' ? hl.asc_setText(text)
-                : (hl.Text = text);
-              if (typeof _ed.asc_insertHyperlink === 'function') { _ed.asc_insertHyperlink(hl); }
-              else if (typeof _ed.asc_addHyperlink === 'function') { _ed.asc_addHyperlink(hl); }
-              else { console.warn('[iOS] _insertHyperlink: no insert method found'); }
-            } catch(e) { console.warn('[iOS] _insertHyperlink:', e); }
+              var _insertFn = typeof _ed.asc_insertHyperlink === 'function' ? _ed.asc_insertHyperlink.bind(_ed)
+                            : typeof _ed.asc_addHyperlink    === 'function' ? _ed.asc_addHyperlink.bind(_ed)
+                            : null;
+              if (!_insertFn) {
+                console.warn('[iOS] _insertHyperlink: no insert method found');
+                _showInsertToast('Link insert not available in this editor version');
+              } else if (HyperCls) {
+                // Class-based path — proper OO asc_CHyperlink instance
+                var hl = new HyperCls();
+                typeof hl.asc_setUrl          === 'function' ? hl.asc_setUrl(url)          : (hl.Url  = url);
+                typeof hl.asc_setTextToInsert === 'function' ? hl.asc_setTextToInsert(text)
+                  : typeof hl.asc_setText     === 'function' ? hl.asc_setText(text)
+                  : (hl.Text = text);
+                _insertFn(hl);
+              } else {
+                // Plain-object fallback — some OO builds accept {url, text, tooltip} directly
+                console.warn('[iOS] _insertHyperlink: asc_CHyperlink class not found, using plain object');
+                _insertFn({ url: url, text: text, tooltip: text, Url: url, Text: text });
+              }
+            } catch(e) { console.warn('[iOS] _insertHyperlink:', e); _showInsertToast('Link insert failed — please try again'); }
             // 3 s window: OO may keep processing after insert (combo-dataview, right panel)
             setTimeout(function() {
               window._filterInterceptEnabled = true;
               try { _innerWin._ooInjectEnabled = true; } catch(_) {}
             }, 3000);
-          }, 80);
+          }, 200);
         };
 
         // Called by Swift's onDismiss after the native comment sheet closes.
@@ -1168,6 +1344,7 @@
             var _ed = _innerWin.Asc && _innerWin.Asc.editor;
             if (!_ed) {
               console.warn('[iOS] _addComment: OO editor not available');
+              _showInsertToast('Editor not ready — please try again');
               setTimeout(function() {
                 window._filterInterceptEnabled = true;
                 try { _innerWin._ooInjectEnabled = true; } catch(_) {}
@@ -1179,13 +1356,16 @@
               // which our CSS hides; the resulting DOM thrash crashes WKWebView.
               if (typeof _ed.asc_addComment === 'function') { _ed.asc_addComment(text, false); }
               else if (typeof _ed.asc_AddComment === 'function') { _ed.asc_AddComment(text); }
-              else { console.warn('[iOS] _addComment: no add method found'); }
-            } catch(e) { console.warn('[iOS] _addComment:', e); }
+              else {
+                console.warn('[iOS] _addComment: no add method found');
+                _showInsertToast('Comment insert not available in this editor version');
+              }
+            } catch(e) { console.warn('[iOS] _addComment:', e); _showInsertToast('Comment insert failed — please try again'); }
             setTimeout(function() {
               window._filterInterceptEnabled = true;
               try { _innerWin._ooInjectEnabled = true; } catch(_) {}
             }, 1500);
-          }, 80);
+          }, 200);
         };
 
         // Called by Swift after native chart sheet closes (onDismiss).
@@ -1211,6 +1391,8 @@
             try { _innerWin.focus(); } catch(_) {}
             var _ed = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
             if (!_ed) {
+              console.warn('[iOS] _insertChart: editor not available');
+              _showInsertToast('Editor not ready — please try again');
               setTimeout(_restore, 800);
               return;
             }
@@ -1225,6 +1407,11 @@
             console.log('[iOS] _insertChart:', type, '→', enumKey, '=', chartNum);
 
             var _done = false;
+
+            // Set a crash-guard before calling OO chart APIs. If the WebContent process
+            // is killed by iOS (OOM/watchdog) during the call, the guard persists in
+            // localStorage. _reInjectOO detects it after reload and shows a user toast.
+            try { localStorage.setItem('_oo_insert_pending', 'chart'); } catch(_) {}
 
             // ── Method 1: asc_addChartDrawing (preferred — no wizard, no crash) ──────
             if (!_done && typeof _ed.asc_addChartDrawing === 'function') {
@@ -1246,16 +1433,22 @@
                   } catch(_) { sp = null; }
                 }
                 // Duck-typed fallback: OO reads .type and .chart.type via property access
-                if (!sp) { sp = { type: chartNum, chart: { type: chartNum, subtype: chartNum } }; }
+                if (!sp) { sp = { type: chartNum, chart: { type: chartNum, subtype: chartNum, style: 1 } }; }
                 _ed.asc_addChartDrawing(sp, false);
                 _done = true;
+                // Trigger resize so OO recalculates canvas after chart drawing is added
+                try { _innerWin.dispatchEvent(new Event('resize')); } catch(_) {}
                 console.log('[iOS] _insertChart: asc_addChartDrawing OK');
               } catch(e) { console.warn('[iOS] asc_addChartDrawing:', e); }
             }
 
             // ── Method 2: asc_insertChart (alternate name in some OO builds) ──────────
             if (!_done && typeof _ed.asc_insertChart === 'function') {
-              try { _ed.asc_insertChart({ type: chartNum }); _done = true; } catch(e) {}
+              try {
+                _ed.asc_insertChart({ type: chartNum, subtype: 0, style: 1 });
+                _done = true;
+                try { _innerWin.dispatchEvent(new Event('resize')); } catch(_) {}
+              } catch(e) {}
             }
 
             // ── Method 3: asc_AddChart ───────────────────────────────────────────────
@@ -1263,19 +1456,16 @@
               try { _ed.asc_AddChart({ type: chartNum }); _done = true; } catch(e) {}
             }
 
-            // ── No direct API available — show native error, do NOT call openChartFrame ─
+            // ── No API worked ─
             if (!_done) {
               console.warn('[iOS] _insertChart: no direct chart API found for type:', type);
-              try {
-                window.webkit.messageHandlers.editorBridge.postMessage({
-                  action: 'editorError',
-                  message: 'Chart insert failed: this chart type is not yet supported in offline mode.'
-                });
-              } catch(_) {}
+              _showInsertToast('Chart insert not available in this editor version');
             }
+            // Clear crash-guard (we reached here = no OOM kill during the API call)
+            try { localStorage.removeItem('_oo_insert_pending'); } catch(_) {}
 
             setTimeout(_restore, 2000);
-          }, 80);
+          }, 200);
         };
 
         // Called by Swift after native shape picker closes (onDismiss).
@@ -1289,6 +1479,7 @@
             var _ed = _innerWin.Asc && _innerWin.Asc.editor;
             if (!_ed) {
               console.warn('[iOS] _insertShape: editor not available');
+              _showInsertToast('Editor not ready — please try again');
               setTimeout(function() {
                 window._filterInterceptEnabled = true;
                 try { _innerWin._ooInjectEnabled = true; } catch(_) {}
@@ -1308,12 +1499,15 @@
               try { _ed.asc_AddShape(type); _done = true; console.log('[iOS] _insertShape via asc_AddShape:', type); }
               catch(e3) { console.warn('[iOS] asc_AddShape:', e3); }
             }
-            if (!_done) { console.warn('[iOS] _insertShape: no working method found for', type); }
+            if (!_done) {
+              console.warn('[iOS] _insertShape: no working method found for', type);
+              _showInsertToast('Shape insert not available in this editor version');
+            }
             setTimeout(function() {
               window._filterInterceptEnabled = true;
               try { _innerWin._ooInjectEnabled = true; } catch(_) {}
             }, 1500);
-          }, 80);
+          }, 200);
         };
 
         // Generic dialog styler for non-filter popups (Warning, etc.)
@@ -1342,7 +1536,7 @@
           });
         }
 
-        var _obs = new MutationObserver(function(mutations) {
+        window._filterObs = new MutationObserver(function(mutations) {
           // Only intercept filter after editor is ready — prevents false positives
           // from OO's own init dialogs during document load.
           if (!window._filterInterceptEnabled) return;
@@ -1373,10 +1567,10 @@
         });
 
         if (iDoc.body) {
-          _obs.observe(iDoc.body, { childList: true, subtree: true });
+          window._filterObs.observe(iDoc.body, { childList: true, subtree: true });
         } else {
           iDoc.addEventListener('DOMContentLoaded', function() {
-            _obs.observe(iDoc.body, { childList: true, subtree: true });
+            window._filterObs.observe(iDoc.body, { childList: true, subtree: true });
           });
         }
       })();
@@ -1464,16 +1658,48 @@
           var _curUrl = _d.URL || '';
           if (_curUrl !== _ooLastDocURL) { _ooLastDocURL = _curUrl; }
 
-          // Check if ONLYOFFICE document editor has rendered its main container
+          // Check if ONLYOFFICE document editor has rendered its main container.
+          // canvas check covers PPT/PE which use different IDs than Word/Excel.
           var _hasOO = _d.querySelector('#id_main_scroll,#id-main-scroll') ||
                        _d.querySelector('.page') ||
                        _d.querySelector('#id-work-area') ||
                        _d.querySelector('#editor-cell') ||
-                       _d.querySelector('[class*="editor-main"]');
+                       _d.querySelector('[class*="editor-main"]') ||
+                       (_d.body && _d.body.children.length > 5 && _d.querySelector('canvas'));
           if (!_hasOO) return; // Not yet — keep polling
 
           // OO is loaded — inject full CSS and call mobile APIs, then stop
           clearInterval(_ooReadyInterval);
+          // Keep _innerWin in sync with the frame that OO actually loaded into.
+          // Same-origin navigation preserves the contentWindow object, but assigning
+          // here is belt-and-suspenders for any build that behaves differently.
+          _innerWin = _w;
+
+          // If a previous insert set a crash-guard flag in localStorage and the editor
+          // reloaded (OOM/watchdog kill), notify the user. Flag cleared first to avoid
+          // showing the message on every subsequent load if removeItem fails.
+          try {
+            var _crashOp = localStorage.getItem('_oo_insert_pending');
+            if (_crashOp) {
+              localStorage.removeItem('_oo_insert_pending');
+              setTimeout(function() {
+                try { window._showInsertToast && window._showInsertToast('Insert failed — editor restarted'); } catch(_) {}
+              }, 1500);
+            }
+          } catch(_lse) {}
+
+          // Re-target filter-interception observer on the live OO document.
+          // injectIOSChrome() registered it on the stub document which OO later
+          // navigated away from — that observer is now watching a detached DOM.
+          // Reconnecting here ensures filter-panel mutations reach the callback.
+          try {
+            if (window._filterObs) {
+              window._filterObs.disconnect();
+              if (_d.body) {
+                window._filterObs.observe(_d.body, { childList: true, subtree: true });
+              }
+            }
+          } catch(_foe) {}
 
           if (!_d.getElementById('_oo_ios_final')) {
             var _sf = _d.createElement('style');
@@ -1482,16 +1708,79 @@
             (_d.head || _d.documentElement).appendChild(_sf);
           }
 
-          // Force-hide status bar, ruler corner, scrollbars via JS for elements with inline display
+          // Word-only: permanent CSS covering document-editor SDK chrome.
+          // Exact element IDs sourced from OO Word sdk-all-min.js template strings.
+          if (_currentDocType === 'word' && !_d.getElementById('_oo_word_chrome')) {
+            var _wcs = _d.createElement('style');
+            _wcs.id = '_oo_word_chrome';
+            _wcs.textContent =
+              // OO canvas is absolutely positioned — display:none on panels does NOT reposition it.
+              // Keep all panels visibility:hidden (in layout flow) so OO's coord system stays intact.
+              // Use ViewScrollToX to scroll past panel_left, making page flush with left edge.
+              '#id_panel_right,#id_panel_left,#id_panel_top,#id_horscrollpanel{' +
+                'visibility:hidden!important;background:white!important;' +
+                'border:none!important;outline:none!important}' +
+              // White body so any exposed background blends with page.
+              'body,html{background:white!important}' +
+              // Content elements INSIDE panels: display:none is safe here.
+              '#id_vertical_scroll,#id_buttonPrevPage,#id_buttonNextPage,#id_buttonRulers{display:none!important}' +
+              '#id_horizontal_scroll{display:none!important}' +
+              '#id_buttonTabs,#id_hor_ruler,#id_vert_ruler{display:none!important}' +
+              // Status bar lives in OO Viewport VBox (outside SDK canvas area) — safe to display:none.
+              '#statusbar,.statusbar,[id*="statusbar"],[class*="statusbar"]{display:none!important}' +
+              // Generic wildcards (belt-and-suspenders for unexpected element names)
+              '[id*="ruler"],[class*="ruler"]{visibility:hidden!important}' +
+              '[id*="scrollbar"],[class*="scrollbar"]{display:none!important}' +
+              // White background so the "gray desktop" area behind the page disappears.
+              '#id_main_scroll,#id_editor_scrolled{background:white!important}' +
+              // Remove page drop-shadow/border so it looks edge-to-edge, not a floating card.
+              '.page{box-shadow:none!important;border:none!important;outline:none!important}' +
+              // Hide native webkit scrollbar — it eats ~15px off clientWidth, breaking zoom calc.
+              '#id_main_scroll::-webkit-scrollbar{width:0!important;height:0!important;display:none!important}' +
+              // Allow horizontal scroll so scrollLeft can clip OO's internal left margin.
+              // The scrollbar itself is already hidden by ::-webkit-scrollbar above.
+              '#id_main_scroll{overflow-x:auto!important}';
+            (_d.head || _d.documentElement).appendChild(_wcs);
+          }
+
+          // Force-hide status bar, ruler corner, scrollbars via JS for elements with inline display.
+          // All panels: visibility:hidden (keeps OO canvas coords intact).
+          try {
+            ['#id_panel_right','#id_panel_left','#id_panel_top','#id_horscrollpanel',
+             '[id*="ruler"]','[class*="ruler"]'].forEach(function(_ps) {
+              try {
+                _d.querySelectorAll(_ps).forEach(function(el) {
+                  el.style.setProperty('visibility','hidden','important');
+                  el.style.setProperty('background','white','important');
+                });
+              } catch(_) {}
+            });
+          } catch(_phe) {}
           try {
             [
+              // Content elements inside panels: display:none is safe
+              '#id_vertical_scroll','#id_buttonPrevPage','#id_buttonNextPage','#id_buttonRulers',
+              '#id_horizontal_scroll','#id_buttonTabs','#id_hor_ruler','#id_vert_ruler',
+              '#statusbar','.statusbar',
+              // Generic wildcards
               '#id-de-statusbar', '[id*="de-statusbar"]', '[class*="de-statusbar"]',
               '[id*="de-status"]', '#id-de-ruler-left-top', '.de-ruler-left-top',
-              '[id*="ruler"]', '[class*="ruler"]',
               '[id*="de-scrollbar"]', '[id*="v-scrollbar"]', '[id*="h-scrollbar"]',
               // Presentation editor (pe-) chrome
               '#id-pe-statusbar', '[id*="pe-statusbar"]', '[class*="pe-statusbar"]',
+              // Slide thumbnail panel — OO 9.x verified underscore ID (primary)
+              '#id_panel_thumbnails',
+              // Legacy hyphen-ID fallback
               '#id-pe-panel-aside', '[id*="pe-panel-aside"]', '[class*="pe-panel-aside"]',
+              '#id-panel-thumbnails', '[id*="panel-thumbnails"]', '[class*="panel-thumbnails"]',
+              '#id-pe-thumbnails', '[id*="pe-thumbnails"]', '[class*="pe-thumbnails"]',
+              '#id-pe-left-panel', '[id*="pe-left-panel"]', '[class*="pe-left-panel"]',
+              '#id-pe-panel-left', '[id*="pe-panel-left"]', '[class*="pe-panel-left"]',
+              '[class*="slide-panel"]',
+              // Notes panel — OO 9.x + legacy
+              '#id_panel_notes',
+              '#id-pe-notes', '[id*="pe-notes"]', '[class*="pe-notes"]',
+              '#id-notes-panel', '.notes-panel', '[id*="notes-panel"]',
               '[id*="pe-ruler"]', '[class*="pe-ruler"]',
               '[id*="pe-scrollbar"]', '[id*="pe-v-scroll"]', '[id*="pe-h-scroll"]',
             ].forEach(function(sel) {
@@ -1501,36 +1790,760 @@
                 });
               } catch(_se) {}
             });
+            // Dispatch resize so OO SDK recalculates canvas bounds
+            try {
+              _d.defaultView && _d.defaultView.dispatchEvent(new Event('resize'));
+            } catch(_me) {}
           } catch(_he) {}
 
-          // Call mobile layout APIs after brief settle delay
-          setTimeout(function() {
-            try {
-              var _ed = _w && _w.Asc && _w.Asc.editor;
-              if (_ed) {
-                if (typeof _ed.asc_setRulerVisible    === 'function') _ed.asc_setRulerVisible(false);
-                if (typeof _ed.asc_showRuler          === 'function') _ed.asc_showRuler(false);
-                if (typeof _ed.asc_SetDocumentRuler   === 'function') _ed.asc_SetDocumentRuler(false);
-                if (typeof _ed.asc_setZoomType        === 'function') _ed.asc_setZoomType(1);
-                if (typeof _ed.asc_setMobileView      === 'function') _ed.asc_setMobileView(true);
-                if (typeof _ed.asc_SetFitPage         === 'function') _ed.asc_SetFitPage(true);
-                if (typeof _ed.asc_setViewLayout      === 'function') _ed.asc_setViewLayout(1);
-                // Dispatch resize so OO recalculates canvas width
-                try { _w.dispatchEvent(new Event('resize')); } catch(_re) {}
-
-                // PPT: register slide-change callback and report initial position
-                if (_currentDocType === 'slide') {
+          // ── elementFromPoint PPT panel hider ──────────────────────────────────
+          // Selector-based hiding fails when OO's actual class/ID differs from our
+          // list. elementFromPoint finds whatever is physically at the panel position,
+          // guaranteeing a hit regardless of naming. Run immediately + at 1s/3s/6s
+          // to catch panels that appear after the initial render pass.
+          if (_currentDocType === 'slide') {
+            function _pptByPoint() {
+              try {
+                var _fd = (function() {
+                  var _f = document.querySelector('iframe[name="frameEditor"]');
+                  return _f ? _f.contentDocument : null;
+                })();
+                if (!_fd || !_fd.body) return;
+                var _fw = _fd.documentElement.clientWidth  || 390;
+                var _fh = _fd.documentElement.clientHeight || 700;
+                // Sample two x-positions: 5% and 20% from left (covers 130px panels on 390px screen)
+                [Math.round(_fw * 0.05), Math.round(_fw * 0.20)].forEach(function(_x) {
                   try {
-                    var _cbFn = function() { setTimeout(_reportSlidePos, 100); };
-                    if      (typeof _ed.asc_registerCallback        === 'function') _ed.asc_registerCallback('asc_onCurrentSlideChanged', _cbFn);
-                    else if (typeof _ed.asc_addHandler              === 'function') _ed.asc_addHandler('currentSlideChanged', _cbFn);
-                    else if (typeof _ed.asc_onCurrentSlideChanged   !== 'undefined') _ed.asc_onCurrentSlideChanged = _cbFn;
-                  } catch(_cbe) {}
-                  setTimeout(_reportSlidePos, 600); // initial position after doc loads
+                    var _cy = Math.round(_fh * 0.5);
+                    var _el = _fd.elementFromPoint(_x, _cy);
+                    while (_el && _el !== _fd.body && _el !== _fd.documentElement) {
+                      var _r = _el.getBoundingClientRect();
+                      // Panel shape: left-anchored, narrower than 45%, taller than 30%
+                      if (_r.left <= 10 && _r.width >= 40 && _r.width < _fw * 0.45 && _r.height > _fh * 0.3) {
+                        // Skip if element contains a large main canvas
+                        var _hasMain = false;
+                        if (_el.querySelectorAll) {
+                          _el.querySelectorAll('canvas').forEach(function(c) {
+                            if ((c.width || c.offsetWidth) > 200 && (c.height || c.offsetHeight) > 100) _hasMain = true;
+                          });
+                        }
+                        if (!_hasMain) {
+                          _el.style.setProperty('display',   'none',   'important');
+                          _el.style.setProperty('width',     '0',      'important');
+                          _el.style.setProperty('overflow',  'hidden', 'important');
+                          // Expand the sibling (editor area) to fill freed space
+                          var _par = _el.parentElement;
+                          if (_par) {
+                            Array.from(_par.children).forEach(function(_sib) {
+                              if (_sib === _el) return;
+                              var _sr = _sib.getBoundingClientRect();
+                              if (_sr.width > _fw * 0.1 || _sr.height > _fh * 0.1) {
+                                _sib.style.setProperty('left',        '0',        'important');
+                                _sib.style.setProperty('width',       '100%',     'important');
+                                _sib.style.setProperty('margin-left', '0',        'important');
+                                _sib.style.setProperty('flex',        '1 1 auto', 'important');
+                              }
+                            });
+                            _par.style.setProperty('padding-left', '0', 'important');
+                          }
+                          // Log exact element so we can add its selector to CSS
+                          try {
+                            window.webkit.messageHandlers.editorBridge.postMessage({
+                              action: 'debug',
+                              msg: '[PPT-BYPOINT] HID @(' + _x + ',' + _cy + '): ' +
+                                   _el.tagName + '#' + _el.id +
+                                   ' class="' + (typeof _el.className === 'string' ? _el.className.slice(0,100) : '') + '"' +
+                                   ' ' + Math.round(_r.width) + 'x' + Math.round(_r.height)
+                            });
+                          } catch(_lb) {}
+                          break;  // found and hidden — stop walking up
+                        }
+                      }
+                      _el = _el.parentElement;
+                    }
+                  } catch(_ep) {}
+                });
+                try { _fd.defaultView.dispatchEvent(new Event('resize')); } catch(_) {}
+              } catch(_bp) {}
+            }
+            _pptByPoint();
+            setTimeout(_pptByPoint, 1000);
+            setTimeout(_pptByPoint, 3000);
+            setTimeout(_pptByPoint, 6000);
+          }
+
+          // MutationObserver: hide status bar and scrollbars as OO renders them.
+          // OO builds its chrome elements progressively; the initial JS loop above may
+          // fire before status bar / scrollbar DOM exists. The observer catches them later.
+          // attributes:true also catches when OO JS re-shows a hidden element via style change.
+          (function() {
+            // Panel containers: use visibility:hidden to preserve layout dims (avoid canvas breakage).
+            var _panelSelectors = ['#id_panel_right','#id_panel_left','#id_panel_top','#id_horscrollpanel','[id*="ruler"]','[class*="ruler"]'];
+            // Content elements: display:none is safe (don't affect OO canvas coordinate system).
+            // NOTE: '#statusbar'/'.statusbar'/'[id*="statusbar"]'/'[class*="statusbar"]' are
+            // intentionally NOT listed here — in Excel the bottom status bar contains the sheet
+            // tabs which must remain visible. Word's status bar uses '[id*="de-statusbar"]'.
+            var _chromeSelectors = [
+              '#id_vertical_scroll','#id_buttonPrevPage','#id_buttonNextPage','#id_buttonRulers',
+              '#id_horizontal_scroll','#id_buttonTabs','#id_hor_ruler','#id_vert_ruler',
+              '[id*="de-statusbar"]','[class*="de-statusbar"]',
+              '[id*="de-scrollbar"]','[id*="de-v-scroll"]','[id*="de-h-scroll"]',
+              '[id*="v-scrollbar"]','[id*="h-scrollbar"]',
+              '[id*="scrollbar"]','[class*="scrollbar"]',
+              // PPT: slide thumbnail panel (left column) — keep in observer so OO can't re-show it
+              '#id-pe-panel-aside','[id*="pe-panel-aside"]','[class*="pe-panel-aside"]',
+              '#id-panel-thumbnails','[id*="panel-thumbnails"]','[class*="panel-thumbnails"]',
+              '#id-pe-thumbnails','[id*="pe-thumbnails"]','[class*="pe-thumbnails"]',
+              '#id-pe-left-panel','[id*="pe-left-panel"]','[class*="pe-left-panel"]',
+              '#id-pe-panel-left','[id*="pe-panel-left"]','[class*="pe-panel-left"]',
+              '[class*="slide-panel"]',
+              // PPT: notes panel (bottom "Click to add notes" bar)
+              '#id-pe-notes','[id*="pe-notes"]','[class*="pe-notes"]',
+              '.notes-panel','[id*="notes-panel"]',
+            ];
+            function _hideChrome(root) {
+              var _el = root || _d;
+              _panelSelectors.forEach(function(sel) {
+                try {
+                  _el.querySelectorAll(sel).forEach(function(el) {
+                    el.style.setProperty('visibility','hidden','important');
+                    el.style.setProperty('background','transparent','important');
+                  });
+                } catch(_) {}
+              });
+              _chromeSelectors.forEach(function(sel) {
+                try {
+                  _el.querySelectorAll(sel).forEach(function(el) {
+                    el.style.setProperty('display','none','important');
+                  });
+                } catch(_) {}
+              });
+            }
+            _hideChrome();
+            try {
+              var _obs = new _w.MutationObserver(function(muts) {
+                // Skip during insert operations: OO makes hundreds of DOM mutations
+                // when inserting charts / hyperlinks / images. Without this guard,
+                // _hideChrome() runs on every mutation → O(n²) querySelectorAll
+                // saturation that freezes WKWebView's JS thread and corrupts the insert.
+                if (_w._ooInjectEnabled === false) return;
+                _hideChrome();
+                var _mw = _d.documentElement.clientWidth  || 390;
+                var _mh = _d.documentElement.clientHeight || 700;
+                for (var _mi = 0; _mi < muts.length; _mi++) {
+                  var _mn = muts[_mi];
+                  // PPT: immediately hide newly added nodes that geometry-match the slide panel
+                  if (_currentDocType === 'slide' && _mn.type === 'childList') {
+                    for (var _ni = 0; _ni < _mn.addedNodes.length; _ni++) {
+                      var _node = _mn.addedNodes[_ni];
+                      if (_node.nodeType !== 1) continue;
+                      try {
+                        var _nr = _node.getBoundingClientRect();
+                        if (_nr.left <= 8 && _nr.width >= 60 && _nr.width < _mw * 0.85 && _nr.height > _mh * 0.25) {
+                          _node.style.setProperty('display','none','important');
+                          _node.style.setProperty('width','0','important');
+                          _node.style.setProperty('overflow','hidden','important');
+                        }
+                      } catch(_) {}
+                    }
+                  }
+                  // Re-hide any element whose style attribute was changed by OO
+                  if (_mn.type === 'attributes' && _mn.target) {
+                    var _t = _mn.target;
+                    var _id = (_t.id || '').toLowerCase();
+                    var _cls = (typeof _t.className === 'string' ? _t.className : '').toLowerCase();
+                    var _str = _id + ' ' + _cls;
+                    var _isPanel = ['id_panel_right','id_panel_left','id_panel_top','id_horscrollpanel'].some(function(k) { return _id === k; });
+                    // 'statusbar' is excluded for Excel ('cell') — the bottom status bar contains
+                    // sheet tabs that must remain visible. For Word/PPT, de-statusbar covers it.
+                    var _hide = (_currentDocType === 'cell')
+                      ? ['scrollbar','de-status','de-scroll'].some(function(k) { return _str.indexOf(k) !== -1; })
+                      : ['scrollbar','statusbar','de-status','de-scroll'].some(function(k) { return _str.indexOf(k) !== -1; });
+                    var _ruler = _str.indexOf('ruler') !== -1;
+                    var _pptPanel = ['pe-panel','panel-thumbnails','pe-thumbnails','pe-left','pe-notes','slide-panel','notes-panel'].some(function(k) { return _str.indexOf(k) !== -1; });
+                    if (_isPanel || _ruler) { _t.style.setProperty('visibility','hidden','important'); _t.style.setProperty('background','transparent','important'); }
+                    else if (_hide || _pptPanel) _t.style.setProperty('display','none','important');
+                    // PPT: also geometry-check re-shown elements
+                    if (_currentDocType === 'slide') {
+                      try {
+                        var _tr = _t.getBoundingClientRect();
+                        if (_tr.left <= 8 && _tr.width >= 60 && _tr.width < _mw * 0.85 && _tr.height > _mh * 0.25) {
+                          _t.style.setProperty('display','none','important');
+                          _t.style.setProperty('width','0','important');
+                          _t.style.setProperty('overflow','hidden','important');
+                        }
+                      } catch(_) {}
+                    }
+                  }
+                }
+              });
+              _obs.observe(_d.body || _d.documentElement, {childList:true, subtree:true, attributes:true, attributeFilter:['style','class']});
+              // Word/PPT need a much longer window because OO re-renders chrome lazily;
+              // Excel 20s is sufficient.
+              setTimeout(function() { try { _obs.disconnect(); } catch(_) {} },
+                         (_currentDocType === 'word' || _currentDocType === 'slide') ? 300000 : 20000);
+            } catch(_oe) {}
+          })();
+
+          // Word-specific: geometry-based hide for bottom statusbar strip.
+          // OO's DE statusbar doesn't have "statusbar" in its id/class in v9.x;
+          // geometry is the only reliable way to find it: short wide strip anchored at the bottom.
+          if (_currentDocType === 'word') {
+            (function() {
+              // Clip OO's internal scroll margins so the page appears edge-to-edge.
+              // OO Word places .page[0] at top:~20px and left:~20px inside #id_main_scroll.
+              // Setting scrollTop = page.top  clips the top  gray strip (same idea as scrolling
+              // a PDF to skip the first blank margin).
+              // Setting scrollLeft = page.left clips the left gray strip — works because
+              // overflow-x is now 'auto' (scrollbar hidden via ::-webkit-scrollbar above).
+              // zoom = floor(clientWidth/794*100) makes page width ≈ clientWidth, so after
+              // scrollLeft clip the right edge fits within the visible area automatically.
+              function _wordScrollFix() {
+                try {
+                  // Re-fetch iframe references fresh — closure vars may be stale if OO navigated
+                  var _sfr = document.querySelector('iframe[name="frameEditor"]');
+                  if (!_sfr) return;
+                  var _sd = _sfr.contentDocument || (_sfr.contentWindow && _sfr.contentWindow.document);
+                  if (!_sd || !_sd.body) return;
+
+                  var _scrollEl = _sd.querySelector('#id_main_scroll');
+                  var _firstPage = _sd.querySelector('.page');
+                  if (!_scrollEl || !_firstPage) return;
+
+                  // Top clip
+                  var _pt = parseInt(_firstPage.style.top, 10);
+                  if (!isNaN(_pt) && _pt > 0 && _scrollEl.scrollTop < _pt) _scrollEl.scrollTop = _pt;
+
+                  // Left clip: try inline style first, then offsetLeft, then default 20px
+                  var _pl = parseInt(_firstPage.style.left, 10);
+                  if (isNaN(_pl) || _pl <= 0) _pl = _firstPage.offsetLeft || 0;
+                  if (_pl <= 0) _pl = 20;
+
+                  // Force overflow-x:auto on the scroll element so scrollLeft works
+                  _scrollEl.style.setProperty('overflow-x', 'auto', 'important');
+
+                  // Try OO's native ViewScrollToX first, fall back to DOM scrollLeft
+                  var _sw = _sfr.contentWindow;
+                  var _ed2 = _sw && _sw.Asc && _sw.Asc.editor;
+                  if (_ed2 && typeof _ed2.ViewScrollToX === 'function') {
+                    _ed2.ViewScrollToX(_pl);
+                  } else {
+                    _scrollEl.scrollLeft = _pl;
+                  }
+
+                  // Log via native bridge (console.log is invisible in Xcode)
+                  var _msg = '[OO-scroll-fix] top=' + _pt + ' left=' + _pl
+                    + ' scrollTop=' + _scrollEl.scrollTop
+                    + ' scrollLeft=' + _scrollEl.scrollLeft
+                    + ' ofX=' + window.getComputedStyle(_scrollEl).overflowX
+                    + ' msW=' + _scrollEl.clientWidth
+                    + ' ViewScrollToX=' + !!(_ed2 && typeof _ed2.ViewScrollToX === 'function');
+                  try { window.webkit.messageHandlers.editorBridge.postMessage({action:'debug', msg:_msg}); } catch(_) {}
+                } catch(_e) {
+                  try { window.webkit.messageHandlers.editorBridge.postMessage({action:'debug', msg:'[OO-scroll-fix-err] '+_e}); } catch(_) {}
                 }
               }
-            } catch(_ae) {}
-          }, 400);
+              setTimeout(_wordScrollFix, 500);
+              setTimeout(_wordScrollFix, 1500);
+              setTimeout(_wordScrollFix, 3000);
+              setTimeout(_wordScrollFix, 6000);
+
+              function _wordStatusHide() {
+                try {
+                  var _pw = _d.documentElement.clientWidth  || 390;
+                  var _ph = _d.documentElement.clientHeight || 700;
+                  _d.querySelectorAll('*').forEach(function(el) {
+                    try {
+                      var tag = el.tagName.toLowerCase();
+                      if (tag === 'canvas' || tag === 'script' || tag === 'style' || tag === 'html' || tag === 'body') return;
+                      var r = el.getBoundingClientRect();
+                      if (r.width <= 0 || r.height <= 0) return;
+                      // Statusbar: bottom-anchored short strip spanning most of screen width
+                      if (r.bottom >= _ph - 6 && r.height >= 18 && r.height <= 70 && r.width >= _pw * 0.45) {
+                        el.style.setProperty('display','none','important');
+                        console.log('[OO-word-geo-status] hidden', tag+'#'+el.id+'.'+el.className, r.width.toFixed(0)+'x'+r.height.toFixed(0)+'@b'+r.bottom.toFixed(0));
+                      }
+                    } catch(_) {}
+                  });
+                  // Trigger canvas reflow so SDK fills the reclaimed space
+                  try { _d.defaultView.dispatchEvent(new Event('resize')); } catch(_) {}
+                } catch(_wge) {}
+              }
+              setTimeout(_wordStatusHide, 1500);
+              setTimeout(_wordStatusHide, 3000);
+              setTimeout(_wordStatusHide, 6000);
+              setTimeout(_wordStatusHide, 12000);
+            })();
+          }
+
+          // PPT-specific: geometry hide fires EARLY (1s, 2s, 3s) — slide panel shows immediately.
+          // Must run before the generic 5s scan because panel may be hidden by then (layout reflow).
+          if (_currentDocType === 'slide') {
+            (function() {
+              function _pptGeoHide() {
+                try {
+                  // Always get a fresh document reference — the captured _d may be stale
+                  // if OO navigated the inner iframe after _reInjectOO first ran.
+                  var _liveFr = document.querySelector('iframe[name="frameEditor"]');
+                  var _liveDoc = (_liveFr && _liveFr.contentDocument) || _d;
+                  if (!_liveDoc || !_liveDoc.body) return;
+                  var _pw = _liveDoc.documentElement.clientWidth  || 390;
+                  var _ph = _liveDoc.documentElement.clientHeight || 700;
+                  // Max panel width = 45% of screen. Thumbnail panel is typically 30-40%;
+                  // canvas container starts after it. Never catch the canvas container.
+                  var _maxPanelW = _pw * 0.45;
+                  _liveDoc.querySelectorAll('*').forEach(function(el) {
+                    try {
+                      var tag = el.tagName.toLowerCase();
+                      if (tag === 'canvas' || tag === 'script' || tag === 'style' || tag === 'html' || tag === 'body') return;
+                      var r = el.getBoundingClientRect();
+                      if (r.width <= 0 || r.height <= 0) return;
+                      // Skip if element contains a <canvas> — that's the main editor area.
+                      if (el.querySelector && el.querySelector('canvas')) return;
+                      // Slide thumbnail panel: may start at x>0 if OO has a left icon strip.
+                      // Allow up to 150px left offset to cover the icon-strip gap.
+                      if (r.left <= 150 && r.width >= 40 && r.width < _maxPanelW && r.height > _ph * 0.25) {
+                        el.style.setProperty('display','none','important');
+                        el.style.setProperty('width','0','important');
+                        el.style.setProperty('min-width','0','important');
+                        el.style.setProperty('max-width','0','important');
+                        el.style.setProperty('flex','0 0 0','important');
+                        el.style.setProperty('overflow','hidden','important');
+                        console.log('[OO-ppt-early-panel]', tag, '#'+el.id, r.width+'x'+r.height);
+                        // After hiding panel, force direct-sibling canvas elements to fill freed space.
+                        // OO may have set left/width inline with !important — JS override wins.
+                        try {
+                          var _parent = el.parentElement;
+                          if (_parent) {
+                            var _kids = _parent.children;
+                            for (var _ki = 0; _ki < _kids.length; _ki++) {
+                              var _k = _kids[_ki];
+                              if (_k === el) continue;
+                              var _kr = _k.getBoundingClientRect();
+                              // Direct sibling that occupies the RIGHT portion of the screen
+                              if (_kr.width > _pw * 0.2 && _kr.height > _ph * 0.2) {
+                                _k.style.setProperty('left','0','important');
+                                _k.style.setProperty('width','100%','important');
+                                _k.style.setProperty('margin-left','0','important');
+                                _k.style.setProperty('padding-left','0','important');
+                                _k.style.setProperty('flex','1 1 auto','important');
+                                console.log('[OO-ppt-canvas-expand]', _k.tagName+'#'+_k.id, _kr.left+'→0');
+                              }
+                            }
+                            // Also clear left/padding on the parent itself
+                            _parent.style.setProperty('padding-left','0','important');
+                          }
+                        } catch(_fe) {}
+                        return;
+                      }
+                      // Notes bar: bottom-anchored strip (tolerance 60px, up to 40% screen height)
+                      if (r.bottom >= _ph - 60 && r.height > 16 && r.height < _ph * 0.4 && r.width > _pw * 0.3) {
+                        el.style.setProperty('display','none','important');
+                        el.style.setProperty('height','0','important');
+                        el.style.setProperty('overflow','hidden','important');
+                        console.log('[OO-ppt-early-notes]', tag, '#'+el.id, r.width+'x'+r.height+'@b'+r.bottom.toFixed(0));
+                      }
+                    } catch(_) {}
+                  });
+                  // Force canvas reflow after hiding
+                  try { _liveDoc.defaultView.dispatchEvent(new Event('resize')); } catch(_) {}
+                } catch(_pge) {}
+              }
+
+              // Also hide by text content: "click to add notes" placeholder
+              function _pptNotesTextHide() {
+                try {
+                  var _liveFr2 = document.querySelector('iframe[name="frameEditor"]');
+                  var _liveDoc2 = (_liveFr2 && _liveFr2.contentDocument) || _d;
+                  if (!_liveDoc2 || !_liveDoc2.body) return;
+                  var _allEls = _liveDoc2.querySelectorAll('*');
+                  for (var _i = 0; _i < _allEls.length; _i++) {
+                    var _el = _allEls[_i];
+                    try {
+                      var _tag = _el.tagName.toLowerCase();
+                      if (_tag === 'script' || _tag === 'style') continue;
+                      var _txt = (_el.textContent || '').trim().toLowerCase();
+                      if (_txt.indexOf('click to add notes') !== -1 || _txt.indexOf('add notes') !== -1) {
+                        // Walk up to find the panel container (parent with height < 40% screen)
+                        var _node = _el;
+                        for (var _up = 0; _up < 8; _up++) {
+                          if (!_node.parentElement) break;
+                          _node = _node.parentElement;
+                          if (_node.tagName.toLowerCase() === 'body') break;
+                          var _r = _node.getBoundingClientRect();
+                          if (_r.height > 16 && _r.height < (_liveDoc2.documentElement.clientHeight || 700) * 0.4) {
+                            _node.style.setProperty('display','none','important');
+                            _node.style.setProperty('height','0','important');
+                            _node.style.setProperty('overflow','hidden','important');
+                            console.log('[OO-ppt-notes-text]', _node.tagName, '#'+_node.id, _r.width+'x'+_r.height);
+                            break;
+                          }
+                        }
+                      }
+                    } catch(_) {}
+                  }
+                  try { _liveDoc2.defaultView.dispatchEvent(new Event('resize')); } catch(_) {}
+                } catch(_nte) {}
+              }
+
+              // Canvas-traversal: walk up from OO's main canvas to find its sibling panel.
+              // Works regardless of class names — pure structural detection.
+              function _pptCanvasTraversal() {
+                try {
+                  var _ctFr = document.querySelector('iframe[name="frameEditor"]');
+                  var _ctDoc = (_ctFr && _ctFr.contentDocument) || _d;
+                  if (!_ctDoc || !_ctDoc.body) return;
+                  var _ctW = _ctDoc.documentElement.clientWidth  || 390;
+                  var _ctH = _ctDoc.documentElement.clientHeight || 700;
+                  // Find the largest visible canvas (OO's main render canvas)
+                  var _bigC = null, _bigA = 0;
+                  _ctDoc.querySelectorAll('canvas').forEach(function(c) {
+                    var _cr = c.getBoundingClientRect();
+                    if (_cr.width < 50 || _cr.height < 50) return; // skip tiny canvases
+                    var a = (c.width || _cr.width) * (c.height || _cr.height);
+                    if (a > _bigA) { _bigA = a; _bigC = c; }
+                  });
+                  if (!_bigC) return;
+                  // Walk up from canvas to find a container that's less than full-screen width
+                  var _cel = _bigC.parentElement;
+                  for (var _ci = 0; _ci < 12 && _cel && _cel !== _ctDoc.body; _ci++) {
+                    var _cr2 = _cel.getBoundingClientRect();
+                    // Canvas container: occupies right portion of screen, not full width
+                    if (_cr2.width > _ctW * 0.3 && _cr2.width < _ctW * 0.95 && _cr2.height > _ctH * 0.3) {
+                      var _par = _cel.parentElement;
+                      if (_par) {
+                        Array.from(_par.children).forEach(function(sib) {
+                          if (sib === _cel) return;
+                          var _sr = sib.getBoundingClientRect();
+                          // A left-side sibling narrower than 55% = slide panel
+                          if (_sr.left <= _ctW * 0.5 && _sr.width > 20 && _sr.width < _ctW * 0.55 && _sr.height > _ctH * 0.3) {
+                            sib.style.setProperty('display','none','important');
+                            sib.style.setProperty('width','0','important');
+                            sib.style.setProperty('min-width','0','important');
+                            sib.style.setProperty('flex','0 0 0','important');
+                            sib.style.setProperty('overflow','hidden','important');
+                            console.log('[OO-canvas-panel]', sib.tagName, '#'+sib.id, '.'+(typeof sib.className==='string'?sib.className.slice(0,50):''), Math.round(_sr.width)+'x'+Math.round(_sr.height));
+                          }
+                        });
+                        _cel.style.setProperty('width','100%','important');
+                        _cel.style.setProperty('flex','1 1 auto','important');
+                        _cel.style.setProperty('left','0','important');
+                        _cel.style.setProperty('margin-left','0','important');
+                      }
+                      break;
+                    }
+                    _cel = _cel.parentElement;
+                  }
+                  try { _ctDoc.defaultView.dispatchEvent(new Event('resize')); } catch(_) {}
+                } catch(_cte) {}
+              }
+              setTimeout(_pptGeoHide, 1000);
+              setTimeout(_pptGeoHide, 2000);
+              setTimeout(_pptGeoHide, 3000);
+              setTimeout(_pptCanvasTraversal, 1500);
+              setTimeout(_pptCanvasTraversal, 3000);
+              setTimeout(_pptGeoHide, 7000);
+              setTimeout(_pptCanvasTraversal, 7500);
+              setTimeout(_pptGeoHide, 15000);
+              // Notes text-based hide — fires later since placeholder appears after doc loads
+              setTimeout(_pptNotesTextHide, 3000);
+              setTimeout(_pptNotesTextHide, 6000);
+              setTimeout(_pptNotesTextHide, 10000);
+              setTimeout(_pptNotesTextHide, 20000);
+            })();
+          }
+
+          // Geometric chrome hide + DOM dump — fires 5s after OO is detected.
+          // Belt-and-suspenders for elements whose IDs differ from our CSS selectors.
+          setTimeout(function() {
+            try {
+              var _ww = _d.documentElement.clientWidth  || 390;
+              var _wh = _d.documentElement.clientHeight || 700;
+              _d.querySelectorAll('*').forEach(function(el) {
+                try {
+                  var tag = el.tagName.toLowerCase();
+                  if (tag === 'canvas' || tag === 'script' || tag === 'style' || tag === 'html' || tag === 'body') return;
+                  var r = el.getBoundingClientRect();
+                  if (r.width <= 0 || r.height <= 0) return;
+                  // PPT: slide thumbnail panel — check BEFORE large-container guard.
+                  // Skip any element that contains a <canvas> — that's the main editor area.
+                  // Panel is narrow (< 45% of screen); canvas container starts after it.
+                  if (_currentDocType === 'slide' && r.left <= 150 && r.width >= 40 && r.width < _ww * 0.45 && r.height > _wh * 0.25
+                      && !(el.querySelector && el.querySelector('canvas'))) {
+                    el.style.setProperty('display','none','important');
+                    el.style.setProperty('width','0','important');
+                    el.style.setProperty('overflow','hidden','important');
+                    console.log('[OO-geo-ppt-panel]', tag, '#'+el.id, r.width+'x'+r.height);
+                    return;
+                  }
+                  // PPT: notes panel — also before large-container guard
+                  if (_currentDocType === 'slide' && r.bottom >= _wh - 8 && r.height > 16 && r.height < 150 && r.width > _ww * 0.3) {
+                    el.style.setProperty('display','none','important');
+                    console.log('[OO-geo-ppt-notes]', tag, '#'+el.id, r.width+'x'+r.height);
+                    return;
+                  }
+                  if (r.width > _ww * 0.6 && r.height > _wh * 0.3) return; // skip large containers
+                  // Vertical scrollbar: narrow strip at right edge
+                  if (r.width <= 20 && r.right >= _ww - 20 && r.height > 60) {
+                    el.style.setProperty('display','none','important');
+                    console.log('[OO-geo-vscroll]', tag, '#'+el.id, r.width+'x'+r.height);
+                    return;
+                  }
+                  // Status bar or H-scrollbar: short strip at bottom
+                  if (r.height <= 28 && r.bottom >= _wh - 28 && r.width > _ww * 0.3) {
+                    el.style.setProperty('display','none','important');
+                    console.log('[OO-geo-bottom]', tag, '#'+el.id, r.width+'x'+r.height);
+                    return;
+                  }
+                  // Ruler corner: tiny square at top-left (above the page)
+                  if (r.width <= 24 && r.height <= 24 && r.left <= 24 && r.top <= 24) {
+                    el.style.setProperty('display','none','important');
+                    console.log('[OO-geo-corner]', tag, '#'+el.id, r.width+'x'+r.height);
+                  }
+                } catch(_) {}
+              });
+            } catch(_ge) {}
+            // Edge dump — deferred to 15s so OO chrome is fully rendered.
+            // Scans both inner iframe + outer document for elements at screen edges.
+            function _runEdgeDump(label) {
+              try {
+                var _freshD = document.querySelector('iframe[name="frameEditor"]');
+                var _iDoc   = _freshD ? _freshD.contentDocument : null;
+                var _dump   = [];
+
+                function _edgeDump(doc, prefix) {
+                  if (!doc || !doc.documentElement) { _dump.push(prefix+'[ERR:no-doc]'); return; }
+                  try {
+                    var vw = doc.documentElement.clientWidth  || 390;
+                    var vh = doc.documentElement.clientHeight || 700;
+                    var all = doc.querySelectorAll('*');
+                    _dump.push(prefix+'[INFO]vw='+vw+',vh='+vh+',n='+all.length);
+                    all.forEach(function(el) {
+                      try {
+                        var tag = el.tagName.toLowerCase();
+                        if (tag === 'html' || tag === 'body' || tag === 'script' || tag === 'style' || tag === 'iframe' || tag === 'symbol' || tag === 'defs') return;
+                        var r = el.getBoundingClientRect();
+                        if (r.width <= 0 || r.height <= 0) return;
+                        // Broad criteria — scrollbars can be up to 40px wide
+                        var atRight   = r.right  >= vw - 50 && r.width  <= 50 && r.height > 10;
+                        var atBottom  = r.bottom >= vh - 60 && r.height <= 60 && r.width  > 10;
+                        var atTopLeft = r.width  <= 40 && r.height <= 40 && r.left <= 40 && r.top <= 40;
+                        if (!atRight && !atBottom && !atTopLeft) return;
+                        var id  = el.id ? '#'+el.id : '';
+                        var cls = (typeof el.className === 'string') ? el.className.trim().slice(0, 60) : '';
+                        var where = atRight ? 'R' : (atBottom ? 'B' : 'TL');
+                        _dump.push(prefix+'['+where+']'+tag+(id||'')+'('+cls+')['+Math.round(r.width)+'x'+Math.round(r.height)+'@'+Math.round(r.left)+','+Math.round(r.top)+']');
+                      } catch(_) {}
+                    });
+                  } catch(_de) { _dump.push(prefix+'[ERR:'+String(_de).slice(0,40)+']'); }
+                }
+
+                _edgeDump(_iDoc, 'IN');
+                _edgeDump(document, 'OUT');
+                window.webkit.messageHandlers.editorBridge.postMessage({ action: 'domDump', dump: [label].concat(_dump) });
+              } catch(_re) {}
+            }
+            setTimeout(function(){ _runEdgeDump('EDGE@15s'); }, 15000);
+            setTimeout(function(){ _runEdgeDump('EDGE@30s'); }, 30000);
+          }, 5000);
+
+          // Word + PPT: repeat geometric scan at 15s and 60s so OO can't re-show chrome.
+          if (_currentDocType === 'word' || _currentDocType === 'slide') {
+            [15000, 60000].forEach(function(_gd) {
+              setTimeout(function() {
+                try {
+                  var _rw = _d.documentElement.clientWidth  || 390;
+                  var _rh = _d.documentElement.clientHeight || 700;
+                  _d.querySelectorAll('*').forEach(function(el) {
+                    try {
+                      var _tag = el.tagName.toLowerCase();
+                      if (_tag === 'canvas' || _tag === 'script' || _tag === 'style' || _tag === 'html' || _tag === 'body') return;
+                      var r = el.getBoundingClientRect();
+                      if (r.width <= 0 || r.height <= 0) return;
+                      // PPT: panel checks BEFORE large-container guard (panel is 60-75% width)
+                      if (_currentDocType === 'slide') {
+                        if (r.left <= 8 && r.width >= 60 && r.width < _rw * 0.85 && r.height > _rh * 0.25) {
+                          el.style.setProperty('display','none','important');
+                          el.style.setProperty('width','0','important');
+                          el.style.setProperty('overflow','hidden','important');
+                          return;
+                        }
+                        if (r.bottom >= _rh - 8 && r.height > 16 && r.height < 150 && r.width > _rw * 0.3) {
+                          el.style.setProperty('display','none','important');
+                          return;
+                        }
+                      }
+                      if (r.width > _rw * 0.6 && r.height > _rh * 0.3) return;
+                      // Vertical scrollbar: narrow at right edge
+                      if (r.width <= 25 && r.right >= _rw - 25 && r.height > 50) {
+                        el.style.setProperty('display','none','important');
+                      }
+                      // Status bar / H-scrollbar: short at bottom
+                      if (r.height <= 35 && r.bottom >= _rh - 35 && r.width > _rw * 0.25) {
+                        el.style.setProperty('display','none','important');
+                      }
+                      // Ruler corner: tiny at top-left
+                      if (r.width <= 28 && r.height <= 28 && r.left <= 28 && r.top <= 28) {
+                        el.style.setProperty('display','none','important');
+                      }
+                    } catch(_) {}
+                  });
+                } catch(_) {}
+              }, _gd);
+            });
+          }
+
+          // Mobile layout APIs — MUST fire after document content is rendered.
+          // Calling asc_SetFitPage on an empty canvas (before content loads) sets
+          // zoom to a wrong value and leaves the canvas blank permanently.
+          // Word: asc_setMobileView causes blank canvas + exposes left sidebar —
+          //       use asc_setZoomType(2) + asc_setZoom(_fitPct) for fit-to-width.
+          //       CSS in _oo_word_chrome collapses panel_left/panel_top to 0 dims.
+          //       JS _wordTopFix scrolls container to clip OO's internal top margin.
+          // Excel/PPT: full mobile view flow.
+          (function() {
+            var _mobileApplied = false;
+            var _applyMobile = function() {
+              if (_mobileApplied) return;
+              // Do NOT set _mobileApplied=true here — wait until OO editor is confirmed ready.
+              // Multiple callers (2.5s fallback + asc_onEndLoadDocument callback) are safe:
+              // the inner guard prevents double-execution once _ed becomes available.
+              var _delay = (_currentDocType === 'word') ? 2500 : 300;
+              setTimeout(function() {
+                try {
+                  if (_mobileApplied) return; // another pending timer already ran first
+                  var _ed = _w && _w.Asc && _w.Asc.editor;
+                  if (!_ed) return; // OO not ready; callback will fire _applyMobile again
+                  _mobileApplied = true; // only mark done when OO is actually ready
+                  if (true) { // block to match original indentation
+                    if (typeof _ed.asc_setRulerVisible    === 'function') _ed.asc_setRulerVisible(false);
+                    if (typeof _ed.asc_showRuler          === 'function') _ed.asc_showRuler(false);
+                    if (typeof _ed.asc_SetDocumentRuler   === 'function') _ed.asc_SetDocumentRuler(false);
+                    if (_currentDocType === 'spreadsheet') {
+                      // Excel only: mobile view + fit-page (safe for spreadsheets)
+                      if (typeof _ed.asc_setMobileView    === 'function') _ed.asc_setMobileView(true);
+                      if (typeof _ed.asc_SetFitPage       === 'function') _ed.asc_SetFitPage(true);
+                      if (typeof _ed.asc_setViewLayout    === 'function') _ed.asc_setViewLayout(1);
+                    } else if (_currentDocType === 'slide') {
+                      // PPT: asc_setMobileView + asc_SetFitPage both cause blank canvas when called
+                      // before slide content finishes rendering (zoom calculated to 0 → permanent blank).
+                      // Use CSS + geo-hide instead to collapse the thumbnail panel.
+                      // Only hide ruler — same as Word path.
+                    } else {
+                      // Word: same mobile-view flow as Excel.
+                      if (typeof _ed.asc_setMobileView === 'function') _ed.asc_setMobileView(true);
+                      if (typeof _ed.asc_SetFitPage    === 'function') _ed.asc_SetFitPage(true);
+                      if (typeof _ed.asc_setViewLayout === 'function') _ed.asc_setViewLayout(1);
+                      try { window.webkit.messageHandlers.editorBridge.postMessage({action:'debug', msg:'[OO-word-mobile] applied'}); } catch(_) {}
+                      // Auto-scroll so page left edge is flush with screen left.
+                      // OO mobile view centers the page by default — we scroll #id_main_scroll
+                      // to wherever .page.getBoundingClientRect().left is relative to its container.
+                      (function() {
+                        function _alignPageLeft() {
+                          try {
+                            var _vFr = document.querySelector('iframe[name="frameEditor"]');
+                            if (!_vFr || !_vFr.contentDocument) return;
+                            var _vD = _vFr.contentDocument;
+                            var _ms = _vD.getElementById('id_main_scroll') || _vD.getElementById('id-main-scroll');
+                            if (!_ms) return;
+                            var _pg = _vD.querySelector('.page');
+                            if (!_pg) { _ms.scrollLeft = 0; return; }
+                            // BoundingClientRect gives us visual positions; compute exact scroll target.
+                            var _pgR = _pg.getBoundingClientRect();
+                            var _msR = _ms.getBoundingClientRect();
+                            var _target = _ms.scrollLeft + (_pgR.left - _msR.left);
+                            _ms.scrollLeft = Math.max(0, _target);
+                            try {
+                              window.webkit.messageHandlers.editorBridge.postMessage({
+                                action: 'debug',
+                                msg: '[OO-word-align] scrollLeft→' + Math.round(_ms.scrollLeft) +
+                                     ' pgLeft=' + Math.round(_pgR.left) +
+                                     ' msLeft=' + Math.round(_msR.left) +
+                                     ' msScroll=' + _ms.scrollWidth + '/' + _ms.clientWidth
+                              });
+                            } catch(_) {}
+                          } catch(_) {}
+                        }
+                        setTimeout(_alignPageLeft, 700);
+                        setTimeout(_alignPageLeft, 2000);
+                        setTimeout(_alignPageLeft, 4500);
+                      })();
+                    }
+                    try { _w.dispatchEvent(new Event('resize')); } catch(_re) {}
+
+                    // PPT: hide thumbnail panel + notes panel via OO API (most reliable approach)
+                    if (_currentDocType === 'slide') {
+                      // Hide slide thumbnail (left panel) — try every known OO 9.x method name
+                      var _thumbFns = ['asc_SetThumbPanelVisible','asc_setThumbPanelVisible',
+                        'asc_SetSlidePanelVisible','asc_setSlidePanelVisible',
+                        'asc_SetNavigationPanelVisible','setThumbPanelVisible'];
+                      for (var _ti = 0; _ti < _thumbFns.length; _ti++) {
+                        try { if (typeof _ed[_thumbFns[_ti]] === 'function') { _ed[_thumbFns[_ti]](false); console.log('[OO-ppt-api] '+_thumbFns[_ti]+'(false)'); break; } } catch(_) {}
+                      }
+                      // Hide notes panel
+                      var _notesFns = ['asc_SetNotesPanelVisible','asc_setNotesPanelVisible',
+                        'asc_SetNotesVisible','asc_setNotesVisible',
+                        'asc_HideNotesPanel','setNotesPanelVisible'];
+                      for (var _ni2 = 0; _ni2 < _notesFns.length; _ni2++) {
+                        try { if (typeof _ed[_notesFns[_ni2]] === 'function') { _ed[_notesFns[_ni2]](false); console.log('[OO-ppt-api] '+_notesFns[_ni2]+'(false)'); break; } } catch(_) {}
+                      }
+                      // Collect OO method names for debug logging — DO NOT call them blindly.
+                      // Calling every "visible/show/hide" method with false breaks the canvas
+                      // because OO 9.x has methods like asc_setViewerVisible that hide the editor area.
+                      try {
+                        var _allPptMeths = [];
+                        var _tmpObj = _ed;
+                        for (var _bpi = 0; _bpi < 5 && _tmpObj; _bpi++) {
+                          Object.getOwnPropertyNames(_tmpObj).forEach(function(m) {
+                            if (/thumb|panel|note|slide|page|count|view|nav/i.test(m)) _allPptMeths.push(m);
+                          });
+                          _tmpObj = Object.getPrototypeOf(_tmpObj);
+                        }
+                        // Post relevant methods to Xcode console via debug bridge
+                        try {
+                          window.webkit.messageHandlers.editorBridge.postMessage({
+                            action: 'debug',
+                            msg: '[OO-ppt-methods] ' + _allPptMeths.join(' ')
+                          });
+                        } catch(_) {}
+                      } catch(_bfe) {}
+                      // Fire resize so OO redraws canvas to full width
+                      try { _w.dispatchEvent(new Event('resize')); } catch(_) {}
+
+                      // Wire slide-change callback for strip navigation
+                      try {
+                        var _cbFn = function() { setTimeout(_reportSlidePos, 100); };
+                        if      (typeof _ed.asc_registerCallback        === 'function') _ed.asc_registerCallback('asc_onCurrentSlideChanged', _cbFn);
+                        else if (typeof _ed.asc_addHandler              === 'function') _ed.asc_addHandler('currentSlideChanged', _cbFn);
+                        else if (typeof _ed.asc_onCurrentSlideChanged   !== 'undefined') _ed.asc_onCurrentSlideChanged = _cbFn;
+                        // Also wire asc_onEndLoadPresentation if it exists — fires after all slides render
+                        if (typeof _ed.asc_registerCallback === 'function') {
+                          _ed.asc_registerCallback('asc_onEndLoadPresentation', function() { setTimeout(_reportSlidePos, 200); });
+                        }
+                      } catch(_cbe) {}
+                      // Fire at 600ms, 2s, 4s, 8s, 12s, 20s — large PPT files load slides slowly
+                      setTimeout(_reportSlidePos, 600);
+                      setTimeout(_reportSlidePos, 2000);
+                      setTimeout(_reportSlidePos, 4000);
+                      setTimeout(_reportSlidePos, 8000);
+                      setTimeout(_reportSlidePos, 12000);
+                      setTimeout(_reportSlidePos, 20000);
+                    }
+                  }
+                } catch(_ae) {}
+              }, _delay);
+            };
+
+            // Register end-load callback so we fire at exactly the right moment
+            try {
+              var _ed0 = _w && _w.Asc && _w.Asc.editor;
+              if (_ed0 && typeof _ed0.asc_registerCallback === 'function') {
+                _ed0.asc_registerCallback('asc_onEndLoadDocument', _applyMobile);
+              }
+            } catch(_cre) {}
+            // Fallback: Word gets 5s (fonts need time to download); others get 2.5s
+            setTimeout(_applyMobile, (_currentDocType === 'word') ? 5000 : 2500);
+          })();
 
         } catch(_pe) {}
       }
@@ -1641,6 +2654,41 @@
           if (window._editorFullyLoaded) { ev.preventDefault(); return; }
           if (ev.reason && String(ev.reason).indexOf('indexOf') !== -1) ev.preventDefault();
         });
+      }
+
+      // ── Word: shift outer iframe to clip panel areas from viewport ───────────
+      // OO Word has #id_panel_left (~30px) and #id_panel_top (~40px) that create
+      // gray borders. We cannot collapse them (breaks canvas coords). Instead we
+      // expand and offset the frameEditor iframe so the panels slide off-screen
+      // while #id_main_scroll appears at x=0,y=0 of the viewport.
+      // #placeholder has overflow:hidden, so the off-screen portions are clipped.
+      // OO sees its normal DOM unmodified — canvas coords, cursor, editing all work.
+      if (_currentDocType === 'word') {
+        (function() {
+          function _wordFrameShift() {
+            try {
+              var _fr = document.querySelector('iframe[name="frameEditor"]');
+              if (!_fr) return;
+              var _iDoc = _fr.contentDocument || (_fr.contentWindow && _fr.contentWindow.document);
+              if (!_iDoc || !_iDoc.body) return;
+              var _pl = _iDoc.querySelector('#id_panel_left');
+              var _pt = _iDoc.querySelector('#id_panel_top');
+              var _leftW = (_pl && _pl.offsetWidth  > 2) ? _pl.offsetWidth  : 0;
+              var _topH  = (_pt && _pt.offsetHeight > 2) ? _pt.offsetHeight : 0;
+              if (_leftW === 0 && _topH === 0) return; // panels absent (hideRulers worked)
+              _fr.style.setProperty('margin-left', '-' + _leftW + 'px', 'important');
+              _fr.style.setProperty('width',  'calc(100% + ' + _leftW + 'px)', 'important');
+              _fr.style.setProperty('margin-top',  '-' + _topH  + 'px', 'important');
+              _fr.style.setProperty('height', 'calc(100% + ' + _topH  + 'px)', 'important');
+              console.log('[OO-word-frame-shift] left=' + _leftW + ' top=' + _topH);
+            } catch(_e) { console.warn('[OO-word-frame-shift] err', _e); }
+          }
+          // Delays: OO builds its DOM progressively; 1s catches most devices,
+          // 4s catches slow devices, 10s catches edge cases.
+          setTimeout(_wordFrameShift, 1000);
+          setTimeout(_wordFrameShift, 4000);
+          setTimeout(_wordFrameShift, 10000);
+        })();
       }
 
       // Auto-dump API so Xcode console shows real method names without manual trigger.
@@ -2632,7 +3680,7 @@
         if (cmd === 'insert-comment') {
           try {
             var _xed5 = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
-            if      (_xed5 && typeof _xed5.asc_addComment === 'function') { _xed5.asc_addComment('', true); }
+            if      (_xed5 && typeof _xed5.asc_addComment === 'function') { _xed5.asc_addComment('', false); }
             else if (_xed5 && typeof _xed5.asc_AddComment === 'function') { _xed5.asc_AddComment(''); }
             else { _focusedCmd('AddComment'); }
           } catch(e) { _focusedCmd('AddComment'); }
@@ -2798,6 +3846,52 @@
           } catch(_) {}
           return;
         }
+        // slide-goto:N — jump to a specific slide (1-based index from native strip)
+        if (cmd.indexOf('slide-goto:') === 0) {
+          var _slGotoIdx = parseInt(cmd.slice(11), 10); // 1-based
+          if (isNaN(_slGotoIdx) || _slGotoIdx < 1) return;
+          var _slGotoEd = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+          if (_slGotoEd) {
+            var _idx0 = _slGotoIdx - 1; // OO uses 0-based
+            var _gotoFns = [
+              'asc_goToPage','asc_goToSlide','asc_GoToPage','asc_setCurrentPage',
+              'asc_changeCurrentSlide','asc_SetCurrentSlide','asc_changeCurrentPage',
+              'asc_onCurrentSlideChanged','asc_scrollToSlide','asc_scrollToPage',
+              'asc_showSlide','asc_gotoSlide','asc_GotoSlide'
+            ];
+            for (var _gi = 0; _gi < _gotoFns.length; _gi++) {
+              if (typeof _slGotoEd[_gotoFns[_gi]] === 'function') {
+                try { _slGotoEd[_gotoFns[_gi]](_idx0); setTimeout(_reportSlidePos, 300); return; } catch(_) {}
+              }
+            }
+          }
+          // Fallback: keyboard PageDown/PageUp simulation to step toward target slide
+          try {
+            var _slGotoCur = 1;
+            var _slGotoEd2 = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+            if (_slGotoEd2) {
+              var _curFns2 = ['asc_getCurrentSlide','asc_getCurrentPage','asc_getCurrentPageIndex'];
+              for (var _ci2 = 0; _ci2 < _curFns2.length; _ci2++) {
+                if (typeof _slGotoEd2[_curFns2[_ci2]] === 'function') {
+                  try { _slGotoCur = (_slGotoEd2[_curFns2[_ci2]]() || 0) + 1; break; } catch(_) {}
+                }
+              }
+            }
+            var _steps = _slGotoIdx - _slGotoCur;
+            var _keyCode = _steps > 0 ? 34 : 33; // PageDown / PageUp
+            var _keyStr  = _steps > 0 ? 'PageDown' : 'PageUp';
+            var _slDoc = _innerWin && _innerWin.document;
+            if (_slDoc && _steps !== 0) {
+              for (var _si = 0; _si < Math.min(Math.abs(_steps), 30); _si++) {
+                _slDoc.dispatchEvent(new KeyboardEvent('keydown', {
+                  bubbles: true, cancelable: true, key: _keyStr, keyCode: _keyCode, which: _keyCode, view: _innerWin
+                }));
+              }
+            }
+          } catch(_) {}
+          setTimeout(_reportSlidePos, 400);
+          return;
+        }
         // slide-layout:N — apply a slide layout by index (0=Blank, 1=Title, 2=Title+Content …)
         if (cmd.indexOf('slide-layout:') === 0) {
           var _slLayoutIdx = parseInt(cmd.slice(13), 10);
@@ -2857,14 +3951,27 @@
         if (cmd === 'dump-dom') {
           var iDoc = _innerWin.document;
           var lines = [];
+          // Skip SVG sprite symbols (zero-size defs) — they fill first 200 slots
+          // and hide actual layout elements. Show visible elements + key containers.
           iDoc.querySelectorAll('[id],[class]').forEach(function(el) {
+            var tag = el.tagName.toLowerCase();
+            if (tag === 'symbol' || tag === 'defs') return;
+            var r = el.getBoundingClientRect();
+            var vis = r.width > 0 && r.height > 0;
             var id = el.id ? '#' + el.id : '';
             var cls = el.className && typeof el.className === 'string'
-              ? '.' + el.className.trim().split(/\s+/).join('.') : '';
-            if (id || cls) lines.push(el.tagName.toLowerCase() + id + cls);
+              ? '.' + el.className.trim().split(/\s+/).join('.').slice(0, 60) : '';
+            if (id || cls) lines.push((vis ? '+' : '-') + tag + id + cls);
           });
-          console.log('[DOM-DUMP]\n' + lines.slice(0, 200).join('\n'));
-          window.webkit.messageHandlers.editorBridge.postMessage({ action: 'domDump', dump: lines.slice(0, 200) });
+          // Report visible elements first (+ prefix), then invisible
+          var vis = lines.filter(function(l) { return l[0] === '+'; });
+          var invis = lines.filter(function(l) { return l[0] === '-'; });
+          var out = ['DOM:vis='+vis.length+',invis='+invis.length]
+            .concat(vis.slice(0, 120))
+            .concat(['---INVIS---'])
+            .concat(invis.slice(0, 60));
+          console.log('[DOM-DUMP]\n' + out.join('\n'));
+          window.webkit.messageHandlers.editorBridge.postMessage({ action: 'domDump', dump: out });
           return;
         }
       } catch(e) {
@@ -2881,27 +3988,64 @@
       if (!_innerWin) return;
       window._filterInterceptEnabled = false;
       try { _innerWin._ooInjectEnabled = false; } catch(_) {}
+      var _restore = function() {
+        window._filterInterceptEnabled = true;
+        try { _innerWin._ooInjectEnabled = true; } catch(_) {}
+      };
       setTimeout(function() {
         try { _innerWin.focus(); } catch(_) {}
         var ed = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
-        var _done = false;
-        if (ed) {
-          if (!_done && typeof ed.asc_insertImageFromUrl === 'function') {
-            try { ed.asc_insertImageFromUrl(officeURL); _done = true; } catch(e1) {}
+        if (!ed) {
+          try { if (window._showInsertToast) window._showInsertToast('Editor not ready — please try again'); } catch(_) {}
+          setTimeout(_restore, 1500);
+          return;
+        }
+
+        function _insertWithUrl(url) {
+          var _done = false;
+          if (typeof ed.asc_insertImageFromUrl === 'function') {
+            try { ed.asc_insertImageFromUrl(url); _done = true; } catch(e1) { console.warn('[iOS] asc_insertImageFromUrl:', e1); }
           }
           if (!_done && typeof ed.asc_addImageUrl === 'function') {
-            try { ed.asc_addImageUrl(officeURL); _done = true; } catch(e2) {}
+            try { ed.asc_addImageUrl(url); _done = true; } catch(e2) {}
           }
           if (!_done && typeof ed.asc_AddImage === 'function') {
-            try { ed.asc_AddImage(officeURL); _done = true; } catch(e3) {}
+            try { ed.asc_AddImage(url); _done = true; } catch(e3) {}
+          }
+          if (!_done) {
+            var _clicked = false;
+            try { _clicked = _clickOOBtn(['insert image','image','picture','photo']); } catch(_) {}
+            if (!_clicked) {
+              try { if (window._showInsertToast) window._showInsertToast('Image insert not available in this editor version'); } catch(_) {}
+            }
           }
         }
-        if (!_done) _clickOOBtn(['insert image','image','picture','photo']);
-        setTimeout(function() {
-          window._filterInterceptEnabled = true;
-          try { _innerWin._ooInjectEnabled = true; } catch(_) {}
-        }, 1500);
-      }, 80);
+
+        // OO's asc_insertImageFromUrl only accepts http/https/blob URLs — office://
+        // URLs are rejected silently. Fetch the image bytes and create a blob URL in
+        // the INNER frame context so OO's image loader (running inside the inner iframe)
+        // can access it without a cross-origin restriction.
+        // Set crash-guard before OO image insert (OOM risk). Cleared after success/error.
+        try { localStorage.setItem('_oo_insert_pending', 'image'); } catch(_) {}
+        fetch(officeURL)
+          .then(function(r) { return r.blob(); })
+          .then(function(blob) {
+            var blobUrl = _innerWin.URL.createObjectURL(blob);
+            _insertWithUrl(blobUrl);
+            // Revoke after OO has had time to load the image bytes
+            setTimeout(function() {
+              try { _innerWin.URL.revokeObjectURL(blobUrl); } catch(_) {}
+              try { localStorage.removeItem('_oo_insert_pending'); } catch(_) {}
+              _restore();
+            }, 3000);
+          })
+          .catch(function(fetchErr) {
+            console.warn('[iOS] insertImageByURL fetch failed:', fetchErr, '— falling back to direct URL');
+            _insertWithUrl(officeURL);
+            try { localStorage.removeItem('_oo_insert_pending'); } catch(_) {}
+            setTimeout(_restore, 1500);
+          });
+      }, 200);
     };
 
     window.insertImageByDataURL = function(dataURL) {
@@ -2968,7 +4112,9 @@
     };
 
     // Swift calls this to send a file into the editor.
-    window.receiveFileFromIOS = async function ({ fileName, fileType, base64data }) {
+    // Accepts either `fileURL` (office:// URL — preferred, no base64 overhead) or
+    // `base64data` (legacy fallback). `fileURL` path: fetch → ArrayBuffer, no encoding.
+    window.receiveFileFromIOS = async function ({ fileName, fileType, fileURL, base64data }) {
       try {
         document.getElementById('loading-text').textContent = 'Opening ' + fileName + '…';
         document.getElementById('loading').style.display = 'flex';
@@ -2982,7 +4128,14 @@
 
         initServer();
 
-        const buf = base64ToArrayBuffer(base64data);
+        var buf;
+        if (fileURL) {
+          var resp = await fetch(fileURL);
+          if (!resp.ok) throw new Error('Failed to fetch document: HTTP ' + resp.status);
+          buf = await resp.arrayBuffer();
+        } else {
+          buf = base64ToArrayBuffer(base64data);
+        }
         const file = new File([buf], fileName, { type: 'application/octet-stream' });
         await server.open(file, { fileType: fileType || fileName.split('.').pop() });
 

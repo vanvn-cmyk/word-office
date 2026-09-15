@@ -11,6 +11,42 @@
           content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no">
     <link rel="icon" href="resources/img/favicon.ico" type="image/x-icon"/>
 
+    <!-- iOS chrome-hiding CSS — embedded directly so it survives any frame navigation -->
+    <style id="_oo_ios_final">
+      /* Header / logo bar */
+      #header-row,#header-logo{display:none!important;height:0!important;min-height:0!important;overflow:hidden!important}
+      /* Info / coauthors buttons */
+      #id-btn-coauthors,#btn-coauthors,#btn-info,#id-btn-info,.btn-header-info,.asc-info-icon,.coauthors-btn,.btn-icon-info{display:none!important}
+      /* Left sidebar */
+      #leftmenu,#id-sidebar,#id-toolbar-left,.leftmenu,.asc-leftmenu,.asc-plugin-panel,.asc-leftmenu-item,[id*="leftmenu"],[class*="leftmenu"],[id*="left-panel"],[class*="left-panel"],[id*="leftpanel"],[class*="leftpanel"]{display:none!important;width:0!important;min-width:0!important;overflow:hidden!important}
+      /* Right panel */
+      #right-panel,#rightpanel,#right-menu,#rightmenu,#id-right-panel,#id-rightmenu,.right-panel,.rightpanel,.asc-rightmenu,[id*="right-panel"],[id*="rightpanel"],[id*="rightmenu"],[class*="right-panel"],[class*="rightpanel"]{display:none!important}
+      /* OO ribbon toolbar: fixed off-screen so _clickOOBtn() still works and keyboard-resize can't bring it back */
+      #toolbar,#id-toolbar,#toolbar-reflow,.toolbar-reflow,[id="toolbar"],[id="id-toolbar"],.toolbar-main,#toolbar-main,.document-toolbar,#document-toolbar{position:fixed!important;top:-9999px!important;left:-9999px!important;width:1px!important;height:1px!important;overflow:hidden!important;pointer-events:none!important;}
+      /* Rulers — [id*="ruler"] catches id_hor_ruler, id_vert_ruler, id_buttonRulers */
+      [id*="ruler"],[class*="ruler"],[id*="de-ruler"]{display:none!important}
+      /* OO Word SDK panel CONTAINERS: visibility:hidden preserves layout dims so
+         the SDK canvas coordinate system stays correct. display:none breaks text input. */
+      #id_panel_right,#id_panel_left,#id_panel_top,#id_horscrollpanel{
+        visibility:hidden!important;background:transparent!important;border:none!important}
+      /* Content elements inside panels: safe to display:none (don't affect canvas layout) */
+      #id_vertical_scroll,#id_buttonPrevPage,#id_buttonNextPage,#id_buttonRulers{display:none!important}
+      #id_horizontal_scroll,#id_buttonTabs,#id_hor_ruler,#id_vert_ruler{display:none!important}
+      /* Word scrollbars (generic wildcard — belt-and-suspenders) */
+      #id-de-v-scrollbar,#id-de-h-scrollbar,[id*="de-scrollbar"],[class*="de-scrollbar"],[id*="de-v-scroll"],[id*="de-h-scroll"],[id*="v-scrollbar"],[id*="h-scrollbar"],[id*="scrollbar"],[class*="scrollbar"]{display:none!important}
+      /* Word status bar */
+      #statusbar,#id-de-statusbar,.de-statusbar,.statusbar,[id*="de-statusbar"],[class*="de-statusbar"],[id*="de-status"],[class*="de-status"],[id*="statusbar"],[class*="statusbar"]{display:none!important}
+      /* Webkit scrollbars */
+      ::-webkit-scrollbar{width:0!important;height:0!important;display:none!important}
+      /* Transparent backgrounds */
+      body,#id_main_scroll,#id-main-scroll,.ms-container,.layout-wrapper,.scroll-content,.document-holder,.editor-main,#editor-main-page{background:transparent!important}
+      /* No page drop-shadow */
+      .page,.slide-page{box-shadow:none!important}
+      /* No inter-page gap */
+      .page+.page{border-top:0.5px solid rgba(128,128,128,0.14)!important;margin-top:0!important}
+      .pages:first-child,.page:first-child{margin-top:0!important}
+    </style>
+
     <!-- splash -->
 
     <style type="text/css">

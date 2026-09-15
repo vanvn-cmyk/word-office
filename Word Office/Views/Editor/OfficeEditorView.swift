@@ -24,9 +24,8 @@ struct OfficeEditorView: View {
     @State private var saveCount = 0
     @State private var isDirty = false
     @State private var editorVC: OfficeEditorViewController?
-    @State private var lastSaveTime: Date? = nil
-    @State private var wordCount: Int = 0
     @State private var slideProgress: (current: Int, total: Int) = (1, 1)
+    @State private var slideThumbnails: [Int: UIImage] = [:]
 
     // Native photo insertion
     @State private var showImagePicker = false
@@ -77,12 +76,18 @@ struct OfficeEditorView: View {
                             filterItems = items
                             showFilterSheet = true
                         },
-                        onSlideChange: { c, t in slideProgress = (c, t) }
+                        onSlideChange: { c, t in slideProgress = (c, t) },
+                        onSlideThumbnail: { num, data in
+                            if let img = UIImage(data: data) {
+                                slideThumbnails[num] = img
+                            }
+                        }
                     )
 
-                    if fileKind == .word {
-                        wordStatusBar
+                    if fileKind == .ppt {
+                        slideStrip
                     }
+
                 }
                 // Native photo picker — triggered by "insert-image" command
                 .photosPicker(
@@ -253,6 +258,79 @@ struct OfficeEditorView: View {
         }
     }
 
+    // MARK: - PPT slide strip
+
+    private static let pptAccent = Color(red: 0.84, green: 0.22, blue: 0.18)
+
+    /// Horizontal thumbnail strip below the PPT canvas.
+    /// Each card is a 16:9 mini slide placeholder with a slide-number badge.
+    /// Active card gets the PPT red border; strip auto-scrolls to keep it visible.
+    private var slideStrip: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(1...max(1, slideProgress.total), id: \.self) { num in
+                        let isCurrent = num == slideProgress.current
+                        Button { handleCommand("slide-goto:\(num)") } label: {
+                            ZStack(alignment: .bottomTrailing) {
+                                // 16:9 slide card — show real thumbnail if captured, else placeholder
+                                if let thumb = slideThumbnails[num] {
+                                    Image(uiImage: thumb)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 96, height: 54)
+                                        .clipped()
+                                        .cornerRadius(5)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 5)
+                                                .strokeBorder(
+                                                    isCurrent ? Self.pptAccent : Color.secondary.opacity(0.25),
+                                                    lineWidth: isCurrent ? 2.5 : 1
+                                                )
+                                        )
+                                } else {
+                                    RoundedRectangle(cornerRadius: 5)
+                                        .fill(Color(uiColor: .secondarySystemBackground))
+                                        .frame(width: 96, height: 54)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 5)
+                                                .strokeBorder(
+                                                    isCurrent ? Self.pptAccent : Color.secondary.opacity(0.25),
+                                                    lineWidth: isCurrent ? 2.5 : 1
+                                                )
+                                        )
+                                }
+                                // Number badge bottom-right
+                                Text("\(num)")
+                                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 2)
+                                    .background(
+                                        isCurrent ? Self.pptAccent : Color.secondary.opacity(0.55),
+                                        in: RoundedRectangle(cornerRadius: 3)
+                                    )
+                                    .padding(4)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .id(num)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+            }
+            .frame(height: 74)
+            .background(.bar)
+            .overlay(alignment: .top) { Divider() }
+            .onChange(of: slideProgress.current) { _, current in
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    proxy.scrollTo(current, anchor: .center)
+                }
+            }
+        }
+    }
+
     // MARK: - Nav pill (Word + Excel)
 
     @ToolbarContentBuilder
@@ -260,10 +338,20 @@ struct OfficeEditorView: View {
         if fileKind == .word || fileKind == .excel || fileKind == .ppt {
             ToolbarItem(placement: .navigationBarTrailing) {
                 HStack(spacing: 4) {
-                    pillIconBtn("arrow.uturn.backward", cmd: "undo",           label: "Undo")
-                    pillIconBtn("arrow.uturn.forward",  cmd: "redo",           label: "Redo")
-                    pillIconBtn("printer",              cmd: "print",          label: "Print")
-                    pillIconBtn("text.bubble",          cmd: "insert-comment", label: "Comment")
+                    pillIconBtn("arrow.uturn.backward", cmd: "undo", label: "Undo")
+                    pillIconBtn("arrow.uturn.forward",  cmd: "redo", label: "Redo")
+                    if fileKind == .ppt {
+                        // PPT: share instead of print/comment
+                        ShareLink(item: ref.url) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 17, weight: .regular))
+                                .foregroundStyle(.primary)
+                        }
+                        .accessibilityLabel("Share")
+                    } else {
+                        pillIconBtn("printer",    cmd: "print",          label: "Print")
+                        pillIconBtn("text.bubble", cmd: "insert-comment", label: "Comment")
+                    }
                     Button {
                         NotificationCenter.default.post(name: .editorSaveRequested, object: nil)
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { dismiss() }
@@ -282,30 +370,6 @@ struct OfficeEditorView: View {
                 .foregroundStyle(.primary)
         }
         .accessibilityLabel(label)
-    }
-
-    private var wordStatusBar: some View {
-        HStack {
-            if let t = lastSaveTime {
-                Text("Saved at \(t, style: .time)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                Text(isDirty ? "Unsaved changes" : "No changes")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            if wordCount > 0 {
-                Text("\(wordCount) words")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 6)
-        .background(.bar)
-        .overlay(alignment: .top) { Divider() }
     }
 
     // MARK: - Save / error
@@ -348,7 +412,7 @@ struct OfficeEditorView: View {
             } else {
                 await MainActor.run {
                     saveCount += 1
-                    lastSaveTime = Date()
+
                 }
             }
         }
@@ -373,6 +437,7 @@ private struct _OfficeWebView: UIViewControllerRepresentable {
     let onVCReady: (OfficeEditorViewController) -> Void
     let onFilterRequest: ([NativeFilterItem]) -> Void
     let onSlideChange: (Int, Int) -> Void
+    let onSlideThumbnail: (Int, Data) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -384,6 +449,7 @@ private struct _OfficeWebView: UIViewControllerRepresentable {
         vc.onDirtyChange = { dirty in Task { @MainActor in onDirtyChange(dirty) } }
         vc.onFilterRequest = { items in Task { @MainActor in onFilterRequest(items) } }
         vc.onSlideChange = { c, t in Task { @MainActor in onSlideChange(c, t) } }
+        vc.onSlideThumbnail = { num, data in Task { @MainActor in onSlideThumbnail(num, data) } }
         vc.openFile(at: ref.url)
         Task { @MainActor in onVCReady(vc) }
         return vc

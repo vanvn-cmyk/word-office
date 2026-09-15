@@ -103,9 +103,19 @@ struct LibraryView: View {
     /// Drives the shimmer light that travels down the timeline rail (0 → section count, looping).
     @State private var railShimmerProgress: CGFloat = 0
     @State private var badgePulse = false
+    @State private var navPath = NavigationPath()
+    /// Per-session search text scoped to the "View all" destination —
+    /// cleared automatically when the user pops back.
+    @State private var allFilesSearchInput: String = ""
+    /// Set to `true` the moment `.task` fires its first iteration so the
+    /// "No documents yet" empty state never flashes during the 1-frame
+    /// gap between permission becoming `.granted` and `loadLibrary()`
+    /// setting `isLoading = true`.
+    @State private var hasInitialLoadStarted = false
+    @State private var cardPreviewWidth: CGFloat = 320
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navPath) {
             Group {
                 if store.folderPermissionState == .checking {
                     ProgressView()
@@ -118,7 +128,7 @@ struct LibraryView: View {
                         message: "Choose a folder to start tracking your documents",
                         action: (label: "Choose folder", handler: { Task { await onRequestPermission() } })
                     )
-                } else if store.entries.isEmpty && !viewModel.isLoading {
+                } else if store.entries.isEmpty && !viewModel.isLoading && hasInitialLoadStarted {
                     // titleRow shown ABOVE the empty state so "Your Cabinet"
                     // + premium crown stays visible even when the library
                     // is empty — matches iOS Photos / Notes convention
@@ -157,7 +167,10 @@ struct LibraryView: View {
             // asked for as a bonus.
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(.hidden, for: .navigationBar)
-            .task(id: store.folderPermissionState) { await viewModel.loadLibrary() }
+            .task(id: store.folderPermissionState) {
+                hasInitialLoadStarted = true
+                await viewModel.loadLibrary()
+            }
             .refreshable { await viewModel.loadLibrary() }
             .errorAlert($viewModel.errorMessage)
             .sheet(item: $exportingRef) { ref in
@@ -404,17 +417,63 @@ struct LibraryView: View {
                 }
 
                 if viewMode == .list {
-                    // List mode: one big row with the continuous timeline rail.
-                    // timelineGroupedContent owns all sections, labels, and animation.
+                    // Individual List rows — each card is its own row so iOS
+                    // scopes context-menu lift to that card only.
+                    // Rail: 3pt tint bar drawn in the leading gutter via
+                    // listRowBackground, which fills the row including insets.
+                    // Content offset (leading: 11pt) matches timelineGroupedContent's
+                    // .padding(.leading, 3 + DSSpacing.xs) so the visual is identical.
                     Section {
-                        timelineGroupedContent
-                            .listRowInsets(EdgeInsets())
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
+                        ForEach(groupedSections, id: \.status) { group in
+                            let isFirst = group.status == groupedSections.first?.status
+
+                            statusTabHeader(status: group.status, count: group.entries.count)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets(
+                                    top: isFirst ? 0 : DSSpacing.xs,
+                                    leading: 3 + DSSpacing.xs,
+                                    bottom: 0,
+                                    trailing: DSSpacing.xs))
+                                .listRowBackground(
+                                    HStack(spacing: 0) {
+                                        group.status.tintColor.frame(width: 3)
+                                        Color.clear
+                                    }
+                                )
+
+                            if showsGetStartedCoachmark && dueEntries.isEmpty && isFirst {
+                                getStartedCoachmarkRow
+                                    .listRowSeparator(.hidden)
+                                    .listRowInsets(EdgeInsets(
+                                        top: 0, leading: 3 + DSSpacing.xs,
+                                        bottom: 0, trailing: DSSpacing.xs))
+                                    .listRowBackground(
+                                        HStack(spacing: 0) {
+                                            group.status.tintColor.frame(width: 3)
+                                            Color.clear
+                                        }
+                                    )
+                            }
+
+                            ForEach(Array(group.entries.prefix(4))) { entry in
+                                cardContent(for: entry)
+                                    .listRowSeparator(.hidden)
+                                    .listRowInsets(EdgeInsets(
+                                        top: 0,
+                                        leading: 3 + DSSpacing.xs,
+                                        bottom: DSSpacing.xs,
+                                        trailing: DSSpacing.xs))
+                                    .listRowBackground(
+                                        HStack(spacing: 0) {
+                                            group.status.tintColor.frame(width: 3)
+                                            Color.clear
+                                        }
+                                    )
+                            }
+                        }
                     }
                 } else {
-                    // Grid mode: same single-row timeline spine as list mode,
-                    // but each section renders a DocumentGrid instead of cards.
+                    // Grid mode: kept as single-row spine (grid cards don't swipe).
                     Section {
                         timelineGroupedGrid
                             .listRowInsets(EdgeInsets())
@@ -487,6 +546,16 @@ struct LibraryView: View {
                 },
                 onDeleteFile: { entry in
                     Task { await performDeleteFile(entryID: entry.id, name: entry.document.name) }
+                },
+                onChangeStatus: { entry, status in
+                    Task {
+                        await viewModel.setStatus(status, for: entry.id)
+                        toaster.show(
+                            status == .draft ? .info : .success,
+                            title: "Marked as \(status.displayName)",
+                            filename: entry.document.name
+                        )
+                    }
                 }
             )
             .listRowInsets(EdgeInsets())
@@ -503,20 +572,77 @@ struct LibraryView: View {
     /// Data comes from `viewModel.groupedByStatus()` which already respects
     /// `dateFilter`, `typeFilter`, and `favouritesOnly` — so whatever window
     /// the user has active in the parent screen carries over here automatically.
+    /// Navigation bar is hidden — back button + status pill live in content
+    /// (avoids iOS 26 Liquid Glass wrapping toolbar items into ovoid capsules).
     @ViewBuilder
     private func statusAllFilesDestination(status: DocumentStatus) -> some View {
-        let entries = viewModel.groupedByStatus()
+        let allEntries = viewModel.groupedByStatus()
             .first(where: { $0.status == status })?.entries ?? []
+        let query = allFilesSearchInput.trimmingCharacters(in: .whitespaces)
+        let entries: [LibraryEntry] = query.isEmpty
+            ? allEntries
+            : allEntries.filter { $0.document.name.localizedCaseInsensitiveContains(query) }
+        let statusBg: Color = switch status {
+        case .draft:    .dsStatusWarningBackground
+        case .reviewed: .dsBrandPrimarySubtle
+        case .done:     .dsStatusSuccessBackground
+        }
 
         List {
+            // ── Row 1: back button (left) + title centered via ZStack ──
+            Section {
+                ZStack {
+                    // Title centered across the full row
+                    Text(status.displayName)
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundStyle(Color.primary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+
+                    // Back button pinned to leading edge
+                    HStack {
+                        Button { navPath.removeLast() } label: {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(Color.dsTextPrimary)
+                                .frame(width: DSSize.minimumTouchTarget,
+                                       height: DSSize.minimumTouchTarget)
+                                .roundIconButtonSurface()
+                        }
+                        .buttonStyle(.plain)
+                        Spacer()
+                    }
+                }
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: DSSpacing.xs, leading: DSSpacing.md,
+                                          bottom: DSSpacing.xxs, trailing: DSSpacing.md))
+            }
+
+            // ── Row 2: search + view-mode toggle (no filter button) ──
+            // Apple HIG: 16pt side margin (md) for content, 12pt bottom gap before cards.
+            Section {
+                LibrarySearchAndActionsBar(
+                    input: $allFilesSearchInput,
+                    onClear: { allFilesSearchInput = "" }
+                ) {
+                    viewModeToggleButton
+                }
+                .listRowInsets(EdgeInsets(top: DSSpacing.xs, leading: DSSpacing.md,
+                                          bottom: DSSpacing.md, trailing: DSSpacing.md))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            }
+
+            // ── Content ──
+            // Apple HIG: 16pt (md) side margins, 8pt (xs) vertical gap between cards.
             if viewMode == .list {
                 Section {
                     ForEach(entries) { entry in
                         cardContent(for: entry)
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
-                            .listRowInsets(EdgeInsets(top: DSSpacing.xxs, leading: DSSpacing.md,
-                                                      bottom: DSSpacing.xxs, trailing: DSSpacing.xs))
+                            .listRowInsets(EdgeInsets(top: DSSpacing.xs, leading: DSSpacing.md,
+                                                      bottom: DSSpacing.xs, trailing: DSSpacing.md))
                     }
                 }
             } else {
@@ -532,9 +658,22 @@ struct LibraryView: View {
                         onRename: { entry, newStem in await performRename(entryID: entry.id, to: newStem) },
                         onConvertToZip: { entry in performConvertToZip(entryID: entry.id, name: entry.document.name) },
                         onMarkDone: { entry in Task { await performMarkDone(entry: entry) } },
-                        onDeleteFile: { entry in Task { await performDeleteFile(entryID: entry.id, name: entry.document.name) } }
+                        onDeleteFile: { entry in Task { await performDeleteFile(entryID: entry.id, name: entry.document.name) } },
+                        onChangeStatus: { entry, status in
+                            Task {
+                                await viewModel.setStatus(status, for: entry.id)
+                                toaster.show(
+                                    status == .draft ? .info : .success,
+                                    title: "Marked as \(status.displayName)",
+                                    filename: entry.document.name
+                                )
+                            }
+                        },
+                        leadingPadding: DSSpacing.md
                     )
-                    .listRowInsets(EdgeInsets())
+                    // leadingPadding=md(16pt) from DocumentGrid + xs(8pt) from listRowInsets trailing
+                    // + xs(8pt) from DocumentGrid's own trailing = 16pt each side — symmetric HIG margins.
+                    .listRowInsets(EdgeInsets(top: DSSpacing.sm, leading: 0, bottom: 0, trailing: DSSpacing.xs))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                 }
@@ -547,19 +686,24 @@ struct LibraryView: View {
                     .listRowSeparator(.hidden)
             }
         }
-        .listStyle(.insetGrouped)
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
         .contentMargins(.top, 0, for: .scrollContent)
-        .listSectionSpacing(DSSpacing.sm)
-        .navigationTitle(status.displayName)
-        .navigationBarTitleDisplayMode(.large)
+        // Hide system nav bar — back + title live in content above (same
+        // rationale as the root LibraryView: iOS 26 Liquid Glass wraps
+        // toolbar items in ovoid capsules we can't reshape).
+        .toolbar(.hidden, for: .navigationBar)
+        .onDisappear { allFilesSearchInput = "" }
         .overlay {
             if entries.isEmpty {
                 ContentUnavailableView(
-                    "No \(status.displayName) documents",
+                    query.isEmpty ? "No \(status.displayName) documents" : "No results",
                     systemImage: "doc.text",
-                    description: Text(viewModel.dateFilter != nil
-                        ? "No files in this window — try a different date filter"
-                        : "No files here yet")
+                    description: Text(query.isEmpty
+                        ? (viewModel.dateFilter != nil
+                            ? "No files in this window — try a different date filter"
+                            : "No files here yet")
+                        : "No documents match \"\(query)\"")
                 )
             }
         }
@@ -596,10 +740,38 @@ struct LibraryView: View {
         )
         .padding(.horizontal, DSSpacing.sm)
         .padding(.vertical, DSSpacing.sm)
-        .background(Color.dsBackgroundElevated, in: RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous).strokeBorder(Color.dsBorderSubtle))
+        .background(Color.dsBackgroundElevated,
+                    in: RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous)
+            .strokeBorder(Color.dsBorderSubtle))
+        .shadow(color: .black.opacity(0.04), radius: 12, y: 5)
         .shadow(color: .black.opacity(0.05), radius: 3, y: 1)
-        .contextMenu { contextMenu(for: entry) }
+        .background(GeometryReader { geo in
+            Color.clear.onAppear { cardPreviewWidth = geo.size.width }
+        })
+        .contextMenu(menuItems: {
+            contextMenu(for: entry)
+        }, preview: {
+            HStack(spacing: DSSpacing.md) {
+                DocumentKindIcon(kind: entry.document.kind)
+                    .frame(width: 44, height: 44)
+                VStack(alignment: .leading, spacing: DSSpacing.xs) {
+                    Text(entry.document.name)
+                        .font(DSFont.headline)
+                        .foregroundStyle(Color.dsTextPrimary)
+                        .lineLimit(1)
+                    Text(entry.document.modifiedAt, format: .relative(presentation: .named))
+                        .font(DSFont.footnote)
+                        .foregroundStyle(Color.dsTextSecondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, DSSpacing.md)
+            .padding(.vertical, DSSpacing.md)
+            .frame(width: cardPreviewWidth)
+            .background(Color.dsBackgroundElevated,
+                        in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+        })
     }
 
     private func row(for entry: LibraryEntry) -> some View {
@@ -612,7 +784,7 @@ struct LibraryView: View {
         }
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
-        .listRowInsets(EdgeInsets(top: DSSpacing.xxs, leading: DSSpacing.md, bottom: DSSpacing.xxs, trailing: DSSpacing.xs))
+        .listRowInsets(EdgeInsets(top: DSSpacing.xxs, leading: DSSpacing.lg, bottom: DSSpacing.xxs, trailing: DSSpacing.xs))
     }
 
     /// Grouped list rendered as a continuous timeline spine.
@@ -632,39 +804,72 @@ struct LibraryView: View {
         }
         let needsAttention = count > 0 && status != .done
 
-        HStack(spacing: 7) {
-            Image(systemName: status.systemImage)
-                .font(.system(size: 17, weight: .semibold))
-            Text(status.displayName)
-                .font(.system(size: 17, weight: .semibold))
+        return HStack(spacing: DSSpacing.sm) {
+            // Left: status pill — icon + name only
+            HStack(spacing: 7) {
+                Image(systemName: status.systemImage)
+                    .font(.system(size: 17, weight: .semibold))
+                Text(status.displayName)
+                    .font(.system(size: 17, weight: .semibold))
+            }
+            .foregroundStyle(status.tintColor)
+            .padding(.horizontal, DSSpacing.sm)
+            .padding(.vertical, 7)
+            .background(bg, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+
             Spacer(minLength: 0)
 
-            // Pulsing dot — only for Draft/Reviewed when non-empty
-            if needsAttention && !reduceMotion {
-                Circle()
-                    .fill(status.tintColor)
-                    .frame(width: 7, height: 7)
-                    .scaleEffect(badgePulse ? 1.35 : 1.0)
-                    .opacity(badgePulse ? 0.5 : 1.0)
-                    .animation(
-                        .easeInOut(duration: 1.2).repeatForever(autoreverses: true),
-                        value: badgePulse
-                    )
-            } else if needsAttention {
-                Circle()
-                    .fill(status.tintColor)
-                    .frame(width: 7, height: 7)
+            // Right: ● View all › (overflow) or ● count (normal)
+            if count > 4 {
+                Button {
+                    navPath.append(status)
+                } label: {
+                    HStack(spacing: 4) {
+                        if needsAttention && !reduceMotion {
+                            Circle()
+                                .fill(status.tintColor)
+                                .frame(width: 7, height: 7)
+                                .scaleEffect(badgePulse ? 1.35 : 1.0)
+                                .opacity(badgePulse ? 0.5 : 1.0)
+                                .animation(
+                                    .easeInOut(duration: 1.2).repeatForever(autoreverses: true),
+                                    value: badgePulse
+                                )
+                        } else if needsAttention {
+                            Circle()
+                                .fill(status.tintColor)
+                                .frame(width: 7, height: 7)
+                        }
+                        Text("View all")
+                            .font(.system(size: 13, weight: .semibold))
+                    }
+                    .foregroundStyle(status.tintColor)
+                }
+                .buttonStyle(.plain)
+            } else {
+                HStack(spacing: 4) {
+                    if needsAttention && !reduceMotion {
+                        Circle()
+                            .fill(status.tintColor)
+                            .frame(width: 7, height: 7)
+                            .scaleEffect(badgePulse ? 1.35 : 1.0)
+                            .opacity(badgePulse ? 0.5 : 1.0)
+                            .animation(
+                                .easeInOut(duration: 1.2).repeatForever(autoreverses: true),
+                                value: badgePulse
+                            )
+                    } else if needsAttention {
+                        Circle()
+                            .fill(status.tintColor)
+                            .frame(width: 7, height: 7)
+                    }
+                    Text("\(count)")
+                        .font(.system(size: 13, weight: .medium))
+                        .monospacedDigit()
+                        .foregroundStyle(status.tintColor.opacity(0.6))
+                }
             }
-
-            Text("\(count)")
-                .font(.system(size: 13, weight: .medium))
-                .monospacedDigit()
-                .foregroundStyle(status.tintColor.opacity(0.6))
         }
-        .foregroundStyle(status.tintColor)
-        .padding(.horizontal, DSSpacing.sm)
-        .padding(.vertical, 7)
-        .background(bg, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         .padding(.bottom, DSSpacing.sm)
         .onAppear { badgePulse = true }
     }
@@ -694,17 +899,6 @@ struct LibraryView: View {
                         ForEach(group.entries.prefix(4)) { entry in
                             cardContent(for: entry)
                         }
-                    }
-
-                    if group.entries.count > 4 {
-                        NavigationLink(value: group.status) {
-                            Text("View all \(group.entries.count)")
-                                .font(DSFont.subheadline.weight(.semibold))
-                                .foregroundStyle(group.status.tintColor)
-                                .frame(maxWidth: .infinity, alignment: .trailing)
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.top, DSSpacing.xxs)
                     }
 
                     Color.clear.frame(height: DSSpacing.xxs)
@@ -751,7 +945,10 @@ struct LibraryView: View {
                 let localPhase = railShimmerProgress - CGFloat(sectionIndex)
 
                 VStack(alignment: .leading, spacing: 0) {
+                    // DocumentGrid adds its own .padding(.trailing, DSSpacing.xs) internally,
+                    // so the header needs the same extra offset to keep "View all" flush.
                     statusTabHeader(status: group.status, count: group.entries.count)
+                        .padding(.trailing, DSSpacing.xs)
 
                     if showsGetStartedCoachmark && dueEntries.isEmpty && isFirst {
                         getStartedCoachmarkRow
@@ -770,23 +967,20 @@ struct LibraryView: View {
                         onConvertToZip: { entry in performConvertToZip(entryID: entry.id, name: entry.document.name) },
                         onMarkDone: { entry in Task { await performMarkDone(entry: entry) } },
                         onDeleteFile: { entry in Task { await performDeleteFile(entryID: entry.id, name: entry.document.name) } },
+                        onChangeStatus: { entry, status in
+                            Task {
+                                await viewModel.setStatus(status, for: entry.id)
+                                toaster.show(
+                                    status == .draft ? .info : .success,
+                                    title: "Marked as \(status.displayName)",
+                                    filename: entry.document.name
+                                )
+                            }
+                        },
                         leadingPadding: 0
                     )
 
-                    if group.entries.count > 4 {
-                        NavigationLink(value: group.status) {
-                            Text("View all \(group.entries.count)")
-                                .font(DSFont.subheadline.weight(.semibold))
-                                .foregroundStyle(group.status.tintColor)
-                                .frame(maxWidth: .infinity, alignment: .trailing)
-                                .padding(.trailing, DSSpacing.xs)
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.top, DSSpacing.xxs)
-                        .padding(.bottom, DSSpacing.xs)
-                    } else {
-                        Color.clear.frame(height: DSSpacing.xxs)
-                    }
+                    Color.clear.frame(height: DSSpacing.xxs)
                 }
                 .padding(.leading, 3 + DSSpacing.xs)
                 .background(alignment: .leading) {
@@ -1463,7 +1657,14 @@ struct LibraryView: View {
         Section("Change status") {
             ForEach(DocumentStatus.allCases) { status in
                 Button {
-                    Task { await viewModel.setStatus(status, for: entry.id) }
+                    Task {
+                        await viewModel.setStatus(status, for: entry.id)
+                        toaster.show(
+                            status == .draft ? .info : .success,
+                            title: "Marked as \(status.displayName)",
+                            filename: entry.document.name
+                        )
+                    }
                 } label: {
                     Label(status.displayName, systemImage: status.systemImage)
                 }
@@ -1479,8 +1680,6 @@ enum LibraryViewMode: String {
     case list
     case grid
 }
-
-// MARK: - Sub-views
 
 private struct LibraryHeroCard: View {
     let copy: LibraryHeroCopy

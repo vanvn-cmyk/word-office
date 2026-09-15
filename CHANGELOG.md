@@ -6,6 +6,38 @@ Format tham khảo [Keep a Changelog](https://keepachangelog.com/). Entry mới 
 
 ---
 
+## [Unreleased] — 2026-09-15 (PPT UX: slide strip 16:9 cards + OO panel root-cause fix)
+
+### 🎨 PPT nav pill — remove print/comment, add ShareLink
+**File:** `Views/Editor/OfficeEditorView.swift`
+- PPT branch trong `editorNavPill`: bỏ `printer` + `text.bubble`; thêm `ShareLink(item: ref.url)` (native iOS share sheet)
+- Word/Excel giữ nguyên print + comment
+- Chỉ thay đổi PPT, không ảnh hưởng Word/Excel
+
+### 🎨 Slide strip → 16:9 mini thumbnail cards
+**File:** `Views/Editor/OfficeEditorView.swift`
+- Thay number chips (36×36pt) bằng 16:9 slide cards (96×54pt `RoundedRectangle`)
+- Active card: `pptAccent` red `strokeBorder` 2.5pt; inactive: 1pt grey 0.25 opacity
+- Number badge bottom-right: 9pt bold monospaced, white text, red/grey background
+- Strip height 52pt → 74pt
+- `ScrollViewReader` auto-scroll giữ nguyên
+
+### 🐛 OO slide thumbnail panel — root cause found + fixed
+**File:** `OfficeBundle/editor.html`
+
+**Root cause:** Guard `if (r.width > ww*0.6 && r.height > wh*0.3) return` trong 5s geometry scan chặn PPT panel trước khi PPT check chạy. Panel ~280px / 390px screen = 72% > 60% threshold → bị skip.
+
+**Fix — 5 layers:**
+1. **Early scans 1s/2s/3s/7s/15s** (`_pptGeoHide`) — chạy ngay sau OO detect, không có large-container guard. Bound: `width < screenWidth * 0.85` (panel 65-75%, canvas sau reflow ~100% → không bị bắt)
+2. **5s generic scan** — PPT panel check chuyển lên TRƯỚC large-container guard
+3. **MutationObserver (5 phút)** — geometry-check cả `childList` (node mới) lẫn `attributes` (re-shown); thêm `width:0; overflow:hidden` bên cạnh `display:none`
+4. **Repeat scans 15s + 60s** — PPT check trước guard, cùng `0.85` bound
+5. **`injectIOSChrome` 4s scan** — scan ALL elements (không chỉ `body > *`) cho PPT
+
+Dispatch `resize` sau mỗi hide để OO recalculate canvas width về full screen.
+
+---
+
 ## [Unreleased] — 2026-09-14 (Library polish: statusTabHeader, filter badge, TemplateGallery anti-AI)
 
 ### ✅ EditorSheet `onDone` callback

@@ -228,13 +228,13 @@ struct FileActionsMenu: View {
 
     var body: some View {
         Button {
-            if reduceMotion {
-                isActionsSheetPresented = true
-            } else {
-                withAnimation(.smooth(duration: 0.28)) {
-                    isActionsSheetPresented = true
-                }
-            }
+            // Present without animation so iOS doesn't run its own
+            // fullScreenCover slide-in (which briefly shows a dark system
+            // background before presentationBackground(.clear) takes effect).
+            // The button icon's tint animation is driven by the
+            // `.animation(value: isActionsSheetPresented)` modifier below —
+            // no need for withAnimation here.
+            isActionsSheetPresented = true
         } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: 13, weight: .semibold))
@@ -433,7 +433,11 @@ struct FileActionsMenu: View {
         withAnimation(animation) { cardIsPresented = false }
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(240))
-            isActionsSheetPresented = false
+            // Dismiss cover instantly — no system transition animation —
+            // same reason as the present path above.
+            withTransaction(Transaction(animation: nil)) {
+                isActionsSheetPresented = false
+            }
         }
     }
 
