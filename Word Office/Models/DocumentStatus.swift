@@ -8,6 +8,10 @@ import SwiftUI
 /// old persisted row still carrying the removed "sent" rawValue degrades
 /// safely to Draft instead of failing to decode.
 enum DocumentStatus: String, Codable, Hashable, Sendable, CaseIterable, Identifiable {
+    /// Auto-assigned to seeded sample files only — signals "tutorial content,
+    /// not a real working document yet". Never selectable by the user via the
+    /// status picker; use `userSelectableCases` to build picker UIs.
+    case getStarted
     case draft
     case reviewed
     case done
@@ -16,46 +20,46 @@ enum DocumentStatus: String, Codable, Hashable, Sendable, CaseIterable, Identifi
 
     var displayName: String {
         switch self {
-        case .draft:    "Draft"
-        case .reviewed: "Reviewed"
-        case .done:     "Done"
+        case .getStarted: "Get Started"
+        case .draft:      "Draft"
+        case .reviewed:   "Reviewed"
+        case .done:       "Done"
         }
     }
 
     /// Circle-wrapped family so all statuses share one visual weight across
-    /// chip / context menu / section header — `signature` (the literal
-    /// scribble) stood out and broke the row rhythm. `checkmark.seal` reads
-    /// as "completed" generically, not tied to e-signing specifically.
+    /// chip / context menu / section header.
     var systemImage: String {
         switch self {
-        case .draft:    "pencil.circle"
-        case .reviewed: "eye.circle"
-        case .done:     "checkmark.seal"
+        case .getStarted: "flag.fill"
+        case .draft:      "pencil.circle"
+        case .reviewed:   "eye.circle"
+        case .done:       "checkmark.seal"
         }
     }
 
-    /// Single canonical color per status — was duplicated slightly
-    /// differently across `DocumentCard.StatusPill`, `DocumentGrid
-    /// .StatusPillTag`, and `LibraryView.statusIconColor` (all mirrors of
-    /// each other "kept in sync" by comment convention, not by the
-    /// compiler) before 2026-09-14. Hoisted here once a 4th near-identical
-    /// switch (`StatusSectionHeader` + the row accent bar) made the
-    /// duplication a real drift risk rather than a one-off. Every
-    /// consumer should read this instead of re-deriving its own palette.
+    /// Single canonical color per status.
     var tintColor: Color {
         switch self {
-        case .draft:    Color.dsStatusWarning
-        case .reviewed: Color.dsBrandPrimary
-        case .done:     Color.dsStatusSuccess
+        case .getStarted: Color.dsBrandPrimary
+        case .draft:      Color.dsStatusWarning
+        case .reviewed:   Color.dsBrandPrimary
+        case .done:       Color.dsStatusSuccess
         }
     }
 
-    /// Cycles forward: Draft → Reviewed → Done → Draft.
+    /// Cycles forward through user-facing statuses. `.getStarted` advances
+    /// to `.draft` so tapping "next" on a sample file promotes it naturally.
     var next: DocumentStatus {
         switch self {
-        case .draft:    .reviewed
-        case .reviewed: .done
-        case .done:     .draft
+        case .getStarted: .draft
+        case .draft:      .reviewed
+        case .reviewed:   .done
+        case .done:       .draft
         }
     }
+
+    /// Status values the user can choose manually (excludes `.getStarted`
+    /// which is system-assigned to sample files only).
+    static var userSelectableCases: [DocumentStatus] { [.draft, .reviewed, .done] }
 }

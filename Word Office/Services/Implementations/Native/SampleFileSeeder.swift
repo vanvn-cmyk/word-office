@@ -24,9 +24,18 @@ final class SampleFileSeeder {
     /// the copy, so keeping them stable in one place makes any future
     /// re-branding a single edit.
     static let sampleFiles: [SampleFile] = [
-        SampleFile(bundleName: "Get Started Word", ext: "docx"),
-        SampleFile(bundleName: "Get Started Excel", ext: "xlsx"),
-        SampleFile(bundleName: "Get Started PowerPoint", ext: "pptx"),
+        SampleFile(bundleName: "Get Started Word",        ext: "docx"),
+        SampleFile(bundleName: "Get Started Excel",       ext: "xlsx"),
+        SampleFile(bundleName: "Get Started PowerPoint",  ext: "pptx"),
+    ]
+
+    /// Initial status for sample files — all `.getStarted` so they appear
+    /// together in a dedicated "Get Started" section, separate from the
+    /// user's real working documents.
+    static let sampleFileStatuses: [String: DocumentStatus] = [
+        "Get Started Word.docx":        .getStarted,
+        "Get Started Excel.xlsx":       .getStarted,
+        "Get Started PowerPoint.pptx":  .getStarted,
     ]
 
     struct SampleFile: Sendable {

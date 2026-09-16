@@ -894,9 +894,15 @@ final class LibraryViewModel {
             if let existingMetadata = existing[docID] {
                 metadata = existingMetadata
             } else {
-                // First scan encounter — default to `.draft`, persist so counts stay right.
+                // First scan encounter — sample files get a designated status
+                // so the Library shows all three sections (Draft / Reviewed /
+                // Done) right after onboarding's "Maybe Later". Every other
+                // new file defaults to `.draft`.
+                let filename = scanEntry.document.url.lastPathComponent
+                let initialStatus = SampleFileSeeder.sampleFileStatuses[filename] ?? .draft
                 let created = DocumentMetadata(
                     id: docID,
+                    status: initialStatus,
                     lastOpenedAt: now,
                     lastModifiedAt: scanEntry.document.modifiedAt
                 )

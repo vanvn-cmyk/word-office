@@ -38,7 +38,14 @@ struct DocumentGrid: View {
                     onConvertToZip: { onConvertToZip(entry) },
                     onMarkDone: { onMarkDone(entry) },
                     onDeleteFile: { onDeleteFile(entry) },
-                    onLongPress: { statusPickerEntry = entry }
+                    onLongPress: {
+                        UIView.setAnimationsEnabled(false)
+                        statusPickerEntry = entry
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(100))
+                            UIView.setAnimationsEnabled(true)
+                        }
+                    }
                 )
             }
         }
@@ -72,11 +79,14 @@ private struct StatusPickerSheet: View {
     var onDismiss: () -> Void
 
     @State private var cardIsPresented = false
+    /// Starts at 0.28 immediately so the scrim covers UIKit's presenter
+    /// background from frame 0. Only animated to 0 on dismiss.
+    @State private var scrimOpacity: Double = 0.28
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
-            Color.black.opacity(cardIsPresented ? 0.28 : 0)
+            Color.black.opacity(scrimOpacity)
                 .ignoresSafeArea()
                 .contentShape(Rectangle())
                 .onTapGesture { dismiss() }
@@ -100,13 +110,16 @@ private struct StatusPickerSheet: View {
     private func dismiss() {
         withAnimation(reduceMotion ? nil : .smooth(duration: 0.24)) {
             cardIsPresented = false
+            scrimOpacity = 0
         }
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(240))
-            // Dismiss cover instantly — no system transition animation —
-            // same reason as FileActionsMenu: avoids the dark background
-            // flash from iOS's default fullScreenCover transition.
-            withTransaction(Transaction(animation: nil)) { onDismiss() }
+            UIView.setAnimationsEnabled(false)
+            onDismiss()
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(100))
+                UIView.setAnimationsEnabled(true)
+            }
         }
     }
 
@@ -148,9 +161,9 @@ private struct StatusPickerSheet: View {
 
             // Status rows
             VStack(spacing: 0) {
-                ForEach(DocumentStatus.allCases) { status in
+                ForEach(DocumentStatus.userSelectableCases) { status in
                     statusRow(status)
-                    if status != DocumentStatus.allCases.last {
+                    if status != DocumentStatus.userSelectableCases.last {
                         Rectangle()
                             .fill(Color.dsBorderSubtle.opacity(0.7))
                             .frame(height: 0.5)
@@ -159,7 +172,7 @@ private struct StatusPickerSheet: View {
                 }
             }
             .padding(.horizontal, DSSpacing.md)
-            .padding(.bottom, DSSpacing.sm)
+            .padding(.bottom, DSSpacing.md)
         }
         .background(
             UnevenRoundedRectangle(
@@ -226,9 +239,16 @@ private struct DocumentTile: View {
     var onLongPress: () -> Void = {}
 
     private static let tileHeight: CGFloat = 152
+    /// Set to true by the long-press recognizer before it calls onLongPress(),
+    /// so the Button's touch-up (which fires after the long-press threshold)
+    /// can suppress the onTap() call that would otherwise also fire.
+    @State private var suppressNextTap = false
 
     var body: some View {
-        Button(action: onTap) {
+        Button {
+            if suppressNextTap { suppressNextTap = false; return }
+            onTap()
+        } label: {
             VStack(alignment: .leading, spacing: DSSpacing.xs) {
                 DocumentKindIcon(kind: entry.document.kind)
                     .frame(width: DSSize.fileIcon, height: DSSize.fileIcon)
@@ -251,10 +271,15 @@ private struct DocumentTile: View {
             .shadow(color: .black.opacity(0.06), radius: 14, x: 0, y: 6)
         }
         .buttonStyle(.plain)
-        // `.simultaneousGesture` runs alongside the List scroll recognizer
-        // and the tile's own tap — no conflict.
-        .simultaneousGesture(
-            LongPressGesture(minimumDuration: 0.5).onEnded { _ in onLongPress() }
+        // `highPriorityGesture` gives the long-press recognizer precedence
+        // over the Button's tap so iOS cancels the tap when the threshold
+        // is reached. `suppressNextTap` is a belt-and-suspenders fallback
+        // in case Button's UIControl still fires on touch-up.
+        .highPriorityGesture(
+            LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                suppressNextTap = true
+                onLongPress()
+            }
         )
         .overlay(alignment: .bottomTrailing) {
             FileActionsMenu(

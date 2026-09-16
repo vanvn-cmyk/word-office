@@ -36,14 +36,18 @@ struct OfficeEditorView: View {
     @State private var showFilterSheet = false
 
     // Native insert sheets
-    @State private var showLinkSheet    = false
-    @State private var showCommentSheet = false
-    @State private var showChartSheet   = false
-    @State private var showShapeSheet   = false
+    @State private var showLinkSheet        = false
+    @State private var showCommentSheet     = false
+    @State private var showChartSheet       = false
+    @State private var showShapeSheet       = false
+    @State private var showFindReplaceSheet = false
+    @State private var showFontPickerSheet  = false
     @State private var pendingLink: (url: String, text: String)? = nil
     @State private var pendingComment: String? = nil
     @State private var pendingChart: String? = nil
     @State private var pendingShape: String? = nil
+    @State private var pendingFindReplace: (find: String, replace: String, replaceAll: Bool)? = nil
+    @State private var pendingFont: String? = nil
 
     private var fileKind: EditorTopToolbar.FileKind {
         EditorTopToolbar.FileKind(ext: ref.url.pathExtension)
@@ -177,6 +181,36 @@ struct OfficeEditorView: View {
                         onCancel: { showShapeSheet = false }
                     )
                 }
+                // Native find & replace sheet
+                .sheet(isPresented: $showFindReplaceSheet, onDismiss: {
+                    if let fr = pendingFindReplace {
+                        editorVC?.findAndReplace(find: fr.find, replace: fr.replace, replaceAll: fr.replaceAll)
+                        pendingFindReplace = nil
+                    }
+                }) {
+                    NativeFindReplaceView(
+                        onCommit: { find, replace, replaceAll in
+                            pendingFindReplace = (find, replace, replaceAll)
+                            showFindReplaceSheet = false
+                        },
+                        onCancel: { showFindReplaceSheet = false }
+                    )
+                }
+                // Native font picker sheet
+                .sheet(isPresented: $showFontPickerSheet, onDismiss: {
+                    if let font = pendingFont {
+                        editorVC?.setFontFamily(font)
+                        pendingFont = nil
+                    }
+                }) {
+                    NativeFontPickerView(
+                        onCommit: { font in
+                            pendingFont = font
+                            showFontPickerSheet = false
+                        },
+                        onCancel: { showFontPickerSheet = false }
+                    )
+                }
             }
         }
         .preference(key: EditorDirtyPreferenceKey.self, value: isDirty)
@@ -193,13 +227,15 @@ struct OfficeEditorView: View {
 
     private func handleCommand(_ cmd: String) {
         switch cmd {
-        case "insert-image":   showImagePicker  = true
-        case "insert-link":    showLinkSheet     = true
-        case "insert-comment": showCommentSheet  = true
-        case "insert-chart":   showChartSheet    = true
-        case "insert-shape":   showShapeSheet    = true
-        case "print":          editorVC?.printDocument()
-        default:               editorVC?.execEditorCommand(cmd)
+        case "insert-image":        showImagePicker       = true
+        case "insert-link":         showLinkSheet          = true
+        case "insert-comment":      showCommentSheet       = true
+        case "insert-chart":        showChartSheet         = true
+        case "insert-shape":        showShapeSheet         = true
+        case "word-find-replace":   showFindReplaceSheet   = true
+        case "word-font-picker":    showFontPickerSheet    = true
+        case "print":               editorVC?.printDocument()
+        default:                    editorVC?.execEditorCommand(cmd)
         }
     }
 
@@ -209,23 +245,24 @@ struct OfficeEditorView: View {
         defer { imagePickerItem = nil }
         guard let raw = try? await item.loadTransferable(type: Data.self) else { return }
 
-        // Resize to max 1600px and target ≤ 600 KB before handing off to OO.
-        // Images are now served via office:// scheme (no base64 bridge), but smaller
-        // images still reduce OO's rendering memory footprint inside WKWebView.
+        // Resize aggressively for Word (memory is tighter than Excel/PPT in WKWebView).
+        // Max 1200px / 400 KB for Word; 1600px / 600 KB for Excel & PPT.
+        let isWord = fileKind == .word
+        let maxPx: CGFloat = isWord ? 1200 : 1600
+        let targetBytes = isWord ? 400_000 : 600_000
+
         let imageData: Data
         if let src = UIImage(data: raw) {
-            let maxPx: CGFloat = 1600
             let scale = min(maxPx / src.size.width, maxPx / src.size.height, 1.0)
             let size  = CGSize(width: (src.size.width * scale).rounded(),
                                height: (src.size.height * scale).rounded())
             let fmt = UIGraphicsImageRendererFormat(); fmt.scale = 1
             let resized = UIGraphicsImageRenderer(size: size, format: fmt)
                 .image { _ in src.draw(in: CGRect(origin: .zero, size: size)) }
-            // Iterate quality down until under 600 KB
             var q: CGFloat = 0.75
             var out = resized.jpegData(compressionQuality: q) ?? raw
-            while out.count > 600_000 && q > 0.35 {
-                q -= 0.1
+            while out.count > targetBytes && q > 0.30 {
+                q -= 0.10
                 out = resized.jpegData(compressionQuality: q) ?? out
             }
             imageData = out

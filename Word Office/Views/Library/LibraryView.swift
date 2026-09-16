@@ -54,11 +54,8 @@ struct LibraryView: View {
     let onOpenEditor: (DocumentRef) -> Void
 
     @AppStorage("libraryViewMode") private var viewMode: LibraryViewMode = .list
-    @AppStorage("library.getStartedCoachmarkSeen") private var getStartedCoachmarkSeen: Bool = false
-
-    private var showsGetStartedCoachmark: Bool {
-        viewModel.isGetStartedMode && !getStartedCoachmarkSeen
-    }
+    @AppStorage("library.openDocumentTipSeen") private var tipSeen: Bool = false
+    @State private var tipPresented: Bool = false
 
     /// Local sheet state for "Save to Files" — the `UIDocumentPickerViewController`
     /// wrapper needs only a URL (no container dependency), so it stays here
@@ -409,7 +406,7 @@ struct LibraryView: View {
             } else {
                 if !dueEntries.isEmpty {
                     Section {
-                        sectionRows(dueEntries, showsCoachmark: showsGetStartedCoachmark)
+                        sectionRows(dueEntries)
                     } header: {
                         Label("Needs Attention", systemImage: "bell.badge.fill")
                             .foregroundStyle(Color.dsStatusWarning)
@@ -427,7 +424,11 @@ struct LibraryView: View {
                         ForEach(groupedSections, id: \.status) { group in
                             let isFirst = group.status == groupedSections.first?.status
 
-                            statusTabHeader(status: group.status, count: group.entries.count)
+                            let showTipInHeader = dueEntries.isEmpty &&
+                                (group.status == .getStarted || group.status == .draft) &&
+                                !group.entries.isEmpty && tipPresented
+
+                            statusTabHeader(status: group.status, count: group.entries.count, showTip: showTipInHeader)
                                 .listRowSeparator(.hidden)
                                 .listRowInsets(EdgeInsets(
                                     top: isFirst ? 0 : DSSpacing.xs,
@@ -441,34 +442,34 @@ struct LibraryView: View {
                                     }
                                 )
 
-                            if showsGetStartedCoachmark && dueEntries.isEmpty && isFirst {
-                                getStartedCoachmarkRow
-                                    .listRowSeparator(.hidden)
-                                    .listRowInsets(EdgeInsets(
-                                        top: 0, leading: 3 + DSSpacing.xs,
-                                        bottom: 0, trailing: DSSpacing.xs))
-                                    .listRowBackground(
-                                        HStack(spacing: 0) {
-                                            group.status.tintColor.frame(width: 3)
-                                            Color.clear
-                                        }
-                                    )
-                            }
-
                             ForEach(Array(group.entries.prefix(4))) { entry in
-                                cardContent(for: entry)
-                                    .listRowSeparator(.hidden)
-                                    .listRowInsets(EdgeInsets(
-                                        top: 0,
-                                        leading: 3 + DSSpacing.xs,
-                                        bottom: DSSpacing.xs,
-                                        trailing: DSSpacing.xs))
-                                    .listRowBackground(
-                                        HStack(spacing: 0) {
-                                            group.status.tintColor.frame(width: 3)
-                                            Color.clear
+                                let attachTip = dueEntries.isEmpty &&
+                                    (group.status == .getStarted || group.status == .draft) &&
+                                    entry.id == group.entries.first?.id
+                                Group {
+                                    cardContent(for: entry)
+                                        .onAppear {
+                                            guard attachTip, !tipSeen, !tipPresented else { return }
+                                            tipPresented = true
+                                            Task { @MainActor in
+                                                try? await Task.sleep(for: .seconds(4))
+                                                withAnimation(.easeOut(duration: 0.2)) { tipPresented = false }
+                                                tipSeen = true
+                                            }
                                         }
-                                    )
+                                }
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets(
+                                    top: 0,
+                                    leading: 3 + DSSpacing.xs,
+                                    bottom: DSSpacing.xs,
+                                    trailing: DSSpacing.xs))
+                                .listRowBackground(
+                                    HStack(spacing: 0) {
+                                        group.status.tintColor.frame(width: 3)
+                                        Color.clear
+                                    }
+                                )
                             }
                         }
                     }
@@ -518,10 +519,7 @@ struct LibraryView: View {
     /// a single grid "row" in `.grid` mode (Library-Home-v10 Frame 4 — same
     /// section structure, different item renderer).
     @ViewBuilder
-    private func sectionRows(_ entries: [LibraryEntry], showsCoachmark: Bool = false) -> some View {
-        if showsCoachmark {
-            getStartedCoachmarkRow
-        }
+    private func sectionRows(_ entries: [LibraryEntry]) -> some View {
         if viewMode == .grid {
             DocumentGrid(
                 entries: entries,
@@ -551,7 +549,7 @@ struct LibraryView: View {
                     Task {
                         await viewModel.setStatus(status, for: entry.id)
                         toaster.show(
-                            status == .draft ? .info : .success,
+                            (status == .draft || status == .getStarted) ? .info : .success,
                             title: "Marked as \(status.displayName)",
                             filename: entry.document.name
                         )
@@ -583,9 +581,10 @@ struct LibraryView: View {
             ? allEntries
             : allEntries.filter { $0.document.name.localizedCaseInsensitiveContains(query) }
         let statusBg: Color = switch status {
-        case .draft:    .dsStatusWarningBackground
-        case .reviewed: .dsBrandPrimarySubtle
-        case .done:     .dsStatusSuccessBackground
+        case .getStarted: Color.dsBrandPrimary.opacity(0.08)
+        case .draft:      .dsStatusWarningBackground
+        case .reviewed:   .dsBrandPrimarySubtle
+        case .done:       .dsStatusSuccessBackground
         }
 
         List {
@@ -663,7 +662,7 @@ struct LibraryView: View {
                             Task {
                                 await viewModel.setStatus(status, for: entry.id)
                                 toaster.show(
-                                    status == .draft ? .info : .success,
+                                    (status == .draft || status == .getStarted) ? .info : .success,
                                     title: "Marked as \(status.displayName)",
                                     filename: entry.document.name
                                 )
@@ -796,15 +795,17 @@ struct LibraryView: View {
     /// No icon, no nested badges, small corner radius so it reads as
     /// a label rather than a UI pill.
     @ViewBuilder
-    private func statusTabHeader(status: DocumentStatus, count: Int) -> some View {
+    private func statusTabHeader(status: DocumentStatus, count: Int, showTip: Bool = false) -> some View {
         let bg: Color = switch status {
-        case .draft:    .dsStatusWarningBackground
-        case .reviewed: .dsBrandPrimarySubtle
-        case .done:     .dsStatusSuccessBackground
+        case .getStarted: Color.dsBrandPrimary.opacity(0.08)
+        case .draft:      .dsStatusWarningBackground
+        case .reviewed:   .dsBrandPrimarySubtle
+        case .done:       .dsStatusSuccessBackground
         }
         let needsAttention = count > 0 && status != .done
 
-        return HStack(spacing: DSSpacing.sm) {
+        return VStack(spacing: 0) {
+        HStack(spacing: DSSpacing.sm) {
             // Left: status pill — icon + name only
             HStack(spacing: 7) {
                 Image(systemName: status.systemImage)
@@ -872,6 +873,16 @@ struct LibraryView: View {
         }
         .padding(.bottom, DSSpacing.sm)
         .onAppear { badgePulse = true }
+        if showTip {
+            HStack {
+                Spacer()
+                TipCallout()
+                    .padding(.trailing, 14)
+                    .padding(.bottom, 6)
+            }
+            .transition(.opacity)
+        }
+        }
     }
 
     /// equals the content's height automatically (background fills parent frame).
@@ -893,11 +904,20 @@ struct LibraryView: View {
                     statusTabHeader(status: group.status, count: group.entries.count)
 
                     VStack(spacing: DSSpacing.xs) {
-                        if showsGetStartedCoachmark && dueEntries.isEmpty && isFirst {
-                            getStartedCoachmarkRow
-                        }
                         ForEach(group.entries.prefix(4)) { entry in
+                            let attachTip = dueEntries.isEmpty &&
+                                (group.status == .getStarted || group.status == .draft) &&
+                                entry.id == group.entries.first?.id
                             cardContent(for: entry)
+                                .onAppear {
+                                    guard attachTip, !tipSeen, !tipPresented else { return }
+                                    tipPresented = true
+                                    Task { @MainActor in
+                                        try? await Task.sleep(for: .seconds(4))
+                                        withAnimation(.easeOut(duration: 0.2)) { tipPresented = false }
+                                        tipSeen = true
+                                    }
+                                }
                         }
                     }
 
@@ -950,11 +970,6 @@ struct LibraryView: View {
                     statusTabHeader(status: group.status, count: group.entries.count)
                         .padding(.trailing, DSSpacing.xs)
 
-                    if showsGetStartedCoachmark && dueEntries.isEmpty && isFirst {
-                        getStartedCoachmarkRow
-                            .padding(.bottom, DSSpacing.xs)
-                    }
-
                     DocumentGrid(
                         entries: Array(group.entries.prefix(4)),
                         onTap: { entry in
@@ -971,7 +986,7 @@ struct LibraryView: View {
                             Task {
                                 await viewModel.setStatus(status, for: entry.id)
                                 toaster.show(
-                                    status == .draft ? .info : .success,
+                                    (status == .draft || status == .getStarted) ? .info : .success,
                                     title: "Marked as \(status.displayName)",
                                     filename: entry.document.name
                                 )
@@ -1083,36 +1098,6 @@ struct LibraryView: View {
         .accessibilityElement(children: .combine)
     }
 
-    // MARK: - Get Started coachmark
-
-    /// One-shot hint row that appears above the first sample file when the
-    /// user landed here via "Maybe Later" on onboarding S4. Arrow ↓ points
-    /// at the file below. Dismissed by tapping anywhere on the row; also
-    /// disappears automatically once the user grants a real folder
-    /// (isGetStartedMode → false).
-    @ViewBuilder
-    private var getStartedCoachmarkRow: some View {
-        Button {
-            getStartedCoachmarkSeen = true
-        } label: {
-            HStack(spacing: DSSpacing.xs) {
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(Color.dsBrandPrimary)
-                Text("Tap the file below to open and edit")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Color.dsTextSecondary)
-                Spacer()
-                Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Color.dsTextTertiary)
-            }
-        }
-        .buttonStyle(.plain)
-        .listRowBackground(Color.dsBrandPrimarySubtle)
-        .listRowSeparator(.hidden)
-        .accessibilityLabel("Get started hint. Tap to dismiss.")
-    }
 
     // MARK: - Header content (subtitle + stat hero + type tabs + view controls)
 
@@ -1655,12 +1640,12 @@ struct LibraryView: View {
     @ViewBuilder
     private func contextMenu(for entry: LibraryEntry) -> some View {
         Section("Change status") {
-            ForEach(DocumentStatus.allCases) { status in
+            ForEach(DocumentStatus.userSelectableCases) { status in
                 Button {
                     Task {
                         await viewModel.setStatus(status, for: entry.id)
                         toaster.show(
-                            status == .draft ? .info : .success,
+                            (status == .draft || status == .getStarted) ? .info : .success,
                             title: "Marked as \(status.displayName)",
                             filename: entry.document.name
                         )
@@ -2058,5 +2043,28 @@ private struct LibrarySearchAndActionsBar<Trailing: View>: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Close search")
+    }
+}
+
+private struct TipCallout: View {
+    var body: some View {
+        VStack(spacing: 0) {
+            Text("Hold to change status")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 11)
+                .fixedSize()
+                .background {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color(.systemBackground))
+                        .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
+                }
+            Image(systemName: "arrowtriangle.down.fill")
+                .resizable()
+                .frame(width: 14, height: 8)
+                .foregroundStyle(Color(.systemBackground))
+                .offset(y: -1)
+        }
     }
 }

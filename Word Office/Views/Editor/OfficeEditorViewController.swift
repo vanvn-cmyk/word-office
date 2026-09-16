@@ -145,6 +145,34 @@ final class OfficeEditorViewController: UIViewController {
         webView.evaluateJavaScript("window._insertShape(\(typeJS));")
     }
 
+    /// Applies a font family to the current text selection via window.ooSetFontFamily.
+    func setFontFamily(_ name: String) {
+        guard scriptReady else { return }
+        let nameJS = jsStringLiteral(name)
+        webView.evaluateJavaScript("window.ooSetFontFamily(\(nameJS));")
+    }
+
+    /// Performs find (and optional replace) via window.ooFindReplace.
+    func findAndReplace(find: String, replace: String, replaceAll: Bool) {
+        guard scriptReady else { return }
+        let findJS    = jsStringLiteral(find)
+        let replaceJS = jsStringLiteral(replace)
+        webView.evaluateJavaScript("window.ooFindReplace(\(findJS), \(replaceJS), \(replaceAll ? "true" : "false"));")
+    }
+
+    /// Shows a UIAlertController with word/character statistics.
+    func showWordCountAlert(words: Int, chars: Int, charsNoSpace: Int, paragraphs: Int) {
+        let message = """
+            Words: \(words)
+            Characters (with spaces): \(chars)
+            Characters (no spaces): \(charsNoSpace)
+            Paragraphs: \(paragraphs)
+            """
+        let alert = UIAlertController(title: "Word Count", message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
+    }
+
     // MARK: - JS string helpers
 
     /// Returns a JS string literal (with surrounding quotes and proper escaping) for the given Swift string.
@@ -222,10 +250,21 @@ final class OfficeEditorViewController: UIViewController {
                     '#id-toolbar-left,[id*="left-panel-btn"]{display:none!important}',
                     /* PPT splitters */
                     '.resizer,.splitter{display:none!important}',
-                    /* PPT thumbnail panel — OO 9.x VERIFIED ID (underscore, not hyphen) */
-                    '#id_panel_thumbnails',
-                    '{display:none!important;width:0!important;min-width:0!important;max-width:0!important;overflow:hidden!important}',
+                    /* PPT thumbnail panel — OO 9.x VERIFIED ID (underscore, not hyphen).
+                       visibility:hidden (NOT display:none) during loading: OO's 52% init step
+                       measures offsetWidth of this panel to calculate canvas size. display:none
+                       returns offsetWidth=0 → OO's init loop waits/fights → stuck at 52%.
+                       After loading completes, ShowThumbnails(false) removes it from layout. */
+                    '#id_panel_thumbnails{visibility:hidden!important;pointer-events:none!important}',
                     '#id_panel_notes{display:none!important;height:0!important;overflow:hidden!important}',
+                    /* PPT canvas containers — the thumbnail panel is visibility:hidden (not
+                       display:none) so OO can measure its offsetWidth during the 52% init step.
+                       But the panel still occupies layout space and pushes area_id_main to the
+                       right. Force both the outer parent AND the main area to left:0 so the
+                       editing canvas starts at the screen edge. Width NOT overridden on area_id_main
+                       because OO reads el.style.width inline for canvas-size calculation. */
+                    '#id_main_parent{left:0!important}',
+                    '#area_id_main{left:0!important;margin-left:0!important}',
                     /* Legacy/fallback selectors for other OO versions */
                     '#id-pe-panel-aside,.pe-panel-aside,',
                     '[id*="pe-panel-aside"],[class*="pe-panel-aside"],',
@@ -258,21 +297,75 @@ final class OfficeEditorViewController: UIViewController {
                     var panelEl = document.getElementById('id_panel_thumbnails');
                     var notesEl = document.getElementById('id_panel_notes');
                     if (!panelEl) return false; // OO not rendered yet
-                    panelEl.style.setProperty('display',   'none',   'important');
-                    panelEl.style.setProperty('width',     '0',      'important');
-                    panelEl.style.setProperty('min-width', '0',      'important');
-                    panelEl.style.setProperty('overflow',  'hidden', 'important');
+
+                    // visibility:hidden keeps the panel in layout flow so OO can measure it;
+                    // do NOT change display — let OO's own layout:{leftMenu:false} config
+                    // manage the display state. Overriding display mid-load causes the 52% freeze.
+                    // ShowThumbnails(false) is called from onDocumentReady in editor.html.
+                    panelEl.style.setProperty('visibility',     'hidden', 'important');
+                    panelEl.style.setProperty('pointer-events', 'none',   'important');
                     if (notesEl) {
                         notesEl.style.setProperty('display',  'none',   'important');
                         notesEl.style.setProperty('height',   '0',      'important');
                         notesEl.style.setProperty('overflow', 'hidden', 'important');
                     }
-                    // Let OO SDK recalculate canvas bounds (it checks panel display internally)
-                    try { window.dispatchEvent(new Event('resize')); } catch(_) {}
-                    try { window.webkit.messageHandlers.editorBridge.postMessage({
-                        action: 'debug',
-                        msg: '[PPT-BYID] panel=FOUND+HIDDEN'
-                    }); } catch(_) {}
+
+
+                    // Diagnostic dump — runs after OO has settled
+                    function _pptDump(label) {
+                        try {
+                            var mp  = document.getElementById('id_main_parent');
+                            var am  = document.getElementById('area_id_main');
+                            var d   = '[PPT-'+label+']';
+                            if (mp) {
+                                var cs = window.getComputedStyle(mp);
+                                var mpR = mp.getBoundingClientRect();
+                                d += ' mp:left='+cs.left+' w='+cs.width+' h='+cs.height+' ov='+cs.overflow;
+                                d += ' mp.rect=('+Math.round(mpR.left)+','+Math.round(mpR.top)+','+Math.round(mpR.width)+','+Math.round(mpR.height)+')';
+                                // Log left-menu sibling so we know if it's taking space
+                                var lm = document.getElementById('id_left_menu') || document.getElementById('left-menu');
+                                if (lm) { var lmC=window.getComputedStyle(lm); d+=' lm:w='+lmC.width+' disp='+lmC.display; } else { d+=' lm:MISSING'; }
+                                // Log first visible slide canvas + its full parent chain
+                                var _firstCv = null;
+                                mp.querySelectorAll('canvas').forEach(function(c,i){
+                                    var cc=window.getComputedStyle(c);
+                                    if (cc.display==='none') return;
+                                    var r=c.getBoundingClientRect();
+                                    d+=' cv['+i+']:px='+c.width+'×'+c.height+' cssW='+cc.width+' rect=('+Math.round(r.left)+','+Math.round(r.top)+','+Math.round(r.width)+','+Math.round(r.height)+')';
+                                    if (!_firstCv && c.width > 100) _firstCv = c;
+                                });
+                                // Parent chain of first large canvas (find the collapsing ancestor)
+                                if (_firstCv) {
+                                    var _el = _firstCv.parentElement; var _depth = 0;
+                                    d += ' chain:';
+                                    while (_el && _el !== mp && _depth < 8) {
+                                        var _er = _el.getBoundingClientRect();
+                                        var _ec = window.getComputedStyle(_el);
+                                        d += '['+(_el.id||_el.className.split(' ')[0]||'?')+' r=('+Math.round(_er.left)+','+Math.round(_er.top)+','+Math.round(_er.width)+','+Math.round(_er.height)+') disp='+_ec.display+' ov='+_ec.overflow+']';
+                                        _el = _el.parentElement; _depth++;
+                                    }
+                                }
+                                // getCountPages to verify OO load state
+                                try { var _ed2=window.Asc&&window.Asc.editor; if(_ed2&&typeof _ed2.getCountPages==='function') d+=' pages='+_ed2.getCountPages(); } catch(_){}
+                            } else { d+=' mp:MISSING'; }
+                            if (am) {
+                                var cs2=window.getComputedStyle(am);
+                                d+=' am:left='+cs2.left+' w='+cs2.width+' zi='+cs2.zIndex+' disp='+cs2.display+' bg='+cs2.backgroundColor;
+                            } else { d+=' am:MISSING'; }
+                            try {
+                                var ed=window.Asc&&window.Asc.editor;
+                                if(ed){
+                                    // bShowThumbnails is the internal bool OO updates after ShowThumbnails()
+                                    d+=' showThumb='+(ed.bShowThumbnails);
+                                    d+=' hasShowFn='+(typeof ed.ShowThumbnails==='function');
+                                }
+                            } catch(_){}
+                            window.webkit.messageHandlers.editorBridge.postMessage({action:'debug',msg:d});
+                        } catch(_){}
+                    }
+                    setTimeout(function(){ _pptDump('T500'); },  500);
+                    setTimeout(function(){ _pptDump('T2000'); }, 2000);
+                    setTimeout(function(){ _pptDump('T5000'); }, 5000);
                     return true;
                 }
 
@@ -484,12 +577,10 @@ final class OfficeEditorViewController: UIViewController {
                     var elId = el.id || '';
                     // Direct underscore-ID match (OO 9.x verified thumbnail panel)
                     if (elId === 'id_panel_thumbnails') {
-                        el.style.setProperty('display',   'none',   'important');
-                        el.style.setProperty('width',     '0',      'important');
-                        el.style.setProperty('min-width', '0',      'important');
-                        el.style.setProperty('overflow',  'hidden', 'important');
-                        // OO SDK recalculates canvas bounds automatically on resize
-                        try { window.dispatchEvent(new Event('resize')); } catch(_) {}
+                        // visibility:hidden only — never override display so OO's own
+                        // layout: {leftMenu:false} config can manage display state freely.
+                        el.style.setProperty('visibility',     'hidden', 'important');
+                        el.style.setProperty('pointer-events', 'none',   'important');
                         return;
                     }
                     if (elId === 'id_panel_notes') {
@@ -523,12 +614,13 @@ final class OfficeEditorViewController: UIViewController {
                     if (!panelEl || panelEl._watched) return;
                     panelEl._watched = true;
                     var watcher = new MutationObserver(function() {
-                        var d = panelEl.style.display;
-                        if (d !== 'none' && d !== '') {
-                            panelEl.style.setProperty('display',   'none',   'important');
-                            panelEl.style.setProperty('width',     '0',      'important');
-                            panelEl.style.setProperty('overflow',  'hidden', 'important');
-                            try { window.dispatchEvent(new Event('resize')); } catch(_) {}
+                        // Keep panel invisible if OO tries to restore it.
+                        // Use visibility:hidden (same as loading phase) — not display:none,
+                        // since post-load OO may still need to measure it for transitions.
+                        var v = panelEl.style.visibility;
+                        if (v !== 'hidden') {
+                            panelEl.style.setProperty('visibility',     'hidden', 'important');
+                            panelEl.style.setProperty('pointer-events', 'none',   'important');
                         }
                     });
                     watcher.observe(panelEl, { attributes: true, attributeFilter: ['style'] });
@@ -815,6 +907,11 @@ extension OfficeEditorViewController: OfficeBridgeDelegate {
 
         case .slideThumbnail(let slideNum, let data):
             onSlideThumbnail?(slideNum, data)
+
+        case .wordCount(let words, let chars, let charsNoSpace, let paragraphs):
+            DispatchQueue.main.async { [weak self] in
+                self?.showWordCountAlert(words: words, chars: chars, charsNoSpace: charsNoSpace, paragraphs: paragraphs)
+            }
 
         case .saved, .unknown:
             break

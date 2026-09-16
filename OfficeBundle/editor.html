@@ -250,6 +250,21 @@
         },
         events: {
           onAppReady: onAppReady,
+          onDocumentReady: () => {
+            // OO has fully loaded the document — safe to call ShowThumbnails(false) now.
+            // DO NOT call this earlier (e.g. from getCountPages polling): calling it
+            // during the 52% render phase changes panel display mid-render → freeze.
+            if (_currentDocType === 'slide') {
+              try {
+                var _ed = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+                if (_ed) {
+                  if (typeof _ed.ShowThumbnails  === 'function') { _ed.ShowThumbnails(false); }
+                  if (typeof _ed.asc_ShowNotes   === 'function') { _ed.asc_ShowNotes(false); }
+                }
+              } catch(_) {}
+            }
+            _reportSlidePos();
+          },
           onDocumentStateChange: (e) => {
             window.webkit.messageHandlers.editorBridge.postMessage({
               action: 'documentStateChange',
@@ -666,13 +681,13 @@
       #id-pe-statusbar, .pe-statusbar,
       [id*="pe-statusbar"], [class*="pe-statusbar"],
       [id*="pe-status"], [class*="pe-status"] { display: none !important; }
-      /* Slide thumbnail panel — OO 9.x VERIFIED ID uses underscore */
+      /* Slide thumbnail panel — OO 9.x VERIFIED ID uses underscore.
+         visibility:hidden only during loading so injecting this CSS mid-render
+         does not change the panel's layout dimensions and freeze OO at 52%.
+         onDocumentReady sets display:none after OO finishes rendering. */
       #id_panel_thumbnails {
-        display: none !important;
-        width: 0 !important;
-        min-width: 0 !important;
-        max-width: 0 !important;
-        overflow: hidden !important;
+        visibility: hidden !important;
+        pointer-events: none !important;
       }
       /* Notes panel — OO 9.x */
       #id_panel_notes { display: none !important; height: 0 !important; overflow: hidden !important; }
@@ -702,7 +717,15 @@
       #id-pe-v-scrollbar, #id-pe-h-scrollbar,
       [id*="pe-scrollbar"], [class*="pe-scrollbar"],
       [id*="pe-v-scroll"], [id*="pe-h-scroll"] { display: none !important; }
-      /* Force slide canvas to use full width after panels are hidden */
+      /* Force the main editing area and slide canvas to start at left:0.
+         The thumbnail panel is visibility:hidden (not display:none) during loading
+         so OO can measure its offsetWidth at 52%. This keeps the panel in flow and
+         pushes area_id_main to left=panelWidth. Force it back to left:0 here.
+         _pptByPoint also sets this via inline !important for higher priority. */
+      #area_id_main {
+        left: 0 !important;
+        margin-left: 0 !important;
+      }
       #id-pe-editor, [id*="pe-editor"], .pe-editor-main,
       #id-pe-editor-box, [id*="pe-editor-box"] {
         left: 0 !important; right: 0 !important;
@@ -1162,6 +1185,34 @@
         // when it receives the 'ready' message). Prevents false-positive fires from
         // ONLYOFFICE's own initialisation dialogs during document open.
         window._filterInterceptEnabled = false;
+        // Second gate: only intercept once the user has actually touched the OO frame.
+        // OO sometimes adds filter-like panels during document restoration (post-ready),
+        // which would trigger a false-positive native filter sheet on file open.
+        // Cleared by touchstart/mousedown on iDoc, or by the native filter-toggle command.
+        window._ooUserHasInteracted = false;
+
+        // Safety watchdog: if an insert operation sets _filterInterceptEnabled=false /
+        // _ooInjectEnabled=false but fails to restore them (Promise rejection, WASM trap,
+        // or async crash), the MutationObserver stays paused and the editor appears frozen.
+        // Reset both flags every 10 s if they have been stuck false for > 8 s.
+        window._insertFlagLatchTime = 0;
+        setInterval(function() {
+          try {
+            var now = Date.now();
+            if (!window._filterInterceptEnabled) {
+              if (!window._insertFlagLatchTime) { window._insertFlagLatchTime = now; return; }
+              if (now - window._insertFlagLatchTime > 8000) {
+                console.warn('[iOS] safety watchdog: resetting stuck insert flags');
+                window._filterInterceptEnabled = true;
+                window._insertFlagLatchTime = 0;
+                try { if (_innerWin) _innerWin._ooInjectEnabled = true; } catch(_) {}
+                try { localStorage.removeItem('_oo_insert_pending'); } catch(_) {}
+              }
+            } else {
+              window._insertFlagLatchTime = 0;
+            }
+          } catch(_) {}
+        }, 2000);
 
         // Intercept filter panel: extract values, move offscreen, post to Swift.
         function _interceptFilter(panel) {
@@ -1382,88 +1433,75 @@
           window._filterInterceptEnabled = false;
           try { _innerWin._ooInjectEnabled = false; } catch(_) {}
 
+          var _restoreDone = false;
           var _restore = function() {
+            if (_restoreDone) return; _restoreDone = true;
             window._filterInterceptEnabled = true;
             try { _innerWin._ooInjectEnabled = true; } catch(_) {}
           };
+          // Safety net: always restore flags within 5 s even if the call hangs
+          setTimeout(_restore, 5000);
 
           setTimeout(function() {
-            try { _innerWin.focus(); } catch(_) {}
-            var _ed = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
-            if (!_ed) {
-              console.warn('[iOS] _insertChart: editor not available');
-              _showInsertToast('Editor not ready — please try again');
-              setTimeout(_restore, 800);
-              return;
-            }
+            try {
+              try { _innerWin.focus(); } catch(_) {}
+              var _ed = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+              if (!_ed) {
+                _showInsertToast('Editor not ready — please try again');
+                _restore(); return;
+              }
 
-            // ── Resolve chart type constant from OO SDK enum ─────────────────────────
-            var Asc = _innerWin.Asc;
-            var ct = Asc && Asc.c_oAscChartType;
-            var keyMap = { column:'barNormal', bar:'hBarNormal', line:'lineNormal', pie:'pie', area:'area', scatter:'scatter' };
-            var fallbacks = { barNormal:1, hBarNormal:4, lineNormal:7, pie:13, area:22, scatter:15 };
-            var enumKey = keyMap[type] || 'barNormal';
-            var chartNum = (ct && ct[enumKey] != null) ? ct[enumKey] : (fallbacks[enumKey] || 1);
-            console.log('[iOS] _insertChart:', type, '→', enumKey, '=', chartNum);
+              var Asc = _innerWin.Asc;
+              var ct = Asc && Asc.c_oAscChartType;
+              var keyMap = { column:'barNormal', bar:'hBarNormal', line:'lineNormal', pie:'pie', area:'area', scatter:'scatter' };
+              var fallbacks = { barNormal:1, hBarNormal:4, lineNormal:7, pie:13, area:22, scatter:15 };
+              var enumKey = keyMap[type] || 'barNormal';
+              var chartNum = (ct && ct[enumKey] != null) ? ct[enumKey] : (fallbacks[enumKey] || 1);
+              console.log('[iOS] _insertChart:', type, '→', enumKey, '=', chartNum, 'docType:', _currentDocType);
 
-            var _done = false;
+              var _done = false;
+              try { localStorage.setItem('_oo_insert_pending', 'chart'); } catch(_) {}
 
-            // Set a crash-guard before calling OO chart APIs. If the WebContent process
-            // is killed by iOS (OOM/watchdog) during the call, the guard persists in
-            // localStorage. _reInjectOO detects it after reload and shows a user toast.
-            try { localStorage.setItem('_oo_insert_pending', 'chart'); } catch(_) {}
-
-            // ── Method 1: asc_addChartDrawing (preferred — no wizard, no crash) ──────
-            if (!_done && typeof _ed.asc_addChartDrawing === 'function') {
-              try {
-                // Build chart space — try CChartSpace constructor first for proper prototype
-                var sp = null;
-                if (typeof Asc.CChartSpace === 'function') {
-                  try {
-                    sp = new Asc.CChartSpace();
-                    sp.type = chartNum;
-                    if (typeof Asc.CChart === 'function') {
-                      var ch = new Asc.CChart();
-                      ch.type = chartNum;
-                      ch.subtype = chartNum;
-                      sp.chart = ch;
-                    } else if (sp.chart && typeof sp.chart === 'object') {
-                      sp.chart.type = chartNum;
-                    }
-                  } catch(_) { sp = null; }
+              // ── Word / Presentation: asc_insertChart with plain params (no CChartSpace — spreadsheet-only) ──
+              if (!_done && _currentDocType !== 'spreadsheet') {
+                if (typeof _ed.asc_insertChart === 'function') {
+                  try { _ed.asc_insertChart({ type: chartNum, subtype: 0, style: 1 }); _done = true; console.log('[iOS] _insertChart: asc_insertChart OK (word/ppt)'); } catch(e) { console.warn('[iOS] asc_insertChart (word/ppt):', e); }
                 }
-                // Duck-typed fallback: OO reads .type and .chart.type via property access
-                if (!sp) { sp = { type: chartNum, chart: { type: chartNum, subtype: chartNum, style: 1 } }; }
-                _ed.asc_addChartDrawing(sp, false);
-                _done = true;
-                // Trigger resize so OO recalculates canvas after chart drawing is added
-                try { _innerWin.dispatchEvent(new Event('resize')); } catch(_) {}
-                console.log('[iOS] _insertChart: asc_addChartDrawing OK');
-              } catch(e) { console.warn('[iOS] asc_addChartDrawing:', e); }
-            }
+                if (!_done && typeof _ed.asc_AddChart === 'function') {
+                  try { _ed.asc_AddChart({ type: chartNum }); _done = true; } catch(e) {}
+                }
+              }
 
-            // ── Method 2: asc_insertChart (alternate name in some OO builds) ──────────
-            if (!_done && typeof _ed.asc_insertChart === 'function') {
-              try {
-                _ed.asc_insertChart({ type: chartNum, subtype: 0, style: 1 });
-                _done = true;
-                try { _innerWin.dispatchEvent(new Event('resize')); } catch(_) {}
-              } catch(e) {}
-            }
+              // ── Spreadsheet ONLY: asc_addChartDrawing is a spreadsheet-only WASM export.
+              // Calling it in Word/PPT editor causes an uncatchable WASM RuntimeError (process crash).
+              // NEVER call it when docType is not 'spreadsheet', even as a fallback.
+              if (!_done && _currentDocType === 'spreadsheet' && typeof _ed.asc_addChartDrawing === 'function') {
+                try {
+                  var sp = null;
+                  if (typeof Asc.CChartSpace === 'function') {
+                    try {
+                      sp = new Asc.CChartSpace();
+                      sp.type = chartNum;
+                      if (typeof Asc.CChart === 'function') {
+                        var ch = new Asc.CChart(); ch.type = chartNum; ch.subtype = chartNum; sp.chart = ch;
+                      } else if (sp.chart && typeof sp.chart === 'object') { sp.chart.type = chartNum; }
+                    } catch(_) { sp = null; }
+                  }
+                  if (!sp) { sp = { type: chartNum, chart: { type: chartNum, subtype: chartNum, style: 1 } }; }
+                  // true = insert with default size (no blocking wizard/dialog)
+                  _ed.asc_addChartDrawing(sp, true);
+                  _done = true;
+                  try { _innerWin.dispatchEvent(new Event('resize')); } catch(_) {}
+                  console.log('[iOS] _insertChart: asc_addChartDrawing OK');
+                } catch(e) { console.warn('[iOS] asc_addChartDrawing:', e); }
+              }
 
-            // ── Method 3: asc_AddChart ───────────────────────────────────────────────
-            if (!_done && typeof _ed.asc_AddChart === 'function') {
-              try { _ed.asc_AddChart({ type: chartNum }); _done = true; } catch(e) {}
-            }
-
-            // ── No API worked ─
-            if (!_done) {
-              console.warn('[iOS] _insertChart: no direct chart API found for type:', type);
-              _showInsertToast('Chart insert not available in this editor version');
-            }
-            // Clear crash-guard (we reached here = no OOM kill during the API call)
-            try { localStorage.removeItem('_oo_insert_pending'); } catch(_) {}
-
+              if (!_done) {
+                console.warn('[iOS] _insertChart: no chart API available, docType:', _currentDocType);
+                _showInsertToast('Chart insert not available — please use the Insert menu');
+              }
+              try { localStorage.removeItem('_oo_insert_pending'); } catch(_) {}
+            } catch(outerErr) { console.warn('[iOS] _insertChart outer:', outerErr); }
             setTimeout(_restore, 2000);
           }, 200);
         };
@@ -1474,40 +1512,173 @@
           if (!_innerWin) return;
           window._filterInterceptEnabled = false;
           try { _innerWin._ooInjectEnabled = false; } catch(_) {}
+
+          var _shRestoreDone = false;
+          var _shRestore = function() {
+            if (_shRestoreDone) return; _shRestoreDone = true;
+            window._filterInterceptEnabled = true;
+            try { _innerWin._ooInjectEnabled = true; } catch(_) {}
+          };
+          setTimeout(_shRestore, 6000);
+
+          setTimeout(function() {
+            try {
+              try { _innerWin.focus(); } catch(_) {}
+              var _ed = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+              if (!_ed) {
+                _showInsertToast('Editor not ready — please try again');
+                _shRestore(); return;
+              }
+
+              // asc_AddShape / asc_insertShape both trigger WASM RuntimeError (uncatchable crash).
+              // asc_setShapePreset enters drag-draw mode which iOS touch never resolves (also crash).
+              // Use StartAddShape/asc_startAddShape — the real APIs OO's toolbar calls — which safely
+              // enter draw mode, then simulate mousedown+mouseup to place the shape at a
+              // default position so draw mode resolves immediately without user interaction.
+              // Word/PPT uses StartAddShape(type, true); Excel uses asc_startAddShape(type).
+              var _startDrawFn = null;
+              var _endDrawFn   = null;
+              if (typeof _ed.StartAddShape === 'function') {
+                _startDrawFn = function(t) { _ed.StartAddShape(t, true); };
+                _endDrawFn   = function()  { _ed.StartAddShape('', false); };
+              } else if (typeof _ed.asc_startAddShape === 'function') {
+                _startDrawFn = function(t) { _ed.asc_startAddShape(t); };
+                _endDrawFn   = function()  { _ed.asc_endAddShape && _ed.asc_endAddShape(); };
+              }
+              if (!_startDrawFn) {
+                console.warn('[iOS] _insertShape: no draw-mode API for', type);
+                _showInsertToast('Shape insert not available in this editor version');
+                _shRestore(); return;
+              }
+
+              // Enter draw mode with the requested shape type
+              _startDrawFn(type);
+
+              // Simulate mousedown + mouseup on OO's editor container to place the shape
+              setTimeout(function() {
+                try {
+                  var _doc = _innerWin.document;
+                  // #editor_sdk is OO's main editor container (confirmed from app.js HTML template)
+                  var _target = _doc.getElementById('editor_sdk') ||
+                                _doc.getElementById('id_main_scroll') ||
+                                _doc.getElementById('id-main-scroll') ||
+                                _doc.querySelector('[class*="editor-main"]') ||
+                                _doc.querySelector('canvas') ||
+                                _doc.body;
+
+                  var _r   = _target.getBoundingClientRect();
+                  var _x1  = _r.left + Math.max(40, _r.width  * 0.15);
+                  var _y1  = _r.top  + Math.max(40, _r.height * 0.15);
+                  var _x2  = _x1 + 120;  // ~120 px wide
+                  var _y2  = _y1 + 80;   // ~80 px tall
+
+                  function _fireMouseEvt(el, name, cx, cy) {
+                    try {
+                      el.dispatchEvent(new _innerWin.MouseEvent(name, {
+                        bubbles: true, cancelable: true,
+                        clientX: cx, clientY: cy, button: 0, detail: 1,
+                        view: _innerWin
+                      }));
+                    } catch(_) {}
+                  }
+
+                  _fireMouseEvt(_target, 'mousedown', _x1, _y1);
+                  setTimeout(function() {
+                    _fireMouseEvt(_target, 'mousemove', (_x1 + _x2) / 2, (_y1 + _y2) / 2);
+                    _fireMouseEvt(_target, 'mouseup',   _x2, _y2);
+                    // Also fire on body — OO's _addAutoshape adds a body mouseup handler
+                    try { _fireMouseEvt(_doc.body, 'mouseup', _x2, _y2); } catch(_) {}
+                  }, 80);
+                } catch(evtErr) {
+                  console.warn('[iOS] _insertShape mouse sim error:', evtErr);
+                  try { _endDrawFn && _endDrawFn(); } catch(_) {} // cancel draw mode
+                }
+                setTimeout(_shRestore, 1500);
+              }, 120);
+            } catch(outerErr) { console.warn('[iOS] _insertShape outer:', outerErr); }
+          }, 200);
+        };
+
+        // Called by Swift after native font picker closes — applies font to selection
+        window.ooSetFontFamily = function(name) {
+          if (!_innerWin) return;
           setTimeout(function() {
             try { _innerWin.focus(); } catch(_) {}
-            var _ed = _innerWin.Asc && _innerWin.Asc.editor;
+            var _ed = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+            if (!_ed) return;
+            try {
+              if      (typeof _ed.asc_setFontFamily    === 'function') { _ed.asc_setFontFamily(name);    return; }
+              else if (typeof _ed.asc_SetFontFamily    === 'function') { _ed.asc_SetFontFamily(name);    return; }
+              else if (typeof _ed.asc_changeFontFamily === 'function') { _ed.asc_changeFontFamily(name); return; }
+              else if (_innerWin.AscDesktopEditor) {
+                _innerWin.AscDesktopEditor.executeFocusedCommand('fontFamily', name);
+              }
+            } catch(e) { console.warn('[iOS] ooSetFontFamily:', e); }
+          }, 150);
+        };
+
+        // Called by Swift for native Find & Replace
+        window.ooFindReplace = function(find, replace, replaceAll) {
+          if (!_innerWin) return;
+          setTimeout(function() {
+            try { _innerWin.focus(); } catch(_) {}
+            var _ed = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
             if (!_ed) {
-              console.warn('[iOS] _insertShape: editor not available');
-              _showInsertToast('Editor not ready — please try again');
-              setTimeout(function() {
-                window._filterInterceptEnabled = true;
-                try { _innerWin._ooInjectEnabled = true; } catch(_) {}
-              }, 1500);
+              // Fallback: Ctrl+H opens OO's native find/replace dialog
+              try {
+                var _d = _innerWin && _innerWin.document;
+                if (_d) _d.dispatchEvent(new KeyboardEvent('keydown', {
+                  bubbles: true, cancelable: true, key: 'h', keyCode: 72, which: 72, ctrlKey: true, view: _innerWin
+                }));
+              } catch(_) {}
               return;
             }
-            var _done = false;
-            if (typeof _ed.asc_setShapePreset === 'function') {
-              try { _ed.asc_setShapePreset(type); _done = true; console.log('[iOS] _insertShape via asc_setShapePreset:', type); }
-              catch(e1) { console.warn('[iOS] asc_setShapePreset:', e1); }
-            }
-            if (!_done && typeof _ed.asc_insertShape === 'function') {
-              try { _ed.asc_insertShape(type); _done = true; console.log('[iOS] _insertShape via asc_insertShape:', type); }
-              catch(e2) { console.warn('[iOS] asc_insertShape:', e2); }
-            }
-            if (!_done && typeof _ed.asc_AddShape === 'function') {
-              try { _ed.asc_AddShape(type); _done = true; console.log('[iOS] _insertShape via asc_AddShape:', type); }
-              catch(e3) { console.warn('[iOS] asc_AddShape:', e3); }
-            }
-            if (!_done) {
-              console.warn('[iOS] _insertShape: no working method found for', type);
-              _showInsertToast('Shape insert not available in this editor version');
-            }
-            setTimeout(function() {
-              window._filterInterceptEnabled = true;
-              try { _innerWin._ooInjectEnabled = true; } catch(_) {}
-            }, 1500);
-          }, 200);
+            try {
+              var Asc = _innerWin.Asc;
+              var SearchCls = Asc && (Asc.asc_CSearchSettings || Asc.CSearchSettings);
+              var opts = SearchCls ? new SearchCls() : null;
+              if (opts) {
+                typeof opts.asc_setSearchString  === 'function' ? opts.asc_setSearchString(find)    : (opts.SearchString  = find);
+                typeof opts.asc_setReplaceString === 'function' ? opts.asc_setReplaceString(replace) : (opts.ReplaceString = replace);
+                typeof opts.asc_setMatchCase     === 'function' && opts.asc_setMatchCase(false);
+                typeof opts.asc_setWholeWords    === 'function' && opts.asc_setWholeWords(false);
+              }
+              var _done = false;
+              if (replaceAll) {
+                var _rMethods = ['asc_replaceAll','asc_ReplaceAll','asc_findReplace','asc_FindReplace'];
+                for (var _ri = 0; _ri < _rMethods.length && !_done; _ri++) {
+                  if (typeof _ed[_rMethods[_ri]] === 'function') {
+                    try { opts ? _ed[_rMethods[_ri]](opts) : _ed[_rMethods[_ri]](find, replace); _done = true; } catch(_) {}
+                  }
+                }
+              } else {
+                var _fMethods = ['asc_findText','asc_FindText','asc_find','asc_Find'];
+                for (var _fi = 0; _fi < _fMethods.length && !_done; _fi++) {
+                  if (typeof _ed[_fMethods[_fi]] === 'function') {
+                    try { opts ? _ed[_fMethods[_fi]](opts) : _ed[_fMethods[_fi]](find); _done = true; } catch(_) {}
+                  }
+                }
+                // If Find succeeded and replace provided, replace current match
+                if (_done && replace !== '') {
+                  var _rrMethods = ['asc_replace','asc_Replace','asc_replaceText'];
+                  for (var _oi = 0; _oi < _rrMethods.length; _oi++) {
+                    if (typeof _ed[_rrMethods[_oi]] === 'function') {
+                      try { opts ? _ed[_rrMethods[_oi]](opts) : _ed[_rrMethods[_oi]](find, replace); break; } catch(_) {}
+                    }
+                  }
+                }
+              }
+              if (!_done) {
+                // Fallback: Ctrl+H
+                try {
+                  var _d2 = _innerWin && _innerWin.document;
+                  if (_d2) _d2.dispatchEvent(new KeyboardEvent('keydown', {
+                    bubbles: true, cancelable: true, key: 'h', keyCode: 72, which: 72, ctrlKey: true, view: _innerWin
+                  }));
+                } catch(_) {}
+              }
+            } catch(e) { console.warn('[iOS] ooFindReplace:', e); }
+          }, 150);
         };
 
         // Generic dialog styler for non-filter popups (Warning, etc.)
@@ -1540,6 +1711,10 @@
           // Only intercept filter after editor is ready — prevents false positives
           // from OO's own init dialogs during document load.
           if (!window._filterInterceptEnabled) return;
+          // Also require at least one user touch inside the OO frame. OO may add
+          // filter-like panels during post-ready document restoration; blocking until
+          // the user has interacted prevents the native filter sheet from auto-opening.
+          if (!window._ooUserHasInteracted) return;
           for (var i = 0; i < mutations.length; i++) {
             var added = mutations[i].addedNodes;
             for (var j = 0; j < added.length; j++) {
@@ -1573,6 +1748,14 @@
             window._filterObs.observe(iDoc.body, { childList: true, subtree: true });
           });
         }
+
+        // Mark user-interacted on first touch inside the OO stub frame.
+        // (The live OO frame gets its own listener re-attached in _reInjectOO.)
+        try {
+          function _markOOInteracted() { window._ooUserHasInteracted = true; }
+          iDoc.addEventListener('touchstart', _markOOInteracted, { passive: true, capture: true });
+          iDoc.addEventListener('mousedown',  _markOOInteracted, { capture: true });
+        } catch(_) {}
       })();
     }
 
@@ -1701,6 +1884,13 @@
             }
           } catch(_foe) {}
 
+          // Re-attach interaction listeners on the live OO document so any touch
+          // inside OO's actual editor (cell tap, scroll, etc.) clears the gate.
+          try {
+            _d.addEventListener('touchstart', function() { window._ooUserHasInteracted = true; }, { passive: true, capture: true });
+            _d.addEventListener('mousedown',  function() { window._ooUserHasInteracted = true; }, { capture: true });
+          } catch(_iel) {}
+
           if (!_d.getElementById('_oo_ios_final')) {
             var _sf = _d.createElement('style');
             _sf.id = '_oo_ios_final';
@@ -1768,8 +1958,10 @@
               '[id*="de-scrollbar"]', '[id*="v-scrollbar"]', '[id*="h-scrollbar"]',
               // Presentation editor (pe-) chrome
               '#id-pe-statusbar', '[id*="pe-statusbar"]', '[class*="pe-statusbar"]',
-              // Slide thumbnail panel — OO 9.x verified underscore ID (primary)
-              '#id_panel_thumbnails',
+              // Slide thumbnail panel handled by onDocumentReady (calling ShowThumbnails).
+              // Do NOT set display:none here — this fires when canvas appears (may be mid-render)
+              // and changing the panel display mid-render freezes OO at 52%.
+              // '#id_panel_thumbnails', ← intentionally excluded
               // Legacy hyphen-ID fallback
               '#id-pe-panel-aside', '[id*="pe-panel-aside"]', '[class*="pe-panel-aside"]',
               '#id-panel-thumbnails', '[id*="panel-thumbnails"]', '[class*="panel-thumbnails"]',
@@ -1811,58 +2003,86 @@
                 if (!_fd || !_fd.body) return;
                 var _fw = _fd.documentElement.clientWidth  || 390;
                 var _fh = _fd.documentElement.clientHeight || 700;
-                // Sample two x-positions: 5% and 20% from left (covers 130px panels on 390px screen)
-                [Math.round(_fw * 0.05), Math.round(_fw * 0.20)].forEach(function(_x) {
+
+                // Primary path: find the verified OO 9.x thumbnail panel by exact ID.
+                // elementFromPoint cannot be used here because the panel has pointer-events:none
+                // (set by our WKUserScript CSS), which causes elementFromPoint to skip it.
+                var _panelEl = _fd.getElementById('id_panel_thumbnails');
+                if (_panelEl) {
+                  // Force the main editor area to fill the full width now that we know
+                  // the panel is present. We do NOT set display:none on the panel here —
+                  // OO measures panel.offsetWidth during its 52% init step; display:none
+                  // returns 0 and freezes OO. area_id_main forced to left:0 via inline
+                  // !important (wins over OO's regular inline style positioning).
+                  var _mainEl = _fd.getElementById('area_id_main');
+                  if (_mainEl) {
+                    _mainEl.style.setProperty('left',        '0',        'important');
+                    _mainEl.style.setProperty('margin-left', '0',        'important');
+                    _mainEl.style.setProperty('right',       '0',        'important');
+                    _mainEl.style.setProperty('flex',        '1 1 auto', 'important');
+                  }
+                  // Zero out padding-left on panel's parent so the content area isn't indented
+                  var _panPar = _panelEl.parentElement;
+                  if (_panPar) _panPar.style.setProperty('padding-left', '0', 'important');
                   try {
-                    var _cy = Math.round(_fh * 0.5);
-                    var _el = _fd.elementFromPoint(_x, _cy);
-                    while (_el && _el !== _fd.body && _el !== _fd.documentElement) {
-                      var _r = _el.getBoundingClientRect();
-                      // Panel shape: left-anchored, narrower than 45%, taller than 30%
-                      if (_r.left <= 10 && _r.width >= 40 && _r.width < _fw * 0.45 && _r.height > _fh * 0.3) {
-                        // Skip if element contains a large main canvas
-                        var _hasMain = false;
-                        if (_el.querySelectorAll) {
-                          _el.querySelectorAll('canvas').forEach(function(c) {
-                            if ((c.width || c.offsetWidth) > 200 && (c.height || c.offsetHeight) > 100) _hasMain = true;
-                          });
-                        }
-                        if (!_hasMain) {
-                          _el.style.setProperty('display',   'none',   'important');
-                          _el.style.setProperty('width',     '0',      'important');
-                          _el.style.setProperty('overflow',  'hidden', 'important');
-                          // Expand the sibling (editor area) to fill freed space
-                          var _par = _el.parentElement;
-                          if (_par) {
-                            Array.from(_par.children).forEach(function(_sib) {
-                              if (_sib === _el) return;
-                              var _sr = _sib.getBoundingClientRect();
-                              if (_sr.width > _fw * 0.1 || _sr.height > _fh * 0.1) {
-                                _sib.style.setProperty('left',        '0',        'important');
-                                _sib.style.setProperty('width',       '100%',     'important');
-                                _sib.style.setProperty('margin-left', '0',        'important');
-                                _sib.style.setProperty('flex',        '1 1 auto', 'important');
-                              }
+                    var _panR = _panelEl.getBoundingClientRect();
+                    window.webkit.messageHandlers.editorBridge.postMessage({
+                      action: 'debug',
+                      msg: '[PPT-BYPOINT] fixed layout: panel w=' + Math.round(_panR.width) +
+                           ' area_id_main forced left:0'
+                    });
+                  } catch(_lb) {}
+                } else {
+                  // Fallback for unknown OO versions: elementFromPoint heuristic.
+                  // (Only reached when #id_panel_thumbnails is not found by ID.)
+                  [Math.round(_fw * 0.05), Math.round(_fw * 0.20)].forEach(function(_x) {
+                    try {
+                      var _cy = Math.round(_fh * 0.5);
+                      var _el = _fd.elementFromPoint(_x, _cy);
+                      while (_el && _el !== _fd.body && _el !== _fd.documentElement) {
+                        var _r = _el.getBoundingClientRect();
+                        // Panel shape: left-anchored, narrower than 45%, taller than 30%
+                        if (_r.left <= 10 && _r.width >= 40 && _r.width < _fw * 0.45 && _r.height > _fh * 0.3) {
+                          var _hasMain = false;
+                          if (_el.querySelectorAll) {
+                            _el.querySelectorAll('canvas').forEach(function(c) {
+                              if ((c.width || c.offsetWidth) > 200 && (c.height || c.offsetHeight) > 100) _hasMain = true;
                             });
-                            _par.style.setProperty('padding-left', '0', 'important');
                           }
-                          // Log exact element so we can add its selector to CSS
-                          try {
-                            window.webkit.messageHandlers.editorBridge.postMessage({
-                              action: 'debug',
-                              msg: '[PPT-BYPOINT] HID @(' + _x + ',' + _cy + '): ' +
-                                   _el.tagName + '#' + _el.id +
-                                   ' class="' + (typeof _el.className === 'string' ? _el.className.slice(0,100) : '') + '"' +
-                                   ' ' + Math.round(_r.width) + 'x' + Math.round(_r.height)
-                            });
-                          } catch(_lb) {}
-                          break;  // found and hidden — stop walking up
+                          if (!_hasMain) {
+                            _el.style.setProperty('display',   'none',   'important');
+                            _el.style.setProperty('width',     '0',      'important');
+                            _el.style.setProperty('overflow',  'hidden', 'important');
+                            var _par = _el.parentElement;
+                            if (_par) {
+                              Array.from(_par.children).forEach(function(_sib) {
+                                if (_sib === _el) return;
+                                var _sr = _sib.getBoundingClientRect();
+                                if (_sr.width > _fw * 0.1 || _sr.height > _fh * 0.1) {
+                                  _sib.style.setProperty('left',        '0',        'important');
+                                  _sib.style.setProperty('width',       '100%',     'important');
+                                  _sib.style.setProperty('margin-left', '0',        'important');
+                                  _sib.style.setProperty('flex',        '1 1 auto', 'important');
+                                }
+                              });
+                              _par.style.setProperty('padding-left', '0', 'important');
+                            }
+                            try {
+                              window.webkit.messageHandlers.editorBridge.postMessage({
+                                action: 'debug',
+                                msg: '[PPT-BYPOINT] HID @(' + _x + ',' + _cy + '): ' +
+                                     _el.tagName + '#' + _el.id + ' ' +
+                                     Math.round(_r.width) + 'x' + Math.round(_r.height)
+                              });
+                            } catch(_lb) {}
+                            break;
+                          }
                         }
+                        _el = _el.parentElement;
                       }
-                      _el = _el.parentElement;
-                    }
-                  } catch(_ep) {}
-                });
+                    } catch(_ep) {}
+                  });
+                }
                 try { _fd.defaultView.dispatchEvent(new Event('resize')); } catch(_) {}
               } catch(_bp) {}
             }
@@ -2430,16 +2650,24 @@
                       // Use CSS + geo-hide instead to collapse the thumbnail panel.
                       // Only hide ruler — same as Word path.
                     } else {
-                      // Word: same mobile-view flow as Excel.
+                      // Word: activate mobile view (removes page margins/borders, content fills width).
+                      // Do NOT call asc_SetFitPage — it switches back to page-layout mode (undoes mobile view).
+                      // Do NOT call asc_setViewLayout — may conflict with mobile view init.
+                      // After mobile view, set zoom type 2 (fit-to-width) so content fills screen.
                       if (typeof _ed.asc_setMobileView === 'function') _ed.asc_setMobileView(true);
-                      if (typeof _ed.asc_SetFitPage    === 'function') _ed.asc_SetFitPage(true);
-                      if (typeof _ed.asc_setViewLayout === 'function') _ed.asc_setViewLayout(1);
-                      try { window.webkit.messageHandlers.editorBridge.postMessage({action:'debug', msg:'[OO-word-mobile] applied'}); } catch(_) {}
-                      // Auto-scroll so page left edge is flush with screen left.
-                      // OO mobile view centers the page by default — we scroll #id_main_scroll
-                      // to wherever .page.getBoundingClientRect().left is relative to its container.
+                      setTimeout(function() {
+                        try {
+                          var _ed2 = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+                          if (_ed2 && typeof _ed2.asc_setZoomType === 'function') _ed2.asc_setZoomType(2);
+                          try { _w.dispatchEvent(new Event('resize')); } catch(_) {}
+                        } catch(_) {}
+                      }, 600);
+                      try { window.webkit.messageHandlers.editorBridge.postMessage({action:'debug', msg:'[OO-word-mobile] asc_setMobileView called'}); } catch(_) {}
+                      // Auto-align: scroll #id_main_scroll so .page left edge is flush with x=0.
+                      // OO may reset scrollLeft after each re-render, so fire at multiple times.
+                      // Debug log: [OO-align] shows real coords so we know if calc is working.
                       (function() {
-                        function _alignPageLeft() {
+                        function _align() {
                           try {
                             var _vFr = document.querySelector('iframe[name="frameEditor"]');
                             if (!_vFr || !_vFr.contentDocument) return;
@@ -2447,26 +2675,25 @@
                             var _ms = _vD.getElementById('id_main_scroll') || _vD.getElementById('id-main-scroll');
                             if (!_ms) return;
                             var _pg = _vD.querySelector('.page');
-                            if (!_pg) { _ms.scrollLeft = 0; return; }
-                            // BoundingClientRect gives us visual positions; compute exact scroll target.
-                            var _pgR = _pg.getBoundingClientRect();
-                            var _msR = _ms.getBoundingClientRect();
-                            var _target = _ms.scrollLeft + (_pgR.left - _msR.left);
-                            _ms.scrollLeft = Math.max(0, _target);
+                            var _pgL = _pg ? _pg.getBoundingClientRect().left : 0;
+                            var _msL = _ms.getBoundingClientRect().left;
+                            var _target = Math.max(0, _ms.scrollLeft + (_pgL - _msL));
+                            _ms.scrollLeft = _target;
                             try {
                               window.webkit.messageHandlers.editorBridge.postMessage({
                                 action: 'debug',
-                                msg: '[OO-word-align] scrollLeft→' + Math.round(_ms.scrollLeft) +
-                                     ' pgLeft=' + Math.round(_pgR.left) +
-                                     ' msLeft=' + Math.round(_msR.left) +
-                                     ' msScroll=' + _ms.scrollWidth + '/' + _ms.clientWidth
+                                msg: '[OO-align] t=' + Math.round(_target) +
+                                     ' pgL=' + Math.round(_pgL) +
+                                     ' msL=' + Math.round(_msL) +
+                                     ' sw/cw=' + _ms.scrollWidth + '/' + _ms.clientWidth
                               });
                             } catch(_) {}
                           } catch(_) {}
                         }
-                        setTimeout(_alignPageLeft, 700);
-                        setTimeout(_alignPageLeft, 2000);
-                        setTimeout(_alignPageLeft, 4500);
+                        // Fire densely in the first 8s — OO may re-render several times.
+                        [400, 800, 1200, 1800, 2500, 3500, 5000, 8000].forEach(function(t) {
+                          setTimeout(_align, t);
+                        });
                       })();
                     }
                     try { _w.dispatchEvent(new Event('resize')); } catch(_re) {}
@@ -3419,6 +3646,8 @@
 
           // ── AutoFilter toggle — click OO's button first (Ctrl+Shift+L shortcut as fallback)
           if (cmd === 'filter-toggle') {
+            // Native toolbar tap = explicit user intent; allow filter interception.
+            window._ooUserHasInteracted = true;
             if (_clickOOBtn(['autofilter','auto-filter','auto filter','set filter',
                              'toggle filter','filter','autofilter on','autofilter off',
                              'insert autofilter','remove autofilter'])) return;
@@ -3539,9 +3768,161 @@
             return;
           }
 
-          // Find: open search bar
+          // Find: open search bar — dispatch Ctrl+F to inner frame so OO handles it
           if (cmd === 'find') {
+            try {
+              var _fDoc = _innerWin && _innerWin.document;
+              if (_fDoc) {
+                try { _innerWin.focus(); } catch(_) {}
+                _fDoc.dispatchEvent(new KeyboardEvent('keydown', {
+                  bubbles: true, cancelable: true, key: 'f', keyCode: 70, which: 70,
+                  ctrlKey: true, view: _innerWin
+                }));
+                return;
+              }
+            } catch(_) {}
+            if (_clickOOBtn(['find','search','open find panel','find bar'])) return;
             _execFocused('find');
+            return;
+          }
+
+          // Track Changes toggle
+          if (cmd === 'track-changes') {
+            var _tced = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+            if (_tced) {
+              var _tracking = false;
+              if      (typeof _tced.asc_GetTrackRevisions === 'function') _tracking = _tced.asc_GetTrackRevisions();
+              else if (typeof _tced.asc_getTrackRevisions === 'function') _tracking = _tced.asc_getTrackRevisions();
+              var _newTrack = !_tracking;
+              if      (typeof _tced.asc_SetTrackRevisions === 'function') { _tced.asc_SetTrackRevisions(_newTrack); return; }
+              else if (typeof _tced.asc_setTrackRevisions === 'function') { _tced.asc_setTrackRevisions(_newTrack); return; }
+            }
+            if (_clickOOBtn(['track changes','track revisions','track change','revision'])) return;
+            _focusedCmd('TrackChanges');
+            return;
+          }
+
+          // Accept current tracked change
+          if (cmd === 'review-accept') {
+            var _aced = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+            if (_aced) {
+              if      (typeof _aced.asc_AcceptRevisionChanges === 'function') { _aced.asc_AcceptRevisionChanges(); return; }
+              else if (typeof _aced.asc_acceptRevisionChanges === 'function') { _aced.asc_acceptRevisionChanges(); return; }
+              else if (typeof _aced.asc_AcceptChange          === 'function') { _aced.asc_AcceptChange();          return; }
+              else if (typeof _aced.asc_acceptChange          === 'function') { _aced.asc_acceptChange();          return; }
+            }
+            if (_clickOOBtn(['accept change','accept revision','accept current'])) return;
+            _focusedCmd('AcceptChange');
+            return;
+          }
+
+          // Reject current tracked change
+          if (cmd === 'review-reject') {
+            var _rjed = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+            if (_rjed) {
+              if      (typeof _rjed.asc_RejectRevisionChanges === 'function') { _rjed.asc_RejectRevisionChanges(); return; }
+              else if (typeof _rjed.asc_rejectRevisionChanges === 'function') { _rjed.asc_rejectRevisionChanges(); return; }
+              else if (typeof _rjed.asc_RejectChange          === 'function') { _rjed.asc_RejectChange();          return; }
+              else if (typeof _rjed.asc_rejectChange          === 'function') { _rjed.asc_rejectChange();          return; }
+            }
+            if (_clickOOBtn(['reject change','reject revision','reject current'])) return;
+            _focusedCmd('RejectChange');
+            return;
+          }
+
+          // Accept ALL tracked changes
+          if (cmd === 'review-accept-all') {
+            var _aaed = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+            if (_aaed) {
+              if      (typeof _aaed.asc_AcceptAllRevisionChanges === 'function') { _aaed.asc_AcceptAllRevisionChanges(); return; }
+              else if (typeof _aaed.asc_acceptAllRevisionChanges === 'function') { _aaed.asc_acceptAllRevisionChanges(); return; }
+              else if (typeof _aaed.asc_AcceptAllChanges         === 'function') { _aaed.asc_AcceptAllChanges();         return; }
+              else if (typeof _aaed.asc_acceptAllChanges         === 'function') { _aaed.asc_acceptAllChanges();         return; }
+            }
+            if (_clickOOBtn(['accept all changes','accept all','accept all revisions'])) return;
+            _focusedCmd('AcceptAllChanges');
+            return;
+          }
+
+          // Reject ALL tracked changes
+          if (cmd === 'review-reject-all') {
+            var _raed = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+            if (_raed) {
+              if      (typeof _raed.asc_RejectAllRevisionChanges === 'function') { _raed.asc_RejectAllRevisionChanges(); return; }
+              else if (typeof _raed.asc_rejectAllRevisionChanges === 'function') { _raed.asc_rejectAllRevisionChanges(); return; }
+              else if (typeof _raed.asc_RejectAllChanges         === 'function') { _raed.asc_RejectAllChanges();         return; }
+              else if (typeof _raed.asc_rejectAllChanges         === 'function') { _raed.asc_rejectAllChanges();         return; }
+            }
+            if (_clickOOBtn(['reject all changes','reject all','reject all revisions'])) return;
+            _focusedCmd('RejectAllChanges');
+            return;
+          }
+
+          // Word count — register callback so result posts to Swift via bridge
+          if (cmd === 'word-count') {
+            var _wced = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+            if (_wced) {
+              // Register result callback before calling — OO fires this with the statistic object
+              try {
+                _innerWin.asc_onDocumentStatistic = function(stat) {
+                  try {
+                    var w  = stat ? (typeof stat.asc_getWords              === 'function' ? stat.asc_getWords()              : (stat.Words              || stat.words              || 0)) : 0;
+                    var c  = stat ? (typeof stat.asc_getCharsWithSpaces    === 'function' ? stat.asc_getCharsWithSpaces()    : (stat.CharsWithSpaces    || stat.charsWithSpaces    || 0)) : 0;
+                    var cn = stat ? (typeof stat.asc_getCharsWithoutSpaces === 'function' ? stat.asc_getCharsWithoutSpaces() : (stat.Chars              || stat.chars              || 0)) : 0;
+                    var p  = stat ? (typeof stat.asc_getParagraphs         === 'function' ? stat.asc_getParagraphs()         : (stat.Paragraphs         || stat.paragraphs         || 0)) : 0;
+                    window.webkit.messageHandlers.editorBridge.postMessage({
+                      action: 'wordCount', words: w, chars: c, charsNoSpace: cn, paragraphs: p
+                    });
+                  } catch(_) {}
+                };
+              } catch(_) {}
+              if      (typeof _wced.asc_getDocumentStatistic  === 'function') { _wced.asc_getDocumentStatistic();  return; }
+              else if (typeof _wced.asc_GetDocumentStatistic  === 'function') { _wced.asc_GetDocumentStatistic();  return; }
+              else if (typeof _wced.asc_showDocumentStatistic === 'function') { _wced.asc_showDocumentStatistic(); return; }
+            }
+            if (_clickOOBtn(['word count','words count','statistics','statistic','words'])) return;
+            _focusedCmd('WordsCount');
+            return;
+          }
+
+          // Spell check — open OO's spell check panel
+          if (cmd === 'spell-check') {
+            var _sced = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+            if (_sced) {
+              if      (typeof _sced.asc_startSpellCheck  === 'function') { _sced.asc_startSpellCheck();  return; }
+              else if (typeof _sced.asc_StartSpellCheck  === 'function') { _sced.asc_StartSpellCheck();  return; }
+              else if (typeof _sced.asc_showSpellCheck   === 'function') { _sced.asc_showSpellCheck();   return; }
+            }
+            if (_clickOOBtn(['spell check','spellcheck','spell','check spelling'])) return;
+            _focusedCmd('SpellCheck');
+            return;
+          }
+
+          // Text case — cycle UPPERCASE → lowercase → Title Case via OO API or click
+          if (cmd === 'text-case') {
+            var _tcced = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+            if (_tcced) {
+              var _tcEnum = (_innerWin.Asc && _innerWin.Asc.c_oAscChangeCase)
+                         || (_innerWin.AscCommon && _innerWin.AscCommon.c_oAscChangeCase) || {};
+              // UPPER=1, lower=2, Title=3 (OO enum; fallback to 1 if unknown)
+              var _lsKey = '_oo_case_idx';
+              var _caseVals = [
+                _tcEnum.UPPER   !== undefined ? _tcEnum.UPPER   : 1,
+                _tcEnum.lower   !== undefined ? _tcEnum.lower   : 2,
+                _tcEnum.Title   !== undefined ? _tcEnum.Title   : 3,
+              ];
+              var _caseIdx = ((parseInt(localStorage.getItem(_lsKey) || '0', 10) + 1) % 3);
+              try { localStorage.setItem(_lsKey, String(_caseIdx)); } catch(_) {}
+              var _caseVal = _caseVals[_caseIdx];
+              var _tcMethods = ['asc_ChangeTextCase','asc_changeTextCase','asc_SetTextCase','asc_setTextCase'];
+              for (var _tmi = 0; _tmi < _tcMethods.length; _tmi++) {
+                if (typeof _tcced[_tcMethods[_tmi]] === 'function') {
+                  try { _tcced[_tcMethods[_tmi]](_caseVal); return; } catch(_) {}
+                }
+              }
+            }
+            if (_clickOOBtn(['change case','toggle case','text case','uppercase'])) return;
+            _focusedCmd('ChangeCase');
             return;
           }
         }
@@ -3607,57 +3988,18 @@
         }
 
         if (cmd === 'insert-chart') {
-          try {
-            try { _innerWin.focus(); } catch(_) {}
-            var _xedC = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
-            var _doneC = false;
-            if (_xedC) {
-              // asc_openChartFrame opens the chart creation wizard
-              var _cMethods = [
-                ['asc_openChartFrame', function(ed) { ed.asc_openChartFrame(null); }],
-                ['asc_insertChart',    function(ed) { ed.asc_insertChart(); }],
-                ['asc_AddChart',       function(ed) { ed.asc_AddChart(); }],
-                ['openChartFrame',     function(ed) { ed.openChartFrame(); }],
-              ];
-              _cMethods.forEach(function(pair) {
-                if (!_doneC && typeof _xedC[pair[0]] === 'function') {
-                  try { pair[1](_xedC); _doneC = true; console.log('[iOS] insert-chart via', pair[0]); }
-                  catch(e2) { console.warn('[iOS] insert-chart', pair[0], 'failed:', e2); }
-                }
-              });
-            }
-            if (!_doneC) {
-              _doneC = _clickOOBtn(['insertchart','insert-chart','insert chart','chart']);
-              if (!_doneC) { _focusedCmd('insertChart'); }
-            }
-          } catch(e) { console.warn('[iOS] insert-chart outer:', e); }
+          // Route through the same safe function used by the native chart picker sheet.
+          // Never fall back to _clickOOBtn (clicks OO's hidden toolbar button → opens
+          // OO's chart wizard dialog → crashes WKWebView process on iOS).
+          window._insertChart && window._insertChart('column');
           return;
         }
 
         if (cmd === 'insert-shape') {
-          try {
-            try { _innerWin.focus(); } catch(_) {}
-            var _xedS = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
-            var _doneS = false;
-            if (_xedS) {
-              // asc_setShapePreset('rect') enters draw-shape mode with the basic rectangle
-              var _sMethods = [
-                ['asc_setShapePreset', function(ed) { ed.asc_setShapePreset('rect'); }],
-                ['asc_insertShape',    function(ed) { ed.asc_insertShape('rect'); }],
-                ['asc_AddShape',       function(ed) { ed.asc_AddShape('rect'); }],
-              ];
-              _sMethods.forEach(function(pair) {
-                if (!_doneS && typeof _xedS[pair[0]] === 'function') {
-                  try { pair[1](_xedS); _doneS = true; console.log('[iOS] insert-shape via', pair[0]); }
-                  catch(e2) { console.warn('[iOS] insert-shape', pair[0], 'failed:', e2); }
-                }
-              });
-            }
-            if (!_doneS) {
-              _doneS = _clickOOBtn(['insertshape','insert-shape','insert shape','shape','autoshape']);
-              if (!_doneS) { _focusedCmd('insertShape'); }
-            }
-          } catch(e) { console.warn('[iOS] insert-shape outer:', e); }
+          // Route through the same safe function used by the native shape picker sheet.
+          // Prioritises asc_AddShape (direct insert) over asc_setShapePreset (draw mode
+          // requires mouse drag → unsupported on iOS touch → crashes).
+          window._insertShape && window._insertShape('rect');
           return;
         }
 
@@ -3769,6 +4111,52 @@
           return;
         }
 
+        // ── Word table row / column operations ────────────────────────────────
+        if (cmd === 'table-row-add') {
+          var _tred = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+          if (_tred) {
+            if      (typeof _tred.asc_addTableRow    === 'function') { try { _tred.asc_addTableRow(false);    return; } catch(_) {} }
+            else if (typeof _tred.asc_InsertTableRow === 'function') { try { _tred.asc_InsertTableRow(false); return; } catch(_) {} }
+            else if (typeof _tred.asc_addRow         === 'function') { try { _tred.asc_addRow(false);         return; } catch(_) {} }
+          }
+          if (_clickOOBtn(['insert row below','add row below','insert row'])) return;
+          _focusedCmd('InsertRowBelow');
+          return;
+        }
+        if (cmd === 'table-row-del') {
+          var _trded = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+          if (_trded) {
+            if      (typeof _trded.asc_deleteTableRow === 'function') { try { _trded.asc_deleteTableRow(); return; } catch(_) {} }
+            else if (typeof _trded.asc_DeleteTableRow === 'function') { try { _trded.asc_DeleteTableRow(); return; } catch(_) {} }
+            else if (typeof _trded.asc_deleteRow      === 'function') { try { _trded.asc_deleteRow();      return; } catch(_) {} }
+          }
+          if (_clickOOBtn(['delete row','remove row','delete current row'])) return;
+          _focusedCmd('DeleteRow');
+          return;
+        }
+        if (cmd === 'table-col-add') {
+          var _tcad = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+          if (_tcad) {
+            if      (typeof _tcad.asc_addTableColumn    === 'function') { try { _tcad.asc_addTableColumn(false);    return; } catch(_) {} }
+            else if (typeof _tcad.asc_InsertTableColumn === 'function') { try { _tcad.asc_InsertTableColumn(false); return; } catch(_) {} }
+            else if (typeof _tcad.asc_addColumn         === 'function') { try { _tcad.asc_addColumn(false);         return; } catch(_) {} }
+          }
+          if (_clickOOBtn(['insert column right','add column right','insert column'])) return;
+          _focusedCmd('InsertColumnRight');
+          return;
+        }
+        if (cmd === 'table-col-del') {
+          var _tcdd = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+          if (_tcdd) {
+            if      (typeof _tcdd.asc_deleteTableColumn === 'function') { try { _tcdd.asc_deleteTableColumn(); return; } catch(_) {} }
+            else if (typeof _tcdd.asc_DeleteTableColumn === 'function') { try { _tcdd.asc_DeleteTableColumn(); return; } catch(_) {} }
+            else if (typeof _tcdd.asc_deleteColumn      === 'function') { try { _tcdd.asc_deleteColumn();      return; } catch(_) {} }
+          }
+          if (_clickOOBtn(['delete column','remove column','delete current column'])) return;
+          _focusedCmd('DeleteColumn');
+          return;
+        }
+
         // ── PPT slide-management commands ──────────────────────────────────────
         // Schedule slide position report for all slide nav/management commands.
         // setTimeout fires after the current call returns, by which time OO has
@@ -3854,6 +4242,7 @@
           if (_slGotoEd) {
             var _idx0 = _slGotoIdx - 1; // OO uses 0-based
             var _gotoFns = [
+              'goToPage',  // OO 9.x bare name (confirmed in api.js methods dump)
               'asc_goToPage','asc_goToSlide','asc_GoToPage','asc_setCurrentPage',
               'asc_changeCurrentSlide','asc_SetCurrentSlide','asc_changeCurrentPage',
               'asc_onCurrentSlideChanged','asc_scrollToSlide','asc_scrollToPage',
@@ -3980,70 +4369,89 @@
     };
 
     // Swift calls this to insert a photo picked from the native Photos picker.
-    // dataURL is a "data:image/jpeg;base64,..." string.
-    // OO's asc_insertImageFromUrl expects an HTTP(S) or blob: URL — convert first.
-    // Called by Swift when image is served via office://host/img/<uuid> scheme.
-    // No base64 in JS — OO fetches image bytes directly from the scheme handler.
+    // officeURL is an "office://host/img/<uuid>" URL stored by OfficeSchemeHandler.
+    //
+    // Root-cause fix (2 previous attempts used blob: URLs which crash OO's WASM C++):
+    //   AddImageUrl([url]) is what OO's own toolbar uses internally. It calls OO's WASM
+    //   with a URL that the inner-frame XHR proxy fetches from OfficeSchemeHandler
+    //   (proxy middleware returns null → falls through to real WKWebView XHR →
+    //   OfficeSchemeHandler serves the raw bytes at office://host/img/<uuid>).
+    //   blob: URLs were crashing because OO's C++ HTTP client cannot handle that scheme.
     window.insertImageByURL = function(officeURL) {
       if (!_innerWin) return;
       window._filterInterceptEnabled = false;
       try { _innerWin._ooInjectEnabled = false; } catch(_) {}
+
+      var _imgRestoreDone = false;
       var _restore = function() {
+        if (_imgRestoreDone) return; _imgRestoreDone = true;
         window._filterInterceptEnabled = true;
         try { _innerWin._ooInjectEnabled = true; } catch(_) {}
       };
+      setTimeout(_restore, 10000);
+
       setTimeout(function() {
         try { _innerWin.focus(); } catch(_) {}
         var ed = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
         if (!ed) {
           try { if (window._showInsertToast) window._showInsertToast('Editor not ready — please try again'); } catch(_) {}
-          setTimeout(_restore, 1500);
-          return;
+          _restore(); return;
         }
 
-        function _insertWithUrl(url) {
-          var _done = false;
-          if (typeof ed.asc_insertImageFromUrl === 'function') {
-            try { ed.asc_insertImageFromUrl(url); _done = true; } catch(e1) { console.warn('[iOS] asc_insertImageFromUrl:', e1); }
-          }
-          if (!_done && typeof ed.asc_addImageUrl === 'function') {
-            try { ed.asc_addImageUrl(url); _done = true; } catch(e2) {}
-          }
-          if (!_done && typeof ed.asc_AddImage === 'function') {
-            try { ed.asc_AddImage(url); _done = true; } catch(e3) {}
-          }
-          if (!_done) {
-            var _clicked = false;
-            try { _clicked = _clickOOBtn(['insert image','image','picture','photo']); } catch(_) {}
-            if (!_clicked) {
-              try { if (window._showInsertToast) window._showInsertToast('Image insert not available in this editor version'); } catch(_) {}
-            }
-          }
-        }
-
-        // OO's asc_insertImageFromUrl only accepts http/https/blob URLs — office://
-        // URLs are rejected silently. Fetch the image bytes and create a blob URL in
-        // the INNER frame context so OO's image loader (running inside the inner iframe)
-        // can access it without a cross-origin restriction.
-        // Set crash-guard before OO image insert (OOM risk). Cleared after success/error.
         try { localStorage.setItem('_oo_insert_pending', 'image'); } catch(_) {}
-        fetch(officeURL)
-          .then(function(r) { return r.blob(); })
-          .then(function(blob) {
-            var blobUrl = _innerWin.URL.createObjectURL(blob);
-            _insertWithUrl(blobUrl);
-            // Revoke after OO has had time to load the image bytes
+
+        // Primary: AddImageUrl/asc_addImageDrawingObject — OO's official public APIs.
+        // Word/PPT: AddImageUrl([url])  |  Excel: asc_addImageDrawingObject([url])
+        // The office:// URL is fetched by OO's WASM via the inner-frame XHR → proxy falls
+        // through to real WKWebView XHR → OfficeSchemeHandler serves the image bytes.
+        var _addImgFn = null;
+        if (typeof ed.AddImageUrl === 'function')
+          _addImgFn = function(u) { ed.AddImageUrl([u]); };
+        else if (typeof ed.asc_addImageDrawingObject === 'function')
+          _addImgFn = function(u) { ed.asc_addImageDrawingObject([u]); };
+
+        if (_addImgFn) {
+          try {
+            _addImgFn(officeURL);
+            console.log('[iOS] insertImageByURL: official API OK');
             setTimeout(function() {
-              try { _innerWin.URL.revokeObjectURL(blobUrl); } catch(_) {}
               try { localStorage.removeItem('_oo_insert_pending'); } catch(_) {}
               _restore();
-            }, 3000);
+            }, 5000);
+            return;
+          } catch(e0) { console.warn('[iOS] AddImageUrl/asc_addImageDrawingObject failed:', e0); }
+        }
+
+        // Fallback: fetch bytes in outer frame, POST to EditorServer upload endpoint,
+        // then call asc_insertImageFromUrl with the resulting blob URL.
+        fetch(officeURL)
+          .then(function(r) {
+            var ct = (r.headers && r.headers.get('content-type')) || 'image/jpeg';
+            return r.arrayBuffer().then(function(ab) { return { ab: ab, mime: ct }; });
+          })
+          .then(function(d) {
+            var u8      = new ((_innerWin && _innerWin.Uint8Array) || Uint8Array)(d.ab);
+            var BlobCls = (_innerWin && _innerWin.Blob) ? _innerWin.Blob : Blob;
+            var iURL    = (_innerWin && _innerWin.URL)  ? _innerWin.URL  : URL;
+            var blobURL = iURL.createObjectURL(new BlobCls([u8], { type: d.mime }));
+            var ok = false;
+            if (typeof ed.asc_insertImageFromUrl === 'function') {
+              try { ed.asc_insertImageFromUrl(blobURL); ok = true; } catch(e1) { console.warn('[iOS] asc_insertImageFromUrl:', e1); }
+            }
+            if (!ok) {
+              console.warn('[iOS] insertImageByURL: all insert APIs failed');
+              try { if (window._showInsertToast) window._showInsertToast('Image insert not available — please try again'); } catch(_) {}
+            }
+            setTimeout(function() {
+              try { iURL.revokeObjectURL(blobURL); } catch(_) {}
+              try { localStorage.removeItem('_oo_insert_pending'); } catch(_) {}
+              _restore();
+            }, ok ? 4000 : 500);
           })
           .catch(function(fetchErr) {
-            console.warn('[iOS] insertImageByURL fetch failed:', fetchErr, '— falling back to direct URL');
-            _insertWithUrl(officeURL);
+            console.warn('[iOS] insertImageByURL fetch failed:', fetchErr);
             try { localStorage.removeItem('_oo_insert_pending'); } catch(_) {}
-            setTimeout(_restore, 1500);
+            _restore();
           });
       }, 200);
     };
@@ -4052,24 +4460,27 @@
       if (!_innerWin) return;
       window._filterInterceptEnabled = false;
       try { _innerWin._ooInjectEnabled = false; } catch(_) {}
+
+      var _dUrlRestoreDone = false;
+      var _dRestore = function() {
+        if (_dUrlRestoreDone) return; _dUrlRestoreDone = true;
+        window._filterInterceptEnabled = true;
+        try { _innerWin._ooInjectEnabled = true; } catch(_) {}
+      };
+      setTimeout(_dRestore, 8000);
+
       setTimeout(function() {
         try { _innerWin.focus(); } catch(_) {}
         try {
           var ed = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
           if (!ed) {
             console.warn('[iOS] insertImageByDataURL: editor not ready');
-            setTimeout(function() {
-              window._filterInterceptEnabled = true;
-              try { _innerWin._ooInjectEnabled = true; } catch(_) {}
-            }, 1500);
-            return;
+            _dRestore(); return;
           }
-          // Convert data URL → blob URL so OO image APIs can load it.
+          // Convert data URL → inner-frame blob URL.
           // asc_insertImageFromUrl only accepts http(s)/blob URLs, not data: URIs.
-          // IMPORTANT: create the blob in _innerWin context so OO's image loader
-          // (running in the inner iframe) can fetch its own-origin blob URL.
-          // A blob URL created in the outer frame is cross-origin to the inner frame
-          // even on the same scheme, causing a silent load failure in WKWebView.
+          // Create the blob in _innerWin context so OO's image loader (inner iframe)
+          // can fetch it without cross-frame origin restrictions in WebKit.
           var imgURL = dataURL;
           try {
             var parts = dataURL.split(',');
@@ -4084,7 +4495,7 @@
             imgURL = iURL.createObjectURL(new BlobCls([u8], { type: mime }));
             console.log('[iOS] insertImageByDataURL: inner-frame blob URL created', imgURL.slice(0, 40));
           } catch(blobErr) {
-            console.warn('[iOS] blob conversion failed, falling back to data URL:', blobErr);
+            console.warn('[iOS] blob conversion failed, using data URL directly:', blobErr);
           }
           var _done = false;
           if (!_done && typeof ed.asc_insertImageFromUrl === 'function') {
@@ -4099,15 +4510,14 @@
           if (!_done && typeof ed.asc_AddImage === 'function') {
             try { ed.asc_AddImage(imgURL); _done = true; } catch(e4) { console.warn('[iOS] asc_AddImage:', e4); }
           }
-          if (!_done && _innerWin.AscDesktopEditor) {
-            try { _innerWin.AscDesktopEditor.executeFocusedCommand('insertImageFromUrl', imgURL); _done = true; } catch(e5) {}
+          // Never fall back to _clickOOBtn: clicking OO's hidden toolbar insert-image
+          // button opens OO's native file dialog which crashes the WKWebView process.
+          if (!_done) {
+            console.warn('[iOS] insertImageByDataURL: no working method found');
+            try { if (window._showInsertToast) window._showInsertToast('Image insert not available — please try again'); } catch(_) {}
           }
-          if (!_done) { console.warn('[iOS] insertImageByDataURL: no working method found'); }
         } catch(e) { console.warn('[iOS] insertImageByDataURL:', e); }
-        setTimeout(function() {
-          window._filterInterceptEnabled = true;
-          try { _innerWin._ooInjectEnabled = true; } catch(_) {}
-        }, 1500);
+        setTimeout(_dRestore, 1500);
       }, 80);
     };
 

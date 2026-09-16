@@ -199,6 +199,11 @@ struct FileActionsMenu: View {
     /// transition (instant fade with our clear background), and we want
     /// the CARD to slide up while the overlay itself just appears.
     @State private var cardIsPresented = false
+    /// Starts at 0.28 immediately (not tied to cardIsPresented) so the
+    /// scrim is opaque from frame 0, covering the UIKit presenter's own
+    /// dark background before presentationBackground(.clear) takes hold.
+    /// Only animated to 0 on dismiss.
+    @State private var scrimOpacity: Double = 0.28
     /// Two-phase share: tap Share → close actions sheet → present system
     /// share sheet via `ActivityView`. Chained through this flag so both
     /// are one user-perceived action (a `ShareLink` inside the sheet
@@ -228,13 +233,20 @@ struct FileActionsMenu: View {
 
     var body: some View {
         Button {
-            // Present without animation so iOS doesn't run its own
-            // fullScreenCover slide-in (which briefly shows a dark system
-            // background before presentationBackground(.clear) takes effect).
-            // The button icon's tint animation is driven by the
-            // `.animation(value: isActionsSheetPresented)` modifier below —
-            // no need for withAnimation here.
+            // Disable UIKit animations at system level before presenting
+            // so the fullScreenCover transition is instant. SwiftUI's
+            // withTransaction/Transaction(animation:nil) only suppresses
+            // SwiftUI-driven transitions — UIKit still runs its own
+            // presenter animation underneath and briefly shows a dark
+            // background before presentationBackground(.clear) takes effect.
+            // Re-enable on the next run-loop tick so everything else
+            // in the app continues to animate normally.
+            UIView.setAnimationsEnabled(false)
             isActionsSheetPresented = true
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(100))
+                UIView.setAnimationsEnabled(true)
+            }
         } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: 13, weight: .semibold))
@@ -358,8 +370,11 @@ struct FileActionsMenu: View {
     private var actionsOverlay: some View {
         ZStack {
             // Scrim — dimmed background, tap dismisses. `black.opacity`
-            // matches Apple's own sheet backdrop.
-            Color.black.opacity(cardIsPresented ? 0.28 : 0)
+            // matches Apple's own sheet backdrop. Uses a separate
+            // `scrimOpacity` state (not tied to cardIsPresented) so it
+            // starts at 0.28 from the very first frame, preventing the
+            // UIKit presenter's dark background from showing through.
+            Color.black.opacity(scrimOpacity)
                 .ignoresSafeArea()
                 .contentShape(Rectangle())
                 .onTapGesture { dismissMenu() }
@@ -430,13 +445,17 @@ struct FileActionsMenu: View {
     /// `.transition`).
     private func dismissMenu() {
         let animation: Animation? = reduceMotion ? nil : .smooth(duration: 0.24)
-        withAnimation(animation) { cardIsPresented = false }
+        withAnimation(animation) {
+            cardIsPresented = false
+            scrimOpacity = 0
+        }
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(240))
-            // Dismiss cover instantly — no system transition animation —
-            // same reason as the present path above.
-            withTransaction(Transaction(animation: nil)) {
-                isActionsSheetPresented = false
+            UIView.setAnimationsEnabled(false)
+            isActionsSheetPresented = false
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(100))
+                UIView.setAnimationsEnabled(true)
             }
         }
     }
@@ -674,17 +693,19 @@ private struct StatusPill: View {
 
     private var foreground: Color {
         switch status {
-        case .draft:    Color.dsStatusWarning
-        case .reviewed: Color.dsBrandPrimary
-        case .done:     Color.dsStatusSuccess
+        case .getStarted: Color.dsBrandPrimary
+        case .draft:      Color.dsStatusWarning
+        case .reviewed:   Color.dsBrandPrimary
+        case .done:       Color.dsStatusSuccess
         }
     }
 
     private var background: Color {
         switch status {
-        case .draft:    Color.dsStatusWarningBackground
-        case .reviewed: Color.dsBrandPrimarySubtle
-        case .done:     Color.dsStatusSuccessBackground
+        case .getStarted: Color.dsBrandPrimarySubtle
+        case .draft:      Color.dsStatusWarningBackground
+        case .reviewed:   Color.dsBrandPrimarySubtle
+        case .done:       Color.dsStatusSuccessBackground
         }
     }
 }

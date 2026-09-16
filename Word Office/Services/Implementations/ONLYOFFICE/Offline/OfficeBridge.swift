@@ -34,6 +34,8 @@ enum OfficeBridgeMessage {
     case slideChange(current: Int, total: Int)
     /// Thumbnail image captured from OO's rendering canvas for a slide.
     case slideThumbnail(slideNum: Int, data: Data)
+    /// Word document statistics returned by asc_getDocumentStatistic.
+    case wordCount(words: Int, chars: Int, charsNoSpace: Int, paragraphs: Int)
     /// Unknown/unparseable message.
     case unknown(body: Any)
 }
@@ -124,6 +126,13 @@ final class OfficeBridge: NSObject, WKScriptMessageHandler {
                   let data = Data(base64Encoded: b64)
             else { return .unknown(body: body) }
             return .slideThumbnail(slideNum: num, data: data)
+
+        case "wordCount":
+            let words        = dict["words"]        as? Int ?? 0
+            let chars        = dict["chars"]        as? Int ?? 0
+            let charsNoSpace = dict["charsNoSpace"] as? Int ?? 0
+            let paragraphs   = dict["paragraphs"]   as? Int ?? 0
+            return .wordCount(words: words, chars: chars, charsNoSpace: charsNoSpace, paragraphs: paragraphs)
 
         case "debug":
             if let msg = dict["msg"] as? String {

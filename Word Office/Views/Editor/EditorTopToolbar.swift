@@ -35,6 +35,7 @@ struct EditorTopToolbar: View {
         case home      = "Home"
         case paragraph = "Paragraph"
         case insert    = "Insert"
+        case review    = "Review"
     }
 
     private enum PPTTab: String, CaseIterable {
@@ -53,11 +54,12 @@ struct EditorTopToolbar: View {
     @State private var excelTab: ExcelTab = .home
     @State private var wordTab:  WordTab  = .home
     @State private var pptTab:   PPTTab   = .home
-    @State private var fontColor:          Color = .black
-    @State private var fillColor:          Color = Color(red: 1.0, green: 0.92, blue: 0.23)
-    @State private var wordFontColor:      Color = .black
-    @State private var wordHighlightColor: Color = Color(red: 1.0, green: 0.93, blue: 0.0)
-    @State private var pptFontColor:       Color = .black
+    @State private var fontColor:               Color = .black
+    @State private var fillColor:               Color = Color(red: 1.0, green: 0.92, blue: 0.23)
+    @State private var wordFontColor:           Color = .black
+    @State private var wordHighlightColor:      Color = Color(red: 1.0, green: 0.93, blue: 0.0)
+    @State private var pptFontColor:            Color = .black
+    @State private var wordTrackChangesActive:  Bool  = false
 
     // MARK: - Body
 
@@ -79,7 +81,15 @@ struct EditorTopToolbar: View {
             }
         case .word:
             VStack(spacing: 0) {
-                tabBar(tabs: WordTab.allCases, selected: $wordTab)
+                tabBarWithTrailing(tabs: WordTab.allCases, selected: $wordTab) {
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.3))
+                        .frame(width: 0.5, height: 22)
+                        .padding(.horizontal, 2)
+                    iconBtn("minus.magnifyingglass", label: "Zoom out", cmd: "zoom-out")
+                    iconBtn("plus.magnifyingglass",  label: "Zoom in",  cmd: "zoom-in")
+                        .padding(.trailing, 4)
+                }
                 wordContentRow
                     .animation(.easeInOut(duration: 0.12), value: wordTab)
             }
@@ -316,7 +326,8 @@ struct EditorTopToolbar: View {
                         fmtBtn(.underline,     cmd: "underline")
                         fmtBtn(.strikethrough, cmd: "strikeout")
                         vDivider()
-                        // Size
+                        // Font picker + Size
+                        iconBtn("textformat", label: "Font", cmd: "word-font-picker")
                         textBtn("A+", label: "Increase font size", cmd: "font-size-inc")
                         textBtn("A−", label: "Decrease font size", cmd: "font-size-dec")
                         vDivider()
@@ -324,8 +335,9 @@ struct EditorTopToolbar: View {
                         chipBtn("x²", label: "Superscript", cmd: "superscript")
                         chipBtn("x₂", label: "Subscript",   cmd: "subscript")
                         vDivider()
-                        // Clear
-                        iconBtn("eraser", label: "Clear formatting", cmd: "clear-format")
+                        // Clear & Text case
+                        iconBtn("eraser",       label: "Clear formatting", cmd: "clear-format")
+                        chipBtn("Aa",           label: "Text case",        cmd: "text-case")
                         vDivider()
                         // Alignment
                         iconBtn("text.alignleft",    label: "Left",    cmd: "align-left")
@@ -355,14 +367,24 @@ struct EditorTopToolbar: View {
                         iconBtn("text.alignright",   label: "Right",   cmd: "align-right")
                         iconBtn("text.alignjustify", label: "Justify", cmd: "align-justify")
                         vDivider()
-                        chipBtn("Title", label: "Title style", cmd: "style:Title")
-                        chipBtn("H4",    label: "Heading 4",   cmd: "style:Heading 4")
-                        chipBtn("H5",    label: "Heading 5",   cmd: "style:Heading 5")
+                        chipBtn("Normal", label: "Normal",    cmd: "style:Normal")
+                        chipBtn("H1",     label: "Heading 1", cmd: "style:Heading 1")
+                        chipBtn("H2",     label: "Heading 2", cmd: "style:Heading 2")
+                        chipBtn("H3",     label: "Heading 3", cmd: "style:Heading 3")
+                        chipBtn("H4",     label: "Heading 4", cmd: "style:Heading 4")
+                        chipBtn("H5",     label: "Heading 5", cmd: "style:Heading 5")
+                        chipBtn("Title",  label: "Title",     cmd: "style:Title")
                     case .insert:
                         iconBtn("photo",         label: "Insert image",  cmd: "insert-image")
                         chipBtn("Table",         label: "Insert table",  cmd: "insert-table")
                         chipBtn("Chart",         label: "Insert chart",  cmd: "insert-chart")
                         chipBtn("Shape",         label: "Insert shape",  cmd: "insert-shape")
+                        vDivider()
+                        // Table row / column operations (active when cursor is inside a table)
+                        chipBtn("Row +",  label: "Add row below",    cmd: "table-row-add")
+                        chipBtn("Row −",  label: "Delete row",       cmd: "table-row-del")
+                        chipBtn("Col +",  label: "Add column right", cmd: "table-col-add")
+                        chipBtn("Col −",  label: "Delete column",    cmd: "table-col-del")
                         vDivider()
                         iconBtn("link",          label: "Hyperlink",     cmd: "insert-link")
                         iconBtn("text.bubble",   label: "Comment",       cmd: "insert-comment")
@@ -372,6 +394,21 @@ struct EditorTopToolbar: View {
                         chipBtn("Header",        label: "Header",        cmd: "insert-header")
                         chipBtn("Footer",        label: "Footer",        cmd: "insert-footer")
                         chipBtn("Footnote",      label: "Footnote",      cmd: "insert-footnote")
+                    case .review:
+                        // Find & Replace
+                        iconBtn("magnifyingglass", label: "Find",           cmd: "find")
+                        iconBtn("arrow.left.arrow.right", label: "Find & Replace", cmd: "word-find-replace")
+                        vDivider()
+                        // Track Changes — active chip shows current state
+                        activeChipBtn("Track",    label: "Track Changes",     cmd: "track-changes",    isActive: $wordTrackChangesActive)
+                        iconBtn("checkmark",      label: "Accept change",     cmd: "review-accept")
+                        iconBtn("xmark",          label: "Reject change",     cmd: "review-reject")
+                        chipBtn("Acc All",        label: "Accept all changes", cmd: "review-accept-all")
+                        chipBtn("Rej All",        label: "Reject all changes", cmd: "review-reject-all")
+                        vDivider()
+                        // Document info
+                        chipBtn("Words",   label: "Word count",  cmd: "word-count")
+                        chipBtn("Spell",   label: "Spell check", cmd: "spell-check")
                     }
                 }
                 .padding(.horizontal, 4)
@@ -582,12 +619,37 @@ struct EditorTopToolbar: View {
             Text(text)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.primary)
-                .padding(.horizontal, 9)
+                .padding(.horizontal, 8)
                 .padding(.vertical, 5)
                 .background(Color.secondary.opacity(0.15),
                             in: RoundedRectangle(cornerRadius: 7))
                 .frame(minHeight: 44)
-                .padding(.horizontal, 3)
+                .padding(.horizontal, 2)
+                .contentShape(Rectangle())
+        }
+        .foregroundStyle(.primary)
+        .accessibilityLabel(label)
+    }
+
+    /// Toggle chip — shows accent fill when `isActive` is true, toggling on each tap.
+    private func activeChipBtn(
+        _ text: String, label: String, cmd: String, isActive: Binding<Bool>
+    ) -> some View {
+        Button {
+            isActive.wrappedValue.toggle()
+            onCommand(cmd)
+        } label: {
+            Text(text)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(isActive.wrappedValue ? .white : .primary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(
+                    isActive.wrappedValue ? Color.accentColor : Color.secondary.opacity(0.15),
+                    in: RoundedRectangle(cornerRadius: 7)
+                )
+                .frame(minHeight: 44)
+                .padding(.horizontal, 2)
                 .contentShape(Rectangle())
         }
         .foregroundStyle(.primary)
