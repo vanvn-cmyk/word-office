@@ -91,7 +91,7 @@ struct OnboardingPageView: View {
                             reduceMotion ? nil : .easeInOut(duration: 2.2).repeatForever(autoreverses: true),
                             value: splitFloat
                         )
-                        .offset(x: 110, y: -175)
+                        .offset(x: 110, y: -155)
                         .scaleEffect(badgesRevealed ? 1.0 : 0.15)
                         .opacity(badgesRevealed ? 1.0 : 0)
                         .animation(
@@ -106,7 +106,7 @@ struct OnboardingPageView: View {
                             reduceMotion ? nil : .easeInOut(duration: 2.8).repeatForever(autoreverses: true),
                             value: mergeFloat
                         )
-                        .offset(x: -110, y: 155)
+                        .offset(x: -110, y: 120)
                         .scaleEffect(badgesRevealed ? 1.0 : 0.15)
                         .opacity(badgesRevealed ? 1.0 : 0)
                         .animation(

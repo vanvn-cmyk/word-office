@@ -832,6 +832,87 @@
       setTimeout(trySetup, 2000);
     }
 
+    // Touch editing ergonomics ONLYOFFICE's desktop-oriented UI doesn't provide
+    // on its own for a touch browser:
+    //   1. Right-click → context menu (copy/cut/paste/insert...) has no touch
+    //      equivalent, so a long-press must synthesize a contextmenu event.
+    //   2. Cmd/Ctrl+V paste via the async Clipboard API — normal execCommand
+    //      paste is unreliable for a custom `office://` scheme page, so the
+    //      system clipboard is bridged explicitly.
+    // Idempotent per-window (guarded by a flag) since this is called both on the
+    // stub frame (onAppReady) and again on the live OO document after
+    // _reInjectOO() detects the real editor has loaded — same-origin navigation
+    // preserves the contentWindow object, so the guard correctly no-ops the 2nd call.
+    function installTouchEditingBridge(iDoc, innerWin) {
+      if (!innerWin || innerWin.__touchEditingBridgeInstalled) return;
+      innerWin.__touchEditingBridgeInstalled = true;
+
+      // 1. Long-press → contextmenu -------------------------------------------
+      var HOLD_MS = 500, MOVE_TOLERANCE_PX = 10;
+      var pressTimer = null, startX = 0, startY = 0, curX = 0, curY = 0;
+
+      function cancelPress() {
+        if (pressTimer) clearTimeout(pressTimer);
+        pressTimer = null;
+      }
+      function fireContextMenu() {
+        pressTimer = null;
+        var target = iDoc.elementFromPoint(curX, curY) || iDoc.body;
+        target.dispatchEvent(new MouseEvent('contextmenu', {
+          bubbles: true, cancelable: true, button: 2, buttons: 2,
+          clientX: curX, clientY: curY,
+        }));
+      }
+      iDoc.addEventListener('pointerdown', function(e) {
+        if (e.pointerType === 'mouse') return;
+        cancelPress();
+        startX = curX = e.clientX; startY = curY = e.clientY;
+        pressTimer = setTimeout(fireContextMenu, HOLD_MS);
+      }, true);
+      iDoc.addEventListener('pointermove', function(e) {
+        if (!pressTimer) return;
+        curX = e.clientX; curY = e.clientY;
+        var dist = Math.hypot(curX - startX, curY - startY);
+        if (dist > MOVE_TOLERANCE_PX) cancelPress(); // treat as scroll/drag, not a hold
+      }, true);
+      iDoc.addEventListener('pointerup', cancelPress, true);
+      iDoc.addEventListener('pointercancel', cancelPress, true);
+
+      // 2. System clipboard ↔ Clipboard Web API --------------------------------
+      var isSecure = typeof innerWin.isSecureContext === 'boolean'
+        ? innerWin.isSecureContext
+        : innerWin.location.protocol === 'https:';
+      var clipboard = innerWin.navigator && innerWin.navigator.clipboard;
+      if (!isSecure || !clipboard || typeof clipboard.writeText !== 'function') {
+        return; // Clipboard API unavailable on this scheme/context — skip silently
+      }
+
+      iDoc.addEventListener('copy', function(e) {
+        var text = e.clipboardData && e.clipboardData.getData('text/plain');
+        if (text) clipboard.writeText(text).catch(function() {});
+      }, true);
+
+      iDoc.addEventListener('keydown', function(e) {
+        var isPasteShortcut = (e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V');
+        if (!isPasteShortcut) return;
+        var target = e.target;
+        var isNativeInput = target instanceof innerWin.HTMLInputElement
+          || target instanceof innerWin.HTMLTextAreaElement
+          || (target && target.isContentEditable);
+        if (isNativeInput) return; // let the browser handle paste natively here
+
+        e.preventDefault();
+        clipboard.readText().then(function(text) {
+          var dt = new DataTransfer();
+          dt.setData('text/plain', text);
+          var editorRoot = iDoc.getElementById('editor_sdk') || iDoc.body;
+          editorRoot.dispatchEvent(new ClipboardEvent('paste', {
+            clipboardData: dt, bubbles: true, cancelable: true,
+          }));
+        }).catch(function() {});
+      }, true);
+    }
+
     function injectIOSChrome(iDoc) {
       if (iDoc.getElementById('_oo_ios_hide')) return;
 
@@ -1755,6 +1836,7 @@
           function _markOOInteracted() { window._ooUserHasInteracted = true; }
           iDoc.addEventListener('touchstart', _markOOInteracted, { passive: true, capture: true });
           iDoc.addEventListener('mousedown',  _markOOInteracted, { capture: true });
+          installTouchEditingBridge(iDoc, iDoc.defaultView);
         } catch(_) {}
       })();
     }
@@ -1889,6 +1971,7 @@
           try {
             _d.addEventListener('touchstart', function() { window._ooUserHasInteracted = true; }, { passive: true, capture: true });
             _d.addEventListener('mousedown',  function() { window._ooUserHasInteracted = true; }, { capture: true });
+            installTouchEditingBridge(_d, _w);
           } catch(_iel) {}
 
           if (!_d.getElementById('_oo_ios_final')) {
@@ -2755,6 +2838,34 @@
                       setTimeout(_reportSlidePos, 8000);
                       setTimeout(_reportSlidePos, 12000);
                       setTimeout(_reportSlidePos, 20000);
+
+                      // Safety net: the registerCallback wiring above is best-effort (its
+                      // method name isn't confirmed present on every OO build, same class of
+                      // mismatch as asc_setZoomType/zoomFitToPage earlier tonight), and the
+                      // fixed schedule above stops reporting after 20s. Native "Slide" tab /
+                      // swipe navigation after that point could change OO's current slide
+                      // without the thumbnail strip's red-border state ever finding out.
+                      // Poll (read-only — no zoom/layout/navigation call, so no risk to the
+                      // render fix above) and only postMessage when the value actually
+                      // changed, so this doesn't spam the bridge on every tick.
+                      var _lastReportedSlide = null;
+                      var _slidePollInterval = setInterval(function() {
+                        try {
+                          var _pe = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+                          if (!_pe) return;
+                          var _c = (typeof _pe.asc_getCurrentSlide === 'function' ? _pe.asc_getCurrentSlide()
+                                    : typeof _pe.asc_getCurrentPage === 'function' ? _pe.asc_getCurrentPage() : null);
+                          if (_c === null) return;
+                          if (_c !== _lastReportedSlide) {
+                            _lastReportedSlide = _c;
+                            _reportSlidePos();
+                          }
+                        } catch(_) {}
+                      }, 1000);
+                      // Cap at 10 minutes — a PPT editing session rarely runs longer than
+                      // that in one sitting, and this keeps the interval from running forever
+                      // in the background if the user leaves the editor open.
+                      setTimeout(function() { clearInterval(_slidePollInterval); }, 600000);
                     }
                   }
                 } catch(_ae) {}

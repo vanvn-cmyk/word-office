@@ -6,6 +6,107 @@ Format tham khảo [Keep a Changelog](https://keepachangelog.com/). Entry mới 
 
 ---
 
+## [Unreleased] — 2026-09-17 (Library coachmark: geometry-anchored overlay rebuild + onboarding badge offsets)
+
+### 🐛 "Hold to change status" coachmark — floating/detached from card, wrong architecture
+**File:** `Views/Library/LibraryView.swift`
+
+**Root cause:** tooltip lived inside `statusTabHeader`'s own List row, positioned with `Spacer() + .padding(.trailing:)` — a guessed offset with no relationship to the target card's real position. Looked detached/floating in every report (user screenshots, both simulator and real device).
+
+**Fix — rebuilt as a geometry-anchored overlay**, same pattern as AirTag Finder's `Coachmark` (`renderBox.localToGlobal` there → `onGeometryChange` here):
+1. Target card reports its real frame via `.onGeometryChange(for: CGRect.self)` into `@State tipAnchorFrame` (coordinate space `"libraryTipSpace"`, named on a `ZStack` wrapping the `List`)
+2. `tipOverlay` floats above the `List` (not inside row layout), positioned via `.position()` computed from that real frame — `TipCallout()` bottom-aligned onto a 0×0 point, no dependency on the bubble's own measured height
+3. **Two real bugs found mid-debug, not just tuning:**
+   - First attempt used `PreferenceKey` + `.background(GeometryReader{...})` — reported a wildly wrong frame (tip rendered near the tab bar). Root cause never fully pinned on List's internal measurement pass; switched to `.onGeometryChange` (iOS 17+, the modern replacement) as a more reliable primitive regardless
+   - Still wrong after the switch — actual root cause: `.overlay(alignment:.bottom)` was chained **after** `.position()`. `.position()` makes its view report "as large as the parent offers," so the overlay chained after it aligned against that inflated full-screen frame, not the 0×0 point. Fixed by reordering: `.overlay()` before `.position()`. Verified via a hardcoded mid-screen anchor (bypassing the real card-frame read) before trusting the live flow — confirms the geometry read was fine all along, the bug was purely modifier order
+4. Final tuning from user feedback (screenshots): `tipGap` 10 → 60pt, `tipXOffset` (new) `+70pt` off the card's horizontal center — resolves overlap with the card's own title text + the arrow blending invisibly into the white card at close range
+
+### 🎨 `TipCallout` — design-system conformance audit
+**File:** `Views/Library/LibraryView.swift`
+Checked against `Native-Professional-Workspace-Design-System.md` on request — 4 violations found and fixed:
+- Font: `.system(size: 15, weight: .semibold)` (fixed, non-Dynamic-Type) → `DSFont.subheadline.weight(.semibold)`
+- Vertical padding: `11` (off the 4pt scale) → `DSSpacing.sm` (12)
+- Corner radius: `RoundedRectangle(cornerRadius: 12)` missing `style: .continuous` (explicit DS rule) → `DSRadius.card, style: .continuous`
+- Background: raw `Color(.systemBackground)` → `Color.dsBackgroundElevated` (the app's own token for "popovers and floating surfaces"), applied to both the box fill and the arrow so they stay colour-matched
+
+### 🐛 Onboarding S2 "Tools" hero — Split/Merge badges clipped by page bounds
+**File:** `Views/Onboarding/OnboardingPageView.swift`
+**Root cause:** Split badge `.offset(y: -175)` + bob animation (`-14…+8`) pushed it up to `-189` from the hero ZStack's center in a 370pt-tall hero — ~40pt past the top edge, clipped by `TabView(.page)`'s per-page bounds (reproduced from user's screenshot: icon cut through mid-shape). Merge had the same issue at the bottom edge (`+155` base + bob up to `165` → ~17pt past bottom), just less often caught on screen.
+- Fix round 1: `-175 → -120` (Split), `155 → 120` (Merge) — eliminated the clip, but landed low enough to overlap the background artwork's own icon cluster (user: "split lại thấp quá")
+- Fix round 2 (user: "bay cao lên"): Split `-120 → -155` — still clear of the top-clip margin, sits higher without touching the image content below it
+
+### ⏸️ Known loose end
+- One verification pass caught the coachmark anchored to a stale/wrong-looking position (level with the header row instead of above the card) during a rapid automated reinstall cycle — likely a transient race from hammering the simulator with back-to-back installs, not reproduced in any of the several clean real-flow captures. Flagged to user; revisit if seen again in normal use.
+
+---
+
+## [Unreleased] — 2026-09-17 (PPT blank-canvas root cause + continuous watchdog, zoom-fit ruled out, slide-sync, thumbnail prefetch)
+
+Long live-debug session directly on simulator (build → `simctl uninstall`+`install`+`launch` → pull OS logs → repeat), triggered by "PPT không render/sai view/zoom to/insert lỗi" reported after 3 days stuck. Full blow-by-blow in this repo's own session history; this entry is the durable summary.
+
+### 🐛 PPT blank-canvas root cause found — CONFIRMED, not guessed
+**Symptom:** PPT canvas area renders fully blank (ribbon/thumbnail-strip UI fine, content area white), ~50% of opens.
+**Root cause, confirmed via OS log evidence (not speculation):** `#id_main_parent`'s direct child wrapping the real slide `<canvas>` — internally the element ONLYOFFICE itself names `id_main` — intermittently gets `display:none` set **by ONLYOFFICE's own internal layout code**, not by any CSS/JS in this project (grepped `editor.html` + all Swift for a literal `id_main` selector — zero hits; it's discovered dynamically by a DOM-chain walk, never targeted). Forcing it back to `display:block` once (`OfficeEditorViewController.swift`, `_pptDump`'s existing T2000/T5000 diagnostic) gets **immediately re-reverted by OO within the same tick** — proven by log: `REPAIRED:id_main` on one scan, `disp=none` again on the very next scan a few hundred ms later, repeated hundreds of times in one session. This is a continuous fight, not a one-time stuck state.
+
+### ✅ Fix — continuous force-visible watchdog (not a one-shot repair)
+**File:** `Word Office/Views/Editor/OfficeEditorViewController.swift`, inside `_pptHideByID()`
+- New `_pptForceVisibleTick()` + `setInterval(..., 250)`, capped at 5 min (matches this file's other observer caps): every 250ms, walks the real canvas's ancestor chain up to `#id_main_parent` and re-forces any `display:none` ancestor back to `block`. Does **not** call any OO zoom/layout API — just corrects a CSS property OO itself keeps breaking, so it can't hit the "recomputed zoom → 0" failure class below.
+- Logging throttled (only every 20th repair) to avoid flooding NSLog at 250ms cadence.
+- The existing one-shot repair inside `_pptDump` (T2000/T5000) is left in place, untouched — harmless overlap, not a replacement.
+- **Verified working live** on-device by user after this fix (previous "fix" — the one-shot repair alone — turned out to only have appeared to work by luck on a render that didn't hit OO's re-hide loop).
+
+### ❌ Zoom-fit for PPT — 2 attempts, both caused the SAME severe regression, reverted
+Tried, in order, to auto-fit PPT slide width to the phone viewport (user-reported "zoom to quá" — slide opens at desktop-A4-style zoom, title text cut off):
+1. `asc_setZoomType(2)` (mirrors the working Word code path) — silently no-op'd (guard caught that PPT's `Asc.editor` doesn't expose this method at all — confirmed via `[OO-methods]` apiDump).
+2. `zoomFitToPage()` (the actual PPT-side method name, confirmed present in the same apiDump) — **did fire, and reproduced the exact "canvas permanently blank" failure** the original code's own comments already warned about (they'd previously hit this with `asc_setMobileView`+`asc_SetFitPage` too — 3 different API paths, same failure mode).
+- **Conclusion, not just this session's guess:** any call that makes OO recompute PPT zoom from container width appears to reliably risk this failure on this ONLYOFFICE build/simulator combo. **Do not re-attempt via a 4th API name without first getting a real fix or newer SDK from ONLYOFFICE** — this looks like an upstream bug, not a naming mismatch.
+- **Reverted fully** — `onDocumentReady`'s PPT branch is back to only `ShowThumbnails(false)`/`asc_ShowNotes(false)`, no zoom call.
+
+### ✅ Interim fix — manual zoom in/out buttons (safe alternative)
+**File:** `Word Office/Views/Editor/OfficeEditorView.swift`, `editorNavPill`
+- Added 2 toolbar buttons (`minus.magnifyingglass` / `plus.magnifyingglass`) calling existing `cmd: "zoom-in"/"zoom-out"` → `execEditorCommand` → editor.html's existing `asc_setZoom(current ± 10)` handler (already in the codebase, unused by any button before this).
+- Safe because it sets an explicit numeric percentage rather than asking OO to auto-compute one from container width — doesn't go through whatever internal path `asc_setZoomType`/`zoomFitToPage` do that breaks.
+
+### ✅ Fix — thumbnail-strip red selection border not following native "Slide" pager navigation
+**File:** `OfficeBundle/editor.html`, inside the PPT branch of `onAppReady`'s mobile-apply block
+- Root cause: `_reportSlidePos()` was wired to `asc_registerCallback('asc_onCurrentSlideChanged', ...)` (unconfirmed whether that method name even exists on this build — same class of risk as the zoom API names above) plus a fixed schedule that **stops entirely after 20s**. Native "Slide" tab pager navigation after that window never got reported.
+- Added a read-only `setInterval(..., 1000)` (capped 10 min) polling current slide index; posts `slideChange` only when the value actually changed vs last poll. No zoom/layout/navigation call — pure read, so no risk to the render fix above.
+
+### ⚠️ Added, NOT YET USER-TESTED — thumbnail prefetch for unvisited slides
+**File:** `Word Office/Views/Editor/OfficeEditorViewController.swift`, new `_prefetchOtherThumbnails()`, fires once at 6.5s after load
+- Root cause of blank thumbnails for slides 2+: `captureThumb(cur)` only ever captures whichever slide OO has actually rendered at least once — there's no "get bitmap for slide N without visiting it" API used here.
+- Fix: after the first two `reportSlides` passes confirm the originally-opened slide is stable, sequentially `goToPage`(each other slide) → wait 450ms → `captureThumb` → next, reusing the exact same `goToPage`-family function list already proven safe by the native strip's own tap-to-navigate (`slide-goto:N`). Returns to the originally-viewed slide and re-posts `slideChange` when done.
+- Residual risk (disclosed to and accepted by user before implementing): rapid sequential slide navigation could in principle re-trigger the `id_main` collapse bug above — the continuous watchdog should catch it if so, but this specific interaction hasn't been observed yet. **Confirm on next test session before considering this done.**
+
+### 🛠️ Critical tooling lesson — `simctl install` does NOT clear WKWebView's cache
+Spent a large chunk of this session chasing a "fix that doesn't work" before realizing: `xcrun simctl install` over an **already-installed** app (same bundle ID) is an upgrade-install — it does not wipe the app's container, and WKWebView's persistent data store survives it. Result: rebuilt/reinstalled binaries kept running **stale cached JS** from a much earlier build (confirmed by a debug tag, `[PPT-T500]`, showing up in live logs from a process whose on-disk `editor.html` didn't contain that string anywhere). **Always `simctl terminate` + `simctl uninstall` before `simctl install` when iterating on WKWebView-hosted JS in this project** — a plain reinstall is not a clean test.
+
+### 📚 Also found (structural, no code change)
+- The `[PPT-T500]`/`[PPT-T2000]`/`[PPT-T5000]` diagnostic dump and its `_pptHideByID`/`pptHide`/`reportSlides`/`captureThumb` functions all live in **`OfficeEditorViewController.swift`** (Swift-embedded `WKUserScript` JS), not in `OfficeBundle/editor.html` — easy to grep the wrong file when debugging PPT-specific behavior in this project.
+
+---
+
+## [Unreleased] — 2026-09-16 (Touch editing bridge: long-press context menu + clipboard)
+
+### 🔍 Gap analysis vs competitor teardown (`com.codeharmonylabs.sheetai`)
+- Static-analysis research của đối thủ (`ONLYOFFICE-Mobile-UI-Research.md`) + đối chiếu trực tiếp với `editor.html` hiện tại (`ONLYOFFICE-Mobile-UI-Gap-Analysis.md`), cả 2 file mới ở repo root
+- **Đính chính quan trọng trong lúc audit**: zoom-fit (`asc_setZoomType(2)`/`asc_setZoom`) và ribbon compact (`customization.compactToolbar`) + PPT left-panel (`layout.leftMenu:false`) **đã làm rồi**, qua API chính thức ONLYOFFICE — tốt hơn cách đối thủ hack CSS/DOM. Gap thật chỉ có 2: long-press context menu + clipboard bridge
+- Native bridge (`webkit.messageHandlers`, 14 actions) đối chiếu đầy đủ hơn đối thủ (3 actions) ở mọi mặt — không cần sửa
+
+### ✅ Long-press → context menu + system clipboard bridge
+**File:** `OfficeBundle/editor.html`
+- Hàm mới `installTouchEditingBridge(iDoc, innerWin)` (sau `injectFormulaTouchSelect`, trước `injectIOSChrome`):
+  - Long-press 500ms (dung sai 10px di chuyển) → bắn `contextmenu` event giả đúng toạ độ, để menu ngữ cảnh gốc OO nhận như bấm chuột phải
+  - Clipboard bridge: `copy`/`cut` → `navigator.clipboard.writeText`; Cmd/Ctrl+V → `readText()` rồi bắn `ClipboardEvent('paste')` giả vào `#editor_sdk`. Tự no-op nếu `isSecureContext` false (custom `office://` scheme có thể không có Clipboard API) — không crash
+  - Guard `__touchEditingBridgeInstalled` trên `window` — idempotent khi gọi lại sau OO re-navigate iframe, cùng pattern với `_markOOInteracted` đã có sẵn
+- Gọi ở 2 điểm đã có logic gắn listener tương tự: stub frame lúc `onAppReady` (~dòng 1839), và live OO document trong `_reInjectOO()` sau khi phát hiện editor thật đã load (~dòng 1974)
+- **Verify**: extract script, `node --check` — pass. **Chưa test tay trên simulator/device** — cần: (1) mở file Word, giữ tay ~0.5s trên text xem context menu hiện; (2) copy text app khác, Cmd+V vào editor xem paste được không
+
+### ⏸️ Không đụng (rủi ro > lợi ích lúc này)
+- `_pptGeoHide` (ngưỡng hình học cho panel PPT) — vừa fix hôm 15/09 ("5 lớp vá"), không có bằng chứng đang lỗi lại, để nguyên monitor thêm thay vì refactor sang selector ổn định ngay
+
+---
+
 ## [Unreleased] — 2026-09-15 (PPT UX: slide strip 16:9 cards + OO panel root-cause fix)
 
 ### 🎨 PPT nav pill — remove print/comment, add ShareLink

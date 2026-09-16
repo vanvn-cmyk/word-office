@@ -311,6 +311,49 @@ final class OfficeEditorViewController: UIViewController {
                     }
 
 
+                    // Continuous version of the same repair the diagnostic dump below does
+                    // once at fixed checkpoints. Log evidence showed OO doesn't just leave
+                    // this collapsed once — it re-asserts display:none on it repeatedly
+                    // (a one-time force-visible gets overwritten again within one tick), so
+                    // a single fix at T2000/T5000 isn't enough. This re-checks and re-forces
+                    // every 250ms for as long as the editor stays open (capped at 5 min,
+                    // matching this file's other observer caps) instead of fixing once.
+                    var _pptForceVisibleCount = 0, _pptForceVisibleLastLogged = 0;
+                    function _pptForceVisibleTick() {
+                        try {
+                            var _fvMp = document.getElementById('id_main_parent');
+                            if (!_fvMp) return;
+                            var _fvCv = null;
+                            var _fvCvs = _fvMp.querySelectorAll('canvas');
+                            for (var _fi = 0; _fi < _fvCvs.length; _fi++) {
+                                if (_fvCvs[_fi].width > 100) { _fvCv = _fvCvs[_fi]; break; }
+                            }
+                            if (!_fvCv) return;
+                            var _fvEl = _fvCv.parentElement, _fvDepth = 0, _fvHit = false;
+                            while (_fvEl && _fvEl !== _fvMp && _fvDepth < 8) {
+                                if (window.getComputedStyle(_fvEl).display === 'none') {
+                                    _fvEl.style.setProperty('display', 'block', 'important');
+                                    _fvHit = true;
+                                }
+                                _fvEl = _fvEl.parentElement; _fvDepth++;
+                            }
+                            if (_fvHit) {
+                                _pptForceVisibleCount++;
+                                try { window.dispatchEvent(new Event('resize')); } catch(_) {}
+                                // Throttle logging — this can fire every tick while OO keeps
+                                // re-hiding, and NSLog at 250ms cadence for minutes would flood.
+                                if (_pptForceVisibleCount - _pptForceVisibleLastLogged >= 20) {
+                                    _pptForceVisibleLastLogged = _pptForceVisibleCount;
+                                    try { window.webkit.messageHandlers.editorBridge.postMessage(
+                                        {action:'debug', msg:'[OO-ppt-forcevis] repaired '+_pptForceVisibleCount+' times so far'}
+                                    ); } catch(_) {}
+                                }
+                            }
+                        } catch(_) {}
+                    }
+                    var _pptForceVisibleInterval = setInterval(_pptForceVisibleTick, 250);
+                    setTimeout(function() { try { clearInterval(_pptForceVisibleInterval); } catch(_) {} }, 300000);
+
                     // Diagnostic dump — runs after OO has settled
                     function _pptDump(label) {
                         try {
@@ -338,11 +381,32 @@ final class OfficeEditorViewController: UIViewController {
                                 if (_firstCv) {
                                     var _el = _firstCv.parentElement; var _depth = 0;
                                     d += ' chain:';
+                                    var _repaired = [];
                                     while (_el && _el !== mp && _depth < 8) {
                                         var _er = _el.getBoundingClientRect();
                                         var _ec = window.getComputedStyle(_el);
                                         d += '['+(_el.id||_el.className.split(' ')[0]||'?')+' r=('+Math.round(_er.left)+','+Math.round(_er.top)+','+Math.round(_er.width)+','+Math.round(_er.height)+') disp='+_ec.display+' ov='+_ec.overflow+']';
+                                        // Watchdog: an ancestor of the real slide canvas sitting at
+                                        // display:none is never something WE set (nothing in this
+                                        // file or editor.html targets these OO-internal ids) — it's
+                                        // OO's own layout code leaving it collapsed, intermittently,
+                                        // after the thumbnail-panel hide/show sequence (seen ~50% of
+                                        // opens). Give OO one natural cycle to self-correct (skip on
+                                        // the T500 pass) — if it's STILL display:none by T2000+, force
+                                        // it visible directly. This only flips one CSS property back
+                                        // to what every working run already shows it should be
+                                        // (block) — it does not call any OO zoom/layout API, so it
+                                        // can't hit the "recomputed zoom -> 0" failure mode that
+                                        // asc_setZoomType/zoomFitToPage did.
+                                        if (label !== 'T500' && _ec.display === 'none') {
+                                            _el.style.setProperty('display', 'block', 'important');
+                                            _repaired.push(_el.id || _el.className.split(' ')[0] || '?');
+                                        }
                                         _el = _el.parentElement; _depth++;
+                                    }
+                                    if (_repaired.length) {
+                                        d += ' REPAIRED:' + _repaired.join(',');
+                                        try { window.dispatchEvent(new Event('resize')); } catch(_) {}
                                     }
                                 }
                                 // getCountPages to verify OO load state
@@ -660,6 +724,85 @@ final class OfficeEditorViewController: UIViewController {
                 setTimeout(reportSlides, 10000);
                 setTimeout(reportSlides, 20000);
                 setTimeout(reportSlides, 30000);
+
+                // Thumbnail strip only gets a real image for whichever slide the user has
+                // actually viewed (captureThumb reads OO's live render canvas — there's no
+                // way to grab a slide's bitmap without OO having drawn it at least once).
+                // This walks every OTHER slide once, captures it, then returns to the slide
+                // the user was actually on — reusing the exact same goToPage-family call
+                // used by the native strip's own tap-to-navigate ("slide-goto:N") command,
+                // so it's the same already-exercised path, not a new one. Self-contained:
+                // does not touch reportSlides/captureThumb, and the existing _pptDump
+                // watchdog (display:none repair) runs independently of this and still
+                // protects against the canvas-collapse bug regardless of what triggers it.
+                function _prefetchOtherThumbnails() {
+                    try {
+                        var _pfFr = document.querySelector('iframe[name="frameEditor"]');
+                        var _pfWin = _pfFr && _pfFr.contentWindow;
+                        var _pfEd = _pfWin && _pfWin.Asc && _pfWin.Asc.editor;
+                        if (!_pfEd) return;
+
+                        var _origSlide = 1, _pfTot = 1;
+                        var _pfCurFns = ['asc_getCurrentSlide','asc_getCurrentPage','asc_getCurrentPageIndex'];
+                        for (var _pi = 0; _pi < _pfCurFns.length; _pi++) {
+                            if (typeof _pfEd[_pfCurFns[_pi]] === 'function') {
+                                try { _origSlide = (_pfEd[_pfCurFns[_pi]]() || 0) + 1; break; } catch(_) {}
+                            }
+                        }
+                        var _pfTotFns = ['asc_getSlidesCount','asc_getSlideCount','asc_getCountPages','asc_getPagesCount','getSlideCount'];
+                        for (var _ti = 0; _ti < _pfTotFns.length; _ti++) {
+                            if (typeof _pfEd[_pfTotFns[_ti]] === 'function') {
+                                try { _pfTot = _pfEd[_pfTotFns[_ti]]() || 1; break; } catch(_) {}
+                            }
+                        }
+                        if (_pfTot <= 1) return; // single slide (or count unknown) — nothing to prefetch
+
+                        var _pfGotoFns = ['goToPage','asc_goToPage','asc_goToSlide','asc_GoToPage',
+                                          'asc_setCurrentPage','asc_changeCurrentSlide','asc_SetCurrentSlide','asc_changeCurrentPage'];
+                        function _pfGoto(idx1) {
+                            var idx0 = idx1 - 1;
+                            for (var _gi = 0; _gi < _pfGotoFns.length; _gi++) {
+                                if (typeof _pfEd[_pfGotoFns[_gi]] === 'function') {
+                                    try { _pfEd[_pfGotoFns[_gi]](idx0); return true; } catch(_) {}
+                                }
+                            }
+                            return false;
+                        }
+
+                        var _pfQueue = [];
+                        for (var _s = 1; _s <= _pfTot; _s++) { if (_s !== _origSlide) _pfQueue.push(_s); }
+
+                        function _pfStep() {
+                            if (!_pfQueue.length) {
+                                // Done — return to the slide the user was actually viewing and
+                                // resync the native strip's highlighted index.
+                                _pfGoto(_origSlide);
+                                setTimeout(function() {
+                                    try {
+                                        captureThumb(_origSlide);
+                                        window.webkit.messageHandlers.editorBridge.postMessage(
+                                            { action: 'slideChange', current: _origSlide, total: _pfTot }
+                                        );
+                                    } catch(_) {}
+                                }, 450);
+                                return;
+                            }
+                            var _next = _pfQueue.shift();
+                            if (_pfGoto(_next)) {
+                                setTimeout(function() {
+                                    try { captureThumb(_next); } catch(_) {}
+                                    setTimeout(_pfStep, 250);
+                                }, 450);
+                            } else {
+                                setTimeout(_pfStep, 50); // nav API unavailable — skip to next
+                            }
+                        }
+                        _pfStep();
+                    } catch(_) {}
+                }
+                // Starts after the first two reportSlides passes (3s, 6s) have already
+                // captured the originally-viewed slide and confirmed OO is stable.
+                setTimeout(_prefetchOtherThumbnails, 6500);
                 // PPT geometry fallback — CSS + observer cover most cases; these two
                 // catch panels that appeared before the observer attached or escaped CSS.
                 setTimeout(pptHide, 300);

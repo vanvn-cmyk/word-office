@@ -56,6 +56,9 @@ struct LibraryView: View {
     @AppStorage("libraryViewMode") private var viewMode: LibraryViewMode = .list
     @AppStorage("library.openDocumentTipSeen") private var tipSeen: Bool = false
     @State private var tipPresented: Bool = false
+    /// Target card's real frame (`libraryTipSpace` coordinate space), fed by
+    /// `TipAnchorFrameKey` — see `tipOverlay`.
+    @State private var tipAnchorFrame: CGRect?
 
     /// Local sheet state for "Save to Files" — the `UIDocumentPickerViewController`
     /// wrapper needs only a URL (no container dependency), so it stays here
@@ -349,6 +352,43 @@ struct LibraryView: View {
     private var groupedSections: [(status: DocumentStatus, entries: [LibraryEntry])] { viewModel.groupedByStatus() }
 
     private var libraryList: some View {
+        ZStack(alignment: .topLeading) {
+            libraryListContent
+            tipOverlay
+        }
+        .coordinateSpace(name: "libraryTipSpace")
+    }
+
+    /// Coachmark overlay — floats above the list (not inside its row layout)
+    /// and positions itself from `tipAnchorFrame`, the target card's real
+    /// frame reported via `onGeometryChange` (see the `ForEach` below).
+    /// Anchoring a 0×0 point at the card's top-center and bottom-aligning
+    /// `TipCallout` on it pins the
+    /// bubble's arrow tip exactly `tipGap` above the card, growing upward —
+    /// no guessed Spacer/padding offset, no dependency on the bubble's own
+    /// measured height.
+    @ViewBuilder
+    private var tipOverlay: some View {
+        if let anchor = tipAnchorFrame, tipPresented {
+            let tipGap: CGFloat = 60
+            let tipXOffset: CGFloat = 70
+            Color.clear
+                .frame(width: 0, height: 0)
+                // `.overlay` MUST come before `.position` — `.position` makes
+                // its view report "as large as the parent offers" for layout
+                // purposes, so an `.overlay` chained after it aligns against
+                // that inflated full-screen frame instead of the 0×0 point
+                // (reproduced: hardcoding a mid-screen anchor still rendered
+                // the bubble pinned to the bottom edge until this was
+                // reordered).
+                .overlay(alignment: .bottom) { TipCallout() }
+                .position(x: anchor.midX + tipXOffset, y: anchor.minY - tipGap)
+                .transition(.opacity)
+                .allowsHitTesting(false)
+        }
+    }
+
+    private var libraryListContent: some View {
         // Single List for every state (default / filter-empty / search-
         // active / search-empty). Search results and no-result placeholders
         // render as list rows UNDER `listHeader`, never replace it — so the
@@ -424,11 +464,7 @@ struct LibraryView: View {
                         ForEach(groupedSections, id: \.status) { group in
                             let isFirst = group.status == groupedSections.first?.status
 
-                            let showTipInHeader = dueEntries.isEmpty &&
-                                (group.status == .getStarted || group.status == .draft) &&
-                                !group.entries.isEmpty && tipPresented
-
-                            statusTabHeader(status: group.status, count: group.entries.count, showTip: showTipInHeader)
+                            statusTabHeader(status: group.status, count: group.entries.count)
                                 .listRowSeparator(.hidden)
                                 .listRowInsets(EdgeInsets(
                                     top: isFirst ? 0 : DSSpacing.xs,
@@ -448,6 +484,25 @@ struct LibraryView: View {
                                     entry.id == group.entries.first?.id
                                 Group {
                                     cardContent(for: entry)
+                                        // Reports this card's real on-screen frame (in the
+                                        // `libraryTipSpace` coordinate space) up to the tip
+                                        // overlay below, so the coachmark anchors to the
+                                        // card's actual position/width instead of a guessed
+                                        // Spacer+padding offset — same approach as AirTag
+                                        // Finder's `Coachmark` (renderBox.localToGlobal).
+                                        // `onGeometryChange` (not a PreferenceKey +
+                                        // background GeometryReader) — List's internal
+                                        // UIKit-bridged sizing pass re-instantiates row
+                                        // content off-screen for measurement, and a
+                                        // preference written during that pass was winning
+                                        // over the real on-screen frame (reproduced: tip
+                                        // rendered near the tab bar instead of the card).
+                                        .onGeometryChange(for: CGRect.self) { geo in
+                                            geo.frame(in: .named("libraryTipSpace"))
+                                        } action: { newValue in
+                                            guard attachTip else { return }
+                                            tipAnchorFrame = newValue
+                                        }
                                         .onAppear {
                                             guard attachTip, !tipSeen, !tipPresented else { return }
                                             tipPresented = true
@@ -795,7 +850,7 @@ struct LibraryView: View {
     /// No icon, no nested badges, small corner radius so it reads as
     /// a label rather than a UI pill.
     @ViewBuilder
-    private func statusTabHeader(status: DocumentStatus, count: Int, showTip: Bool = false) -> some View {
+    private func statusTabHeader(status: DocumentStatus, count: Int) -> some View {
         let bg: Color = switch status {
         case .getStarted: Color.dsBrandPrimary.opacity(0.08)
         case .draft:      .dsStatusWarningBackground
@@ -873,15 +928,6 @@ struct LibraryView: View {
         }
         .padding(.bottom, DSSpacing.sm)
         .onAppear { badgePulse = true }
-        if showTip {
-            HStack {
-                Spacer()
-                TipCallout()
-                    .padding(.trailing, 14)
-                    .padding(.bottom, 6)
-            }
-            .transition(.opacity)
-        }
         }
     }
 
@@ -2050,20 +2096,20 @@ private struct TipCallout: View {
     var body: some View {
         VStack(spacing: 0) {
             Text("Hold to change status")
-                .font(.system(size: 15, weight: .semibold))
+                .font(DSFont.subheadline.weight(.semibold))
                 .foregroundStyle(.primary)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 11)
+                .padding(.horizontal, DSSpacing.md)
+                .padding(.vertical, DSSpacing.sm)
                 .fixedSize()
                 .background {
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color(.systemBackground))
+                    RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous)
+                        .fill(Color.dsBackgroundElevated)
                         .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
                 }
             Image(systemName: "arrowtriangle.down.fill")
                 .resizable()
                 .frame(width: 14, height: 8)
-                .foregroundStyle(Color(.systemBackground))
+                .foregroundStyle(Color.dsBackgroundElevated)
                 .offset(y: -1)
         }
     }
