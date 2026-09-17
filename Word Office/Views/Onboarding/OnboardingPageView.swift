@@ -14,10 +14,12 @@ struct OnboardingPageView: View {
     @State private var splitFloat = false
     @State private var mergeFloat = false
 
-    // S4 has a taller text block (title + subtitle + privacy chip) so give
-    // it a shorter hero slot so the total page height stays balanced.
     private var heroMaxHeight: CGFloat {
-        page.id == .chooseFolder ? 310 : 370
+        switch page.id {
+        case .chooseFolder: 310
+        case .paywall:      280
+        default:            370
+        }
     }
 
     var body: some View {
@@ -134,6 +136,9 @@ struct OnboardingPageView: View {
                 S3StatusOverlay(isActive: isActive)
             }
 
+        case .paywall:
+            EmptyView()
+
         case .chooseFolder:
             Image(page.imageName)
                 .resizable()
@@ -162,6 +167,14 @@ struct OnboardingPageView: View {
 
     private var textBlock: some View {
         VStack(spacing: DSSpacing.sm) {
+            if page.id == .chooseFolder {
+                Text("One more step")
+                    .font(.system(size: 15, weight: .bold))
+                    .tracking(1.2)
+                    .foregroundStyle(Color.dsBrandPrimary)
+                    .textCase(.uppercase)
+            }
+
             Text(page.title)
                 .font(.system(size: 30, weight: .bold))
                 .foregroundStyle(OnboardingColors.textPrimary)

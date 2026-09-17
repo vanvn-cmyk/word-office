@@ -33,9 +33,9 @@ final class DSToastPresenter {
             /// dismisses it, info at 6s.
             var defaultAutoDismissDuration: Duration? {
                 switch self {
-                case .success: .seconds(4)
+                case .success: .seconds(2)
                 case .error: nil
-                case .info: .seconds(6)
+                case .info: .seconds(2)
                 }
             }
         }

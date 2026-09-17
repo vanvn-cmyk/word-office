@@ -377,16 +377,13 @@ struct OfficeEditorView: View {
                 HStack(spacing: 4) {
                     pillIconBtn("arrow.uturn.backward", cmd: "undo", label: "Undo")
                     pillIconBtn("arrow.uturn.forward",  cmd: "redo", label: "Redo")
-                    // Manual zoom step (±10%, clamped 50-400 in the JS handler) — NOT an
-                    // auto "fit to width" call. PPT's auto-fit APIs (asc_setZoomType,
-                    // zoomFitToPage) are known to blank the canvas on this ONLYOFFICE build
-                    // (see CHANGELOG); a plain asc_setZoom(current±10) doesn't go through
-                    // that same auto-compute path, so it's the safe way to let the user
-                    // zoom PPT out by hand until a real auto-fit is found.
-                    pillIconBtn("minus.magnifyingglass", cmd: "zoom-out", label: "Zoom out")
-                    pillIconBtn("plus.magnifyingglass",  cmd: "zoom-in",  label: "Zoom in")
                     if fileKind == .ppt {
-                        // PPT: share instead of print/comment
+                        // PPT has no tab-bar trailing zoom, so keep it here.
+                        // PPT's auto-fit APIs (asc_setZoomType, zoomFitToPage) are known to
+                        // blank the canvas on this ONLYOFFICE build; asc_setZoom(current±10)
+                        // avoids that path, so manual step zoom is the safe approach.
+                        pillIconBtn("minus.magnifyingglass", cmd: "zoom-out", label: "Zoom out")
+                        pillIconBtn("plus.magnifyingglass",  cmd: "zoom-in",  label: "Zoom in")
                         ShareLink(item: ref.url) {
                             Image(systemName: "square.and.arrow.up")
                                 .font(.system(size: 17, weight: .regular))
@@ -394,6 +391,7 @@ struct OfficeEditorView: View {
                         }
                         .accessibilityLabel("Share")
                     } else {
+                        // Word/Excel: zoom already lives in the tab-bar trailing area.
                         pillIconBtn("printer",    cmd: "print",          label: "Print")
                         pillIconBtn("text.bubble", cmd: "insert-comment", label: "Comment")
                     }

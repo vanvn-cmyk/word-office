@@ -278,9 +278,12 @@ struct EditorTopToolbar: View {
                         chipBtn("Text", label: "Text format",    cmd: "number-text")
                         vDivider()
                         // Alignment
-                        iconBtn("text.alignleft",   label: "Align left",   cmd: "cell-align-left")
-                        iconBtn("text.aligncenter", label: "Align center", cmd: "cell-align-center")
-                        iconBtn("text.alignright",  label: "Align right",  cmd: "cell-align-right")
+                        iconBtn("text.alignleft",        label: "Align left",   cmd: "cell-align-left")
+                        iconBtn("text.aligncenter",      label: "Align center", cmd: "cell-align-center")
+                        iconBtn("text.alignright",       label: "Align right",  cmd: "cell-align-right")
+                        iconBtn("align.vertical.top",    label: "Align top",    cmd: "cell-valign-top")
+                        iconBtn("align.vertical.center", label: "Align middle", cmd: "cell-valign-middle")
+                        iconBtn("align.vertical.bottom", label: "Align bottom", cmd: "cell-valign-bottom")
                         vDivider()
                         chipBtn("Wrap",    label: "Wrap text",    cmd: "wrap-text")
                         chipBtn("Merge",   label: "Merge cells",  cmd: "merge-center")
@@ -320,6 +323,10 @@ struct EditorTopToolbar: View {
                 HStack(spacing: 0) {
                     switch wordTab {
                     case .home:
+                        // Undo / Redo — pinned first so thumb can reach while keyboard is open
+                        iconBtn("arrow.uturn.backward", label: "Undo", cmd: "undo")
+                        iconBtn("arrow.uturn.forward",  label: "Redo", cmd: "redo")
+                        vDivider()
                         // Format
                         fmtBtn(.bold,          cmd: "bold")
                         fmtBtn(.italic,        cmd: "italic")
@@ -434,6 +441,10 @@ struct EditorTopToolbar: View {
                     switch pptTab {
 
                     case .home:
+                        // Undo / Redo — first so thumb can reach while keyboard is open
+                        iconBtn("arrow.uturn.backward", label: "Undo", cmd: "undo")
+                        iconBtn("arrow.uturn.forward",  label: "Redo", cmd: "redo")
+                        vDivider()
                         fmtBtn(.bold,          cmd: "bold")
                         fmtBtn(.italic,        cmd: "italic")
                         fmtBtn(.underline,     cmd: "underline")
@@ -449,6 +460,9 @@ struct EditorTopToolbar: View {
                         iconBtn("align.vertical.top",    label: "Align top",    cmd: "ppt-valign-top")
                         iconBtn("align.vertical.center", label: "Align middle", cmd: "ppt-valign-middle")
                         iconBtn("align.vertical.bottom", label: "Align bottom", cmd: "ppt-valign-bottom")
+                        vDivider()
+                        iconBtn("list.bullet", label: "Bullet list",   cmd: "list-bullet")
+                        iconBtn("list.number", label: "Numbered list", cmd: "list-numbered")
                         vDivider()
                         iconBtn("eraser", label: "Clear formatting", cmd: "clear-format")
 

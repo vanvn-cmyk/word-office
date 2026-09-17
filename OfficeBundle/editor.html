@@ -3338,7 +3338,7 @@
           'number-percent':     '0%',
           'number-decimal-inc': '__incDecimal__',
           'number-decimal-dec': '__decDecimal__',
-          'number-date':        'dd/mm/yyyy',
+          'number-date':        'm/d/yyyy',
           'number-time':        'hh:mm:ss',
           'number-text':        '@',
         };
@@ -3793,15 +3793,18 @@
           }
 
           // ── Insert / delete rows & columns ────────────────────────────────────
-          // Try direct Asc API (asc_insertCells / asc_deleteCells with enum, then
-          // named helpers), falling back to executeFocusedCommand with inner focus.
+          // asc_insertRows(above, count) carries direction; asc_insertCells uses a
+          // direction-less enum (InsertRows=2) so it must be last resort.
           if (cmd === 'row-insert-above' || cmd === 'row-insert-below') {
-            var _io = _A.c_oAscInsertOptions || {};
-            var _rowType = _io.InsertRows !== undefined ? _io.InsertRows : 2;
-            if      (typeof _ed.asc_insertCells === 'function') { _ed.asc_insertCells(_rowType); }
-            else if (typeof _ed.asc_insertRows  === 'function') { _ed.asc_insertRows(cmd === 'row-insert-above', 1); }
-            else if (typeof _ed.asc_addRow      === 'function') { _ed.asc_addRow(cmd === 'row-insert-above'); }
-            else { _execFocused(cmd === 'row-insert-above' ? 'InsertRowAbove' : 'InsertRowBelow'); }
+            var _isAbove = cmd === 'row-insert-above';
+            if      (typeof _ed.asc_insertRows  === 'function') { _ed.asc_insertRows(_isAbove, 1); }
+            else if (typeof _ed.asc_addRow      === 'function') { _ed.asc_addRow(_isAbove); }
+            else {
+              var _io = _A.c_oAscInsertOptions || {};
+              var _rowType = _io.InsertRows !== undefined ? _io.InsertRows : 2;
+              if (typeof _ed.asc_insertCells === 'function') { _ed.asc_insertCells(_rowType); }
+              else { _execFocused(_isAbove ? 'InsertRowAbove' : 'InsertRowBelow'); }
+            }
             return;
           }
           if (cmd === 'row-delete') {
@@ -3879,8 +3882,21 @@
             return;
           }
 
-          // Find: open search bar — dispatch Ctrl+F to inner frame so OO handles it
+          // Find: open OO's search bar.
+          // Ctrl+F keyboard simulation is a no-op on iOS WKWebView, so try direct
+          // API and _clickOOBtn first; Ctrl+F is kept as last resort for desktop.
           if (cmd === 'find') {
+            var _fEd = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+            if (_fEd) {
+              var _findFns = ['asc_openFind','asc_findText','asc_ShowFindBar','asc_showFindBar',
+                              'asc_findAndReplace','asc_Find'];
+              for (var _fi = 0; _fi < _findFns.length; _fi++) {
+                if (typeof _fEd[_findFns[_fi]] === 'function') {
+                  try { _fEd[_findFns[_fi]](); return; } catch(_) {}
+                }
+              }
+            }
+            if (_clickOOBtn(['find','search','find and replace','open find','find bar','magnify'])) return;
             try {
               var _fDoc = _innerWin && _innerWin.document;
               if (_fDoc) {
@@ -3889,10 +3905,8 @@
                   bubbles: true, cancelable: true, key: 'f', keyCode: 70, which: 70,
                   ctrlKey: true, view: _innerWin
                 }));
-                return;
               }
             } catch(_) {}
-            if (_clickOOBtn(['find','search','open find panel','find bar'])) return;
             _execFocused('find');
             return;
           }

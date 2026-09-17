@@ -18,6 +18,7 @@ struct OnboardingPage: Identifiable, Hashable {
         case editOffice
         case tools
         case trackDocuments
+        case paywall
         case chooseFolder
     }
 
@@ -50,6 +51,15 @@ struct OnboardingPage: Identifiable, Hashable {
             subtitle: "Mark documents as Draft, Reviewed, or Signed so you always know what's done and what still needs attention",
             primaryCTA: "Continue",
             secondaryCTA: nil,
+            showsPrivacyChip: false
+        ),
+        OnboardingPage(
+            id: .paywall,
+            imageName: "PaywallHeroIllustration",
+            title: "Your Office, Upgraded",
+            subtitle: "Edit, sign, scan, and organize — everything your documents need",
+            primaryCTA: "Start Free Trial",
+            secondaryCTA: "Start for free",
             showsPrivacyChip: false
         ),
         OnboardingPage(

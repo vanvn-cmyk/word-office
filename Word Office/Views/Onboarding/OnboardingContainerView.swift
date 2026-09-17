@@ -40,7 +40,13 @@ struct OnboardingContainerView: View {
                     .padding(.horizontal, DSSpacing.lg)
                     .padding(.bottom, DSSpacing.lg)
             }
+
+            if viewModel.currentPage.id == .paywall {
+                PaywallView(onContinueForFree: { viewModel.advance() })
+                    .transition(.move(edge: .trailing))
+            }
         }
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.35), value: viewModel.currentPage.id == .paywall)
         .animation(reduceMotion ? nil : .default, value: permissionVM.errorMessage)
         .animation(reduceMotion ? nil : .default, value: permissionVM.isRequesting)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: viewModel.currentIndex)
@@ -72,14 +78,15 @@ struct OnboardingContainerView: View {
                 // instead of just relocating the blob (which review pointed
                 // out is easy to get wrong again on a future page).
                 Button("Skip") {
-                    viewModel.jump(to: viewModel.pages.count - 1)
+                    let idx = viewModel.pages.firstIndex(where: { $0.id == .paywall }) ?? viewModel.pages.count - 1
+                    viewModel.jump(to: idx)
                 }
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(OnboardingColors.textSecondary)
                 .padding(.horizontal, DSSpacing.sm)
                 .padding(.vertical, DSSpacing.xxs)
                 .background(Color.white.opacity(0.7), in: Capsule())
-                .accessibilityHint("Jump to the folder-permission step")
+                .accessibilityHint("Jump to the paywall")
                 .transition(.opacity)
             }
         }
@@ -115,20 +122,25 @@ struct OnboardingContainerView: View {
 
     // MARK: - Footer (CTA + secondary)
 
+    @ViewBuilder
     private var footer: some View {
-        VStack(spacing: DSSpacing.md) {
-            if viewModel.currentPage.showsPrivacyChip, let errorMessage = permissionVM.errorMessage {
-                Text(errorMessage)
-                    .font(.system(size: 13))
-                    .foregroundStyle(OnboardingColors.error)
-                    .multilineTextAlignment(.center)
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+        if viewModel.currentPage.id == .paywall {
+            Color.clear.frame(height: 0)
+        } else {
+            VStack(spacing: DSSpacing.md) {
+                if viewModel.currentPage.showsPrivacyChip, let errorMessage = permissionVM.errorMessage {
+                    Text(errorMessage)
+                        .font(.system(size: 13))
+                        .foregroundStyle(OnboardingColors.error)
+                        .multilineTextAlignment(.center)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
+
+                primaryCTA
+
+                secondaryButton
+                    .padding(.top, DSSpacing.xxs)
             }
-
-            primaryCTA
-
-            secondaryButton
-                .padding(.top, DSSpacing.xxs)
         }
     }
 
@@ -166,12 +178,14 @@ struct OnboardingContainerView: View {
 
     // MARK: - Secondary (Skip on S1-S3 has moved up to topBar; slot reserved for Maybe Later on S4)
 
-    /// Only S4 renders a secondary — the top-bar Skip covers S1-S3.
-    /// The slot always occupies vertical space (empty `Color.clear`) so the
-    /// primary CTA doesn't jump when we cross to S4.
     @ViewBuilder
     private var secondaryButton: some View {
-        if viewModel.isLastPage {
+        switch viewModel.currentPage.id {
+        case .paywall:
+            Button("Start for free") { viewModel.advance() }
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(OnboardingColors.textSecondary)
+        case .chooseFolder:
             Button("Maybe Later") {
                 permissionVM.skipOnboarding()
                 viewModel.finish()
@@ -179,7 +193,7 @@ struct OnboardingContainerView: View {
             .font(.system(size: 15, weight: .medium))
             .foregroundStyle(OnboardingColors.textSecondary)
             .disabled(permissionVM.isRequesting)
-        } else {
+        default:
             Color.clear.frame(height: 20)
         }
     }
@@ -188,7 +202,7 @@ struct OnboardingContainerView: View {
 
     private func handlePrimaryTap() {
         switch viewModel.currentPage.id {
-        case .editOffice, .tools, .trackDocuments:
+        case .editOffice, .tools, .trackDocuments, .paywall:
             viewModel.advance()
         case .chooseFolder:
             Task {

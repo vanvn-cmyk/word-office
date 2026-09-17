@@ -370,7 +370,7 @@ struct LibraryView: View {
     @ViewBuilder
     private var tipOverlay: some View {
         if let anchor = tipAnchorFrame, tipPresented {
-            let tipGap: CGFloat = 60
+            let tipGap: CGFloat = 76
             let tipXOffset: CGFloat = 70
             Color.clear
                 .frame(width: 0, height: 0)
@@ -505,8 +505,9 @@ struct LibraryView: View {
                                         }
                                         .onAppear {
                                             guard attachTip, !tipSeen, !tipPresented else { return }
-                                            tipPresented = true
                                             Task { @MainActor in
+                                                try? await Task.sleep(for: .seconds(1))
+                                                withAnimation(.easeIn(duration: 0.2)) { tipPresented = true }
                                                 try? await Task.sleep(for: .seconds(4))
                                                 withAnimation(.easeOut(duration: 0.2)) { tipPresented = false }
                                                 tipSeen = true
@@ -957,8 +958,9 @@ struct LibraryView: View {
                             cardContent(for: entry)
                                 .onAppear {
                                     guard attachTip, !tipSeen, !tipPresented else { return }
-                                    tipPresented = true
                                     Task { @MainActor in
+                                        try? await Task.sleep(for: .seconds(1))
+                                        withAnimation(.easeIn(duration: 0.2)) { tipPresented = true }
                                         try? await Task.sleep(for: .seconds(4))
                                         withAnimation(.easeOut(duration: 0.2)) { tipPresented = false }
                                         tipSeen = true
@@ -1381,52 +1383,19 @@ struct LibraryView: View {
 
     private var filterMenu: some View {
         Button {
-            // Explicit wrap so the open cascade — surface fill in,
-            // icon symbol swap, popover slide — is driven by ONE curve
-            // (~iOS popover system 0.3s) instead of the previous mix
-            // of 0.18/0.22/system that read as jerky/disjointed.
-            if reduceMotion {
-                isFilterPopoverPresented = true
-            } else {
-                withAnimation(.smooth(duration: 0.28)) {
-                    isFilterPopoverPresented = true
-                }
-            }
+            isFilterPopoverPresented = true
         } label: {
-            // Filled variant when EITHER filter is active — a single visual
-            // cue that "something is narrowing this list". Matched sizing +
-            // flat elevated surface with `viewModeToggleButton` so the two
-            // icons read as a paired cluster next to the search capsule.
-            //
-            // Numeric badge appears only when 2 filters are on: with 1
-            // filter the fill/outline swap on the icon itself is a
-            // sufficient signal — the badge just added visual noise for
-            // the common "single-filter" case. Kept for ≥2 because there
-            // the count is the only cue that MORE than one dimension is
-            // narrowing the list.
             Image(systemName: isAnyFilterActive
                   ? "line.3.horizontal.decrease.circle.fill"
                   : "line.3.horizontal.decrease.circle")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(Color.dsBrandPrimary)
-                // iOS 17+ built-in symbol swap animation — replaces the
-                // fill/outline crossfade with SF Symbols' layered
-                // transition. Removes the "hard flick" the user flagged
-                // when a status filter is applied from the popover.
                 .contentTransition(.symbolEffect(.replace))
                 .frame(width: DSSize.minimumTouchTarget, height: DSSize.minimumTouchTarget)
-                // Tinted while the popover is open so the tap is
-                // visually acknowledged even in the split second before
-                // the popover slides in.
-                .roundIconButtonSurface(isActive: isFilterPopoverPresented || activeFilterCount > 0)
+                .roundIconButtonSurface(isActive: activeFilterCount > 0)
         }
         .buttonStyle(.plain)
-        // Single implicit animation for BOTH values so state changes
-        // driven from the popover selection (statusFilter set → popover
-        // dismiss → isActive flip → icon swap) all share one curve
-        // matching iOS's popover ~0.3s system animation.
         .animation(reduceMotion ? nil : .smooth(duration: 0.28), value: activeFilterCount)
-        .animation(reduceMotion ? nil : .smooth(duration: 0.28), value: isFilterPopoverPresented)
         .accessibilityLabel(activeFilterCount == 0
             ? "Filter documents"
             : "Filter documents, \(activeFilterCount) filter\(activeFilterCount == 1 ? "" : "s") active")

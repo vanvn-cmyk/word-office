@@ -33,6 +33,7 @@ struct OnboardingAuroraBackground: View {
         case .editOffice:     Color(red: 0.55, green: 0.35, blue: 0.95) // violet — creative editing
         case .tools:          Color(red: 0.95, green: 0.52, blue: 0.18) // amber — productive tools
         case .trackDocuments: Color(red: 0.10, green: 0.75, blue: 0.65) // teal  — organized tracking
+        case .paywall:        Color(red: 0.20, green: 0.35, blue: 0.95) // blue  — premium offer
         case .chooseFolder:   Color(red: 0.35, green: 0.45, blue: 0.98) // indigo — systematic storage
         }
     }
@@ -42,6 +43,7 @@ struct OnboardingAuroraBackground: View {
         case .editOffice:     UnitPoint(x: 0.75, y: 0.30)
         case .tools:          UnitPoint(x: 0.20, y: 0.25)
         case .trackDocuments: UnitPoint(x: 0.80, y: 0.40)
+        case .paywall:        UnitPoint(x: 0.75, y: 0.25)
         case .chooseFolder:   UnitPoint(x: 0.25, y: 0.35)
         }
     }
@@ -118,17 +120,17 @@ struct OnboardingAuroraBackground: View {
         case .editOffice:      UnitPoint(x: 0.15, y: 0.05)
         case .tools:            UnitPoint(x: 0.85, y: 0.08)
         case .trackDocuments:  UnitPoint(x: 0.2, y: 0.15)
+        case .paywall:         UnitPoint(x: 0.15, y: 0.10)
         case .chooseFolder:    UnitPoint(x: 0.8, y: 0.12)
         }
     }
 
-    /// Secondary blob sits lower and opposite-side from the primary, for
-    /// depth rather than symmetry.
     private func secondaryAnchor(for kind: OnboardingPage.Kind) -> UnitPoint {
         switch kind {
         case .editOffice:      UnitPoint(x: 0.9, y: 0.55)
         case .tools:            UnitPoint(x: 0.1, y: 0.6)
         case .trackDocuments:  UnitPoint(x: 0.85, y: 0.5)
+        case .paywall:         UnitPoint(x: 0.85, y: 0.55)
         case .chooseFolder:    UnitPoint(x: 0.15, y: 0.58)
         }
     }

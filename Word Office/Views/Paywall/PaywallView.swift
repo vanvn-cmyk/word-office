@@ -20,6 +20,11 @@ struct PaywallView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    /// When non-nil (onboarding context), a "Start for free →" link is shown
+    /// immediately inside the bottom card so the user can skip without waiting
+    /// for the 3-second close button.
+    var onContinueForFree: (() -> Void)? = nil
+
     // Weekly (the trial-eligible plan) selected by default so the
     // low-commitment, trial-led path is what most users land on first —
     // matches the paywall pattern for trial-led products.
@@ -93,22 +98,14 @@ struct PaywallView: View {
 
             VStack(spacing: 0) {
                 heroContent
-                Spacer(minLength: DSSpacing.lg)
+                Spacer(minLength: 0)
                 bottomCard
             }
         }
         .overlay(alignment: .topTrailing) {
-            if showCloseButton {
-                closeButton
-                    .transition(.opacity)
-            }
+            if showCloseButton { closeButton }
         }
         .task {
-            // Fresh delay window per presentation — `.task` is scoped to
-            // this view instance, so a close + reopen sequence naturally
-            // restarts the timer (view is torn down and re-created by
-            // `.fullScreenCover`). `try?` swallows the cancellation
-            // error a fast dismiss would raise.
             try? await Task.sleep(for: showCloseDelay)
             withAnimation(reduceMotion ? nil : .easeIn(duration: 0.3)) {
                 showCloseButton = true
@@ -180,29 +177,12 @@ struct PaywallView: View {
     /// split (which the user flagged as "xấu" through three iterations).
     private var heroContent: some View {
         VStack(spacing: DSSpacing.md) {
-            // Asset cropped from the original 1668×943 (≈1.77:1) to
-            // 1400×943 (≈1.49:1) — "mild" of two crop options shown to
-            // the user, trimming ~4% off each side (PDF icon corner, pen
-            // tip). Original backed up, uncropped, at
-            // `Asset/PaywallHeroIllustration-backups/`.
-            //
-            // `maxHeight` is an ASPIRATION, not a guarantee — per
-            // `body`'s comment, `heroContent` sits in a fixed-height
-            // VStack alongside `bottomCard`, and this image is the one
-            // element flexible enough to get shrunk below its cap when
-            // the benefit subtitles + card don't leave 240pt free. That
-            // squeeze is intentional here, not a bug to chase.
             Image("PaywallHeroIllustration")
                 .resizable()
                 .scaledToFit()
-                .frame(maxHeight: 240)
+                .frame(maxHeight: 195)
                 .padding(.horizontal, DSSpacing.xs)
 
-            // Title + one-line subhead, tightly paired (xxs spacing) so
-            // they read as a single headline block distinct from the
-            // benefit grid below. Per-benefit copy still carries the
-            // "what this means" job — the subhead only sets the frame,
-            // it doesn't repeat any benefit.
             VStack(spacing: DSSpacing.xxs) {
                 Text("Your Office, Upgraded")
                     .font(.largeTitle.bold())
@@ -237,7 +217,7 @@ struct PaywallView: View {
             // restored per the user's explicit request) — the
             // illustration is what absorbs the resulting space pressure,
             // per `body`'s comment.
-            VStack(alignment: .leading, spacing: DSSpacing.sm) {
+            VStack(alignment: .leading, spacing: DSSpacing.xs) {
                 HeroBenefitRow(
                     icon: "square.and.pencil",
                     title: "Edit Office Files",
@@ -261,13 +241,7 @@ struct PaywallView: View {
             }
             .padding(.horizontal, DSSpacing.lg)
         }
-        // Small top breathing room only — `body`'s `ScrollView` (no
-        // `.ignoresSafeArea()` of its own) already insets its content
-        // below the status bar / Dynamic Island automatically. The
-        // earlier fixed `60` was compensating for living directly inside
-        // `heroBackground`'s `.ignoresSafeArea()` ZStack, which no longer
-        // applies now that this sits in scrollable content instead.
-        .padding(.top, DSSpacing.sm)
+        .padding(.top, DSSpacing.xxs)
         .frame(maxWidth: .infinity)
     }
 
@@ -378,7 +352,7 @@ struct PaywallView: View {
 
     private var closeButton: some View {
         Button {
-            dismiss()
+            if let onContinueForFree { onContinueForFree() } else { dismiss() }
         } label: {
             Image(systemName: "xmark")
                 .font(.system(size: 13, weight: .semibold))
@@ -448,12 +422,11 @@ private struct HeroBenefitRow: View {
             ZStack {
                 Circle().fill(.white)
                 Image(systemName: icon)
-                    .font(.system(size: 12, weight: .bold))
+                    .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(Color.dsBrandPrimary)
             }
-            .frame(width: 25, height: 25)
+            .frame(width: 34, height: 34)
             .shadow(color: .black.opacity(0.15), radius: 3, y: 1.5)
-            .padding(.top, 1)
             .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 1) {
