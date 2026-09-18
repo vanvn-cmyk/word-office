@@ -10,6 +10,7 @@ struct ConvertFlowView: View {
     @Bindable var viewModel: PDFToolsViewModel
     let direction: ConvertDirection
     @Environment(DSToastPresenter.self) private var toaster
+    @Environment(\.dismiss) private var dismiss
     /// Fires after a successful conversion that produces a single output
     /// file — parent uses it to open the result in the editor. Fires for
     /// `officeToPDF`, `pdfToWord`, and `imageToPDF`; the `pdfToImage`
@@ -82,12 +83,9 @@ struct ConvertFlowView: View {
     }
 
     var body: some View {
-        stateContent
-            .prominentInlineTitle(direction.title)
-            .toolbar { toolbarContent }
-            .fileImporter(isPresented: $isPickerPresented, allowedContentTypes: fileImporterTypes, onCompletion: handleFilePicked)
-            .sheet(isPresented: $isLibraryPickerPresented) {
-                LibraryFilePicker(
+        Group {
+            if isLibraryPickerPresented {
+                InlineCabinetPicker(
                     entries: store.entries,
                     filter: libraryFilter,
                     allowsMultipleSelection: false,
@@ -95,33 +93,46 @@ struct ConvertFlowView: View {
                     emptyMessage: libraryEmptyMessage
                 ) { urls in
                     guard let url = urls.first else { return }
+                    isLibraryPickerPresented = false
                     handleFilePicked(.success(url))
+                } onCancel: {
+                    isLibraryPickerPresented = false
+                    if singleFileURL == nil { dismiss() }
+                } onBrowse: {
+                    isPickerPresented = true
                 }
+            } else {
+                stateContent
             }
-            .fileSourcePicker(isPresented: $isSourcePickerPresented,
-                              onLibrary: { isLibraryPickerPresented = true },
-                              onBrowse: { isPickerPresented = true })
-            .task {
-                // `initialSource` is set by ToolsTabView before navigating here
-                // (user already chose Library or Browse from the Tools tab sheet).
-                // Open the appropriate picker directly — no intermediate sheet.
-                guard !didAutoPresent, let source = initialSource, singleFileURL == nil else { return }
-                didAutoPresent = true
-                switch source {
-                case .library: isLibraryPickerPresented = true
-                case .browse:  isPickerPresented = true
-                }
+        }
+        .prominentInlineTitle(isLibraryPickerPresented ? "Cabinet" : direction.title)
+        .toolbar { toolbarContent }
+        .fileImporter(isPresented: $isPickerPresented, allowedContentTypes: fileImporterTypes, onCompletion: handleFilePicked)
+        .fileSourcePicker(isPresented: $isSourcePickerPresented,
+                          title: sourcePickerTitle,
+                          onLibrary: { isLibraryPickerPresented = true },
+                          onBrowse: { isPickerPresented = true })
+        .task {
+            // `initialSource` is set by ToolsTabView before navigating here
+            // (user already chose Library or Browse from the Tools tab sheet).
+            // Open the appropriate picker directly — no intermediate sheet.
+            guard !didAutoPresent, let source = initialSource, singleFileURL == nil else { return }
+            didAutoPresent = true
+            switch source {
+            case .library: isLibraryPickerPresented = true
+            case .browse:  isPickerPresented = true
             }
-            .onChange(of: photoItems) { _, items in
-                Task { await loadImages(items) }
-            }
-            .overlay { processingOverlay }
-            .errorAlert($viewModel.errorMessage)
-            // `viewModel` (`pdfToolsVM`) is shared across Merge/Split/
-            // Convert (all 4 directions)/Print — a failure left over from
-            // whichever the user visited last otherwise pops up here as if
-            // it were this direction's error.
-            .onAppear { viewModel.errorMessage = nil }
+        }
+        .onChange(of: photoItems) { _, items in
+            Task { await loadImages(items) }
+        }
+        .overlay { processingOverlay }
+        .errorAlert($viewModel.errorMessage)
+        // `viewModel` (`pdfToolsVM`) is shared across Merge/Split/
+        // Convert (all 4 directions)/Print — a failure left over from
+        // whichever the user visited last otherwise pops up here as if
+        // it were this direction's error.
+        .onAppear { viewModel.errorMessage = nil }
     }
 
     // Split out of `body` — the type-checker was timing out trying to solve the
@@ -159,17 +170,12 @@ struct ConvertFlowView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        // No explicit Cancel — this view is only reached via `NavigationLink`
-        // push from `ToolsTabView`, so the system back chevron already covers
-        // dismissal. Adding a leading Cancel next to it reads as a duplicate.
-        //
-        // No "Done" branch either — success shows a toast (see `performConvert`)
-        // and the Convert button stays available for re-convert; the user
-        // navigates back via the system chevron when finished.
-        ToolbarItem(placement: .confirmationAction) {
-            Button("Convert") { Task { await performConvert() } }
-                .fontWeight(.semibold)
-                .disabled(!canConvert || viewModel.isProcessing || currentSnapshot == lastConvertedSnapshot)
+        if !isLibraryPickerPresented {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Convert") { Task { await performConvert() } }
+                    .fontWeight(.semibold)
+                    .disabled(!canConvert || viewModel.isProcessing || currentSnapshot == lastConvertedSnapshot)
+            }
         }
     }
 
@@ -180,7 +186,7 @@ struct ConvertFlowView: View {
             if let singleFileURL {
                 List {
                     Section("1 file selected") {
-                        DSFileRow(ref: DocumentRef(name: singleFileURL.lastPathComponent, url: singleFileURL, modifiedAt: singleFileURL.contentModificationDateOrNow, kind: direction == .officeToPDF ? .docx : .pdf))
+                        DSFileRow(ref: DocumentRef(name: singleFileURL.lastPathComponent, url: singleFileURL, modifiedAt: singleFileURL.contentModificationDateOrNow, kind: DocumentKind(rawValue: singleFileURL.pathExtension.lowercased()) ?? (direction == .officeToPDF ? .docx : .pdf)))
                     }
                     if direction == .pdfToWord {
                         Section {
@@ -304,6 +310,7 @@ struct ConvertFlowView: View {
 
     private func handleFilePicked(_ result: Result<URL, Error>) {
         guard case .success(let url) = result else { return }
+        isLibraryPickerPresented = false
         switch direction {
         case .officeToPDF, .pdfToWord:
             singleFileURL = url
@@ -393,6 +400,15 @@ struct ConvertFlowView: View {
                 toaster.show(.success, title: "Your document was saved to your Library", filename: url.lastPathComponent)
                 onOpenFile?(url)
             }
+        }
+    }
+
+    private var sourcePickerTitle: LocalizedStringKey {
+        switch direction {
+        case .officeToPDF: "Choose a file to convert"
+        case .pdfToWord:   "Choose a PDF to convert"
+        case .pdfToImage:  "Choose a PDF to export"
+        case .imageToPDF:  "Add photos to convert"
         }
     }
 

@@ -10,6 +10,7 @@ struct MergeView: View {
     @Bindable var viewModel: PDFToolsViewModel
     @Environment(DSToastPresenter.self) private var toaster
     @Environment(LibraryStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
     /// Callback fired after a successful merge — parent (`ToolsTabView`)
     /// uses it to open the merged file in the editor. Optional so this view
     /// can be used stand-alone (e.g. previews) without navigation wiring.
@@ -34,7 +35,23 @@ struct MergeView: View {
         // the file list stays visible so the user can add more files and
         // merge again without navigating back and re-tapping the tool card.
         Group {
-            if urls.isEmpty {
+            if isLibraryPickerPresented || (initialSource == .library && !didAutoPresent) {
+                InlineCabinetPicker(
+                    entries: store.entries,
+                    filter: { $0.document.kind == .pdf },
+                    allowsMultipleSelection: true,
+                    emptyTitle: "No PDFs in Cabinet",
+                    emptyMessage: "Import PDF files first — they'll appear here."
+                ) { picked in
+                    urls.append(contentsOf: picked)
+                    isLibraryPickerPresented = false
+                } onCancel: {
+                    isLibraryPickerPresented = false
+                    if urls.isEmpty { dismiss() }
+                } onBrowse: {
+                    isPickerPresented = true
+                }
+            } else if urls.isEmpty {
                 EmptyStateView(
                     icon: "doc.on.doc",
                     title: "Add PDF files",
@@ -45,7 +62,7 @@ struct MergeView: View {
                 fileList
             }
         }
-        .prominentInlineTitle("Merge PDFs")
+        .prominentInlineTitle(isLibraryPickerPresented ? "Cabinet" : "Merge PDFs")
         .toolbar { toolbarContent }
         .fileImporter(
             isPresented: $isPickerPresented,
@@ -53,17 +70,6 @@ struct MergeView: View {
             allowsMultipleSelection: true,
             onCompletion: handleFilesPicked
         )
-        .sheet(isPresented: $isLibraryPickerPresented) {
-            LibraryFilePicker(
-                entries: store.entries,
-                filter: { $0.document.kind == .pdf },
-                allowsMultipleSelection: true,
-                emptyTitle: "No PDFs in Library",
-                emptyMessage: "Import PDF files first, then come back."
-            ) { picked in
-                urls.append(contentsOf: picked)
-            }
-        }
         .overlay {
             if viewModel.isProcessing {
                 ProcessingOverlay(title: "Merging \(urls.count) files", subtitle: "Running in the background — won't block the app")
@@ -71,6 +77,7 @@ struct MergeView: View {
         }
         .errorAlert($viewModel.errorMessage)
         .fileSourcePicker(isPresented: $isSourcePickerPresented,
+                          title: "Add PDF files",
                           onLibrary: { isLibraryPickerPresented = true },
                           onBrowse: { isPickerPresented = true })
         .task {
@@ -89,18 +96,20 @@ struct MergeView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        // No explicit Cancel — this view is only reached via `NavigationLink`
-        // push from `ToolsTabView`, so the system back chevron already covers
-        // dismissal. Adding a leading Cancel next to it reads as a duplicate.
-        ToolbarItem(placement: .confirmationAction) {
-            Button("Merge") { Task { await performMerge() } }
-                .fontWeight(.semibold)
-                .disabled(urls.count < 2 || viewModel.isProcessing || urls == lastMergedSnapshot)
+        if !isLibraryPickerPresented {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Merge") { Task { await performMerge() } }
+                    .fontWeight(.semibold)
+                    .disabled(urls.count < 2 || viewModel.isProcessing || urls == lastMergedSnapshot)
+            }
         }
     }
 
     private func handleFilesPicked(_ result: Result<[URL], Error>) {
-        if case .success(let picked) = result { urls.append(contentsOf: picked) }
+        if case .success(let picked) = result {
+            urls.append(contentsOf: picked)
+            isLibraryPickerPresented = false
+        }
     }
 
     private var fileList: some View {
@@ -116,12 +125,12 @@ struct MergeView: View {
                     Button {
                         isLibraryPickerPresented = true
                     } label: {
-                        Label("From Library", systemImage: "tray.fill")
+                        Label("From Cabinet", systemImage: "cabinet.fill")
                     }
                     Button {
                         isPickerPresented = true
                     } label: {
-                        Label("Browse Files", systemImage: "folder")
+                        Label("From Device", systemImage: "iphone")
                     }
                 } label: {
                     Label("Add more files", systemImage: "plus")
@@ -160,6 +169,7 @@ struct SplitView: View {
     @Bindable var viewModel: PDFToolsViewModel
     @Environment(DSToastPresenter.self) private var toaster
     @Environment(LibraryStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
     /// Fires when the split produces exactly one file (single range) — the
     /// user lands directly in the editor for that file, matching Merge and
     /// the single-output Convert flows.
@@ -201,7 +211,24 @@ struct SplitView: View {
         // the configure view stays visible so the user can add more ranges
         // and split again without navigating back and re-tapping the tool.
         Group {
-            if let sourceURL {
+            if isLibraryPickerPresented {
+                InlineCabinetPicker(
+                    entries: store.entries,
+                    filter: { $0.document.kind == .pdf },
+                    allowsMultipleSelection: false,
+                    emptyTitle: "No PDFs in Cabinet",
+                    emptyMessage: "Import PDF files first — they'll appear here."
+                ) { picked in
+                    guard let url = picked.first else { return }
+                    isLibraryPickerPresented = false
+                    handleFilePicked(.success(url))
+                } onCancel: {
+                    isLibraryPickerPresented = false
+                    if sourceURL == nil { dismiss() }
+                } onBrowse: {
+                    isPickerPresented = true
+                }
+            } else if let sourceURL {
                 configureState(sourceURL)
             } else {
                 EmptyStateView(
@@ -212,21 +239,9 @@ struct SplitView: View {
                 )
             }
         }
-        .prominentInlineTitle("Split PDF")
+        .prominentInlineTitle(isLibraryPickerPresented ? "Cabinet" : "Split PDF")
         .toolbar { toolbarContent }
         .fileImporter(isPresented: $isPickerPresented, allowedContentTypes: [.pdf], onCompletion: handleFilePicked)
-        .sheet(isPresented: $isLibraryPickerPresented) {
-            LibraryFilePicker(
-                entries: store.entries,
-                filter: { $0.document.kind == .pdf },
-                allowsMultipleSelection: false,
-                emptyTitle: "No PDFs in Library",
-                emptyMessage: "Import PDF files first, then come back."
-            ) { picked in
-                guard let url = picked.first else { return }
-                handleFilePicked(.success(url))
-            }
-        }
         .overlay {
             if viewModel.isProcessing {
                 ProcessingOverlay(title: "Splitting into \(ranges.count) files", subtitle: "Running in the background — won't block the app")
@@ -234,6 +249,7 @@ struct SplitView: View {
         }
         .errorAlert($viewModel.errorMessage)
         .fileSourcePicker(isPresented: $isSourcePickerPresented,
+                          title: "Choose a PDF to split",
                           onLibrary: { isLibraryPickerPresented = true },
                           onBrowse: { isPickerPresented = true })
         .task {
@@ -252,9 +268,7 @@ struct SplitView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        // No explicit Cancel — same rationale as `MergeView.toolbarContent`:
-        // push-only, system back chevron handles dismissal.
-        if sourceURL != nil {
+        if !isLibraryPickerPresented, sourceURL != nil {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Split") { Task { await performSplit() } }
                     .fontWeight(.semibold)
@@ -266,6 +280,7 @@ struct SplitView: View {
     private func handleFilePicked(_ result: Result<URL, Error>) {
         guard case .success(let url) = result else { return }
         sourceURL = url
+        isLibraryPickerPresented = false
         Task {
             // Off the main actor — opening/parsing a large PDF just to read its
             // page count can still be a noticeable synchronous stall otherwise.

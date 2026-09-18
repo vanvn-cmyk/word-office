@@ -155,7 +155,8 @@ struct ToolsTabView: View {
             .sheet(isPresented: $isSourcePickerPresented, onDismiss: handleSourcePickerDismiss) {
                 FileSourcePickerSheet(
                     onLibrary: { pendingDestination = withSource(.library) },
-                    onBrowse:  { pendingDestination = withSource(.browse)  }
+                    onBrowse:  { pendingDestination = withSource(.browse)  },
+                    title: "Choose a source"
                 )
             }
         }
@@ -170,6 +171,7 @@ struct ToolsTabView: View {
         case .convert(let dir, _): return .convert(dir, source: source)
         case .fillForm:           return .fillForm(source: source)
         case .sign:               return .sign(source: source)
+        case .print:              return .print(source: source)
         default:                  return pendingDestination
         }
     }
@@ -186,7 +188,7 @@ struct ToolsTabView: View {
 
     private func sourceWasSelected(_ dest: PDFToolDestination) -> Bool {
         switch dest {
-        case .merge(let s), .split(let s), .fillForm(let s), .sign(let s):
+        case .merge(let s), .split(let s), .fillForm(let s), .sign(let s), .print(let s):
             return s != nil
         case .convert(_, let s):
             return s != nil
@@ -339,7 +341,8 @@ struct ToolsTabView: View {
                     icon: "square.and.pencil",
                     title: "Fill Form",
                     subtitle: "Add text to forms and scans",
-                    tint: .dsBrandPrimary
+                    tint: .dsBrandPrimary,
+                    badge: "PDF only"
                 )
             }
             .buttonStyle(PressableCardButtonStyle())
@@ -352,12 +355,16 @@ struct ToolsTabView: View {
                     icon: "signature",
                     title: "Sign",
                     subtitle: "Draw and stamp your signature",
-                    tint: .dsDocumentImage
+                    tint: .dsDocumentImage,
+                    badge: "PDF only"
                 )
             }
             .buttonStyle(PressableCardButtonStyle())
 
-            NavigationLink(value: PDFToolDestination.print) {
+            Button {
+                pendingDestination = .print()
+                isSourcePickerPresented = true
+            } label: {
                 ToolCard(
                     icon: "printer.fill",
                     title: "Print",
@@ -431,8 +438,8 @@ struct ToolsTabView: View {
                 FillFormView(viewModel: fillFormVM, initialSource: source, onOpenFile: openFile)
             case .sign(let source):
                 SignFlowView(viewModel: signatureVM, initialSource: source, onOpenFile: openFile)
-            case .print:
-                PrintFlowView(viewModel: pdfToolsVM)
+            case .print(let source):
+                PrintFlowView(viewModel: pdfToolsVM, initialSource: source)
             }
         }
         .hidesTabBar()
@@ -452,6 +459,7 @@ private struct ToolCard: View {
     let title: LocalizedStringKey
     let subtitle: LocalizedStringKey
     let tint: Color
+    var badge: LocalizedStringKey? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -470,6 +478,17 @@ private struct ToolCard: View {
                 .padding(.top, 2)
         }
         .toolCardSurface()
+        .overlay(alignment: .topTrailing) {
+            if let badge {
+                Text(badge)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Color.dsStatusError)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.dsStatusErrorBackground, in: Capsule())
+                    .padding(10)
+            }
+        }
     }
 }
 

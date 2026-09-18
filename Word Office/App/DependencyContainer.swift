@@ -37,7 +37,7 @@ final class DependencyContainer {
 
     // MARK: - Convert (§7.4, 2026-09-01 — Office↔PDF, Image↔PDF)
 
-    let documentExporter: MockArtifexDocumentExporter
+    let documentExporter: any DocumentExporting
     let pdfTextExtractor: PDFKitTextExtractor
     let pdfImageExporter: PDFKitImageExporter
     let imagePDFExporter: UIGraphicsImagePDFExporter
@@ -95,7 +95,7 @@ final class DependencyContainer {
         self.textRecognizer = VisionTextRecognizer()
         self.documentPrinter = AirPrintCoordinator()
 
-        self.documentExporter = MockArtifexDocumentExporter()
+        self.documentExporter = X2tDocumentExporter()
         self.pdfTextExtractor = PDFKitTextExtractor(recognizer: textRecognizer)
         self.pdfImageExporter = PDFKitImageExporter()
         self.imagePDFExporter = UIGraphicsImagePDFExporter()

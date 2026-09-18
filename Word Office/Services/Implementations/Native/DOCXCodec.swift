@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import ZIPFoundation
 
 /// Real (non-mock) DOCX text read/write via raw OOXML — lets `MockArtifexDocumentReader`/
@@ -96,6 +97,76 @@ enum DOCXCodec {
         }
     }
 
+    /// Writes a styled DOCX from an `NSAttributedString` (e.g. sourced from
+    /// `PDFPage.attributedString`). Maps bold/large-font runs to basic DOCX
+    /// run properties (`<w:b/>`, `<w:i/>`) and detects heading paragraphs from
+    /// dominant font size, giving noticeably better output than the plain-text
+    /// overload for PDFs that carry an embedded text layer.
+    static func write(_ attributed: NSAttributedString, to url: URL) throws {
+        guard attributed.length > 0 else {
+            try write(AttributedString(""), to: url)
+            return
+        }
+
+        var bodyXML = ""
+        let nsString = attributed.string as NSString
+        let fullRange = NSRange(location: 0, length: nsString.length)
+
+        // Split into paragraph ranges via newline boundaries
+        nsString.enumerateSubstrings(in: fullRange,
+                                     options: [.byParagraphs, .substringNotRequired]) { _, paraRange, _, _ in
+            let paraText = nsString.substring(with: paraRange)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !paraText.isEmpty else { bodyXML += "<w:p/>"; return }
+
+            // Measure dominant font size + bold flag for this paragraph
+            var maxSize: CGFloat = 0
+            var hasBold = false
+            attributed.enumerateAttribute(.font, in: paraRange, options: []) { value, _, _ in
+                guard let font = value as? UIFont else { return }
+                if font.pointSize > maxSize { maxSize = font.pointSize }
+                if font.fontDescriptor.symbolicTraits.contains(.traitBold) { hasBold = true }
+            }
+
+            var pPrXML = ""
+            if let style = headingStyle(fontSize: maxSize, isBold: hasBold) {
+                pPrXML = "<w:pPr><w:pStyle w:val=\"\(style)\"/></w:pPr>"
+            }
+
+            var runsXML = ""
+            attributed.enumerateAttributes(in: paraRange, options: []) { attrs, runRange, _ in
+                let runText = nsString.substring(with: runRange)
+                    .trimmingCharacters(in: .newlines)
+                guard !runText.isEmpty else { return }
+
+                var rPrParts = ""
+                if let font = attrs[.font] as? UIFont {
+                    let traits = font.fontDescriptor.symbolicTraits
+                    if traits.contains(.traitBold)   { rPrParts += "<w:b/>" }
+                    if traits.contains(.traitItalic) { rPrParts += "<w:i/>" }
+                }
+                let rPrXML = rPrParts.isEmpty ? "" : "<w:rPr>\(rPrParts)</w:rPr>"
+                runsXML += "<w:r>\(rPrXML)<w:t xml:space=\"preserve\">\(xmlEscape(runText))</w:t></w:r>"
+            }
+
+            bodyXML += "<w:p>\(pPrXML)\(runsXML)</w:p>"
+        }
+
+        let documentXML = """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>\(bodyXML)<w:sectPr/></w:body></w:document>
+        """
+        try packDocumentXML(documentXML, to: url)
+    }
+
+    private static func headingStyle(fontSize: CGFloat, isBold: Bool) -> String? {
+        switch fontSize {
+        case 20...: return isBold ? "Heading1" : "Heading2"
+        case 16..<20 where isBold: return "Heading2"
+        default: return nil
+        }
+    }
+
     // MARK: - XML building
 
     private static func paragraphXML(for line: String) -> String {
@@ -136,6 +207,36 @@ enum DOCXCodec {
         _ = try? archive.extract(entry) { data.append($0) }
         guard let xml = String(data: data, encoding: .utf8) else { return false }
         return ["<w:tbl", "<w:drawing", "<w:pict", "<w:object"].contains { xml.contains($0) }
+    }
+
+    /// Packages a `document.xml` string into a minimal DOCX archive at `url`,
+    /// creating or replacing the file atomically.
+    private static func packDocumentXML(_ documentXML: String, to url: URL) throws {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let relsDir = tempDir.appendingPathComponent("_rels", isDirectory: true)
+        let wordDir = tempDir.appendingPathComponent("word", isDirectory: true)
+        try FileManager.default.createDirectory(at: relsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: wordDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        try contentTypesXML.write(to: tempDir.appendingPathComponent("[Content_Types].xml"), atomically: true, encoding: .utf8)
+        try rootRelsXML.write(to: relsDir.appendingPathComponent(".rels"), atomically: true, encoding: .utf8)
+        try documentXML.write(to: wordDir.appendingPathComponent("document.xml"), atomically: true, encoding: .utf8)
+
+        let tempZipURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".docx")
+        guard let archive = try? Archive(url: tempZipURL, accessMode: .create) else {
+            throw DOCXCodecError.archiveCreationFailed
+        }
+        try archive.addEntry(with: "[Content_Types].xml", relativeTo: tempDir, compressionMethod: .deflate)
+        try archive.addEntry(with: "_rels/.rels", relativeTo: tempDir, compressionMethod: .deflate)
+        try archive.addEntry(with: "word/document.xml", relativeTo: tempDir, compressionMethod: .deflate)
+        defer { try? FileManager.default.removeItem(at: tempZipURL) }
+
+        if FileManager.default.fileExists(atPath: url.path) {
+            _ = try FileManager.default.replaceItemAt(url, withItemAt: tempZipURL)
+        } else {
+            try FileManager.default.moveItem(at: tempZipURL, to: url)
+        }
     }
 
     private static let contentTypesXML = """

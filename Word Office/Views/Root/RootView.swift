@@ -254,7 +254,7 @@ struct RootView: View {
         GlassEffectContainer(spacing: DSSpacing.sm) {
             HStack(alignment: .bottom, spacing: DSSpacing.sm) {
                 HStack(spacing: 2) {
-                    tabBarButton(.library, label: "Library", systemImage: "tray.full")
+                    tabBarButton(.library, label: "Home", systemImage: "tray.full")
                     tabBarButton(.tools, label: "Tools", systemImage: "IconFourSquares", isCustomAsset: true)
                     tabBarButton(.settings, label: "Settings", systemImage: "gearshape")
                 }

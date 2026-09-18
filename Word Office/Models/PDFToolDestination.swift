@@ -25,7 +25,7 @@ enum PDFToolDestination: Hashable {
     case scan
     case fillForm(source: FilePickerSource? = nil)
     case sign(source: FilePickerSource? = nil)
-    case print
+    case print(source: FilePickerSource? = nil)
 }
 
 /// The 4 Convert directions (§7.4). `To PDF` accepts any of the 3 Office formats

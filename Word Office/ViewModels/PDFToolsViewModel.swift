@@ -6,6 +6,7 @@
 
 import Foundation
 import Observation
+import PDFKit
 import UIKit
 
 @Observable
@@ -141,21 +142,47 @@ final class PDFToolsViewModel {
         try? await textExtractor.needsOCR(url)
     }
 
-    /// PDF → Word. Text-only — no formatting/images/tables (§7.4). Auto-detects
-    /// scanned PDFs (no text layer) and falls back to OCR via `PDFTextExtracting`,
-    /// same engine `Scan & OCR` uses.
+    /// PDF → Word. For PDFs with a text layer, uses `PDFPage.attributedString` to
+    /// preserve bold/italic/heading structure. Falls back to OCR plain text for
+    /// scanned PDFs (§7.4).
     func convertPDFToWord(_ url: URL) async {
         guard !isProcessing else { return }
         isProcessing = true
         lastConvertedURL = nil
         defer { isProcessing = false }
         do {
-            let text = try await textExtractor.extractText(from: url, languages: recognitionLanguages)
             let stem = url.deletingPathExtension().lastPathComponent
             let destination = FileManager.default.nonConflictingURL(for: "\(stem).docx", in: documentsURL)
-            try await Task.detached(priority: .utility) {
-                try DOCXCodec.write(AttributedString(text), to: destination)
-            }.value
+            let needsOCR = (try? await textExtractor.needsOCR(url)) ?? false
+
+            if !needsOCR {
+                // Text layer present — extract with font attributes for richer DOCX output
+                let attributed = try await Task.detached(priority: .utility) { () throws -> NSAttributedString in
+                    guard let document = PDFDocument(url: url) else {
+                        throw PDFTextExtractingError.unreadableDocument
+                    }
+                    let combined = NSMutableAttributedString()
+                    for i in 0..<document.pageCount {
+                        guard let page = document.page(at: i),
+                              let pageAttr = page.attributedString else { continue }
+                        if combined.length > 0 {
+                            combined.append(NSAttributedString(string: "\n\n"))
+                        }
+                        combined.append(pageAttr)
+                    }
+                    return combined
+                }.value
+                try await Task.detached(priority: .utility) {
+                    try DOCXCodec.write(attributed, to: destination)
+                }.value
+            } else {
+                // Scanned PDF — OCR gives plain text only
+                let text = try await textExtractor.extractText(from: url, languages: recognitionLanguages)
+                try await Task.detached(priority: .utility) {
+                    try DOCXCodec.write(AttributedString(text), to: destination)
+                }.value
+            }
+
             lastConvertedURL = destination
             errorMessage = nil
             NotificationCenter.default.post(name: .documentsDidChange, object: nil)

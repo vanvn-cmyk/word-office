@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Bottom sheet for choosing a file source — Library vs Files browser.
+/// Bottom sheet for choosing a file source — Cabinet (in-app) vs Device (Files/iCloud).
 /// Visual pattern matches `ImageConvertPickerSheet` (row-based, explicit
 /// `dsBackgroundSecondary` ground, no Liquid Glass bleed).
 ///
@@ -12,8 +12,10 @@ struct FileSourcePickerSheet: View {
 
     let onLibrary: () -> Void
     let onBrowse: () -> Void
-    /// Optional context line shown above the two source rows.
-    /// When non-nil the sheet grows to 190 pt to accommodate it.
+    /// Headline shown at the top of the sheet — tells the user what they're picking.
+    var title: LocalizedStringKey = "Choose a source"
+    /// Optional secondary context line shown below the title.
+    /// When non-nil the sheet grows to 215 pt to accommodate it.
     var message: LocalizedStringKey? = nil
 
     var body: some View {
@@ -22,11 +24,18 @@ struct FileSourcePickerSheet: View {
                 .fill(Color.secondary.opacity(0.3))
                 .frame(width: 36, height: 4)
                 .padding(.top, DSSpacing.sm)
-                .padding(.bottom, DSSpacing.md)
+                .padding(.bottom, DSSpacing.sm)
+
+            Text(title)
+                .font(DSFont.headline)
+                .foregroundStyle(Color.dsTextPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, DSSpacing.lg)
+                .padding(.bottom, message != nil ? DSSpacing.xs : DSSpacing.md)
 
             if let message {
                 Text(message)
-                    .font(DSFont.body)
+                    .font(DSFont.subheadline)
                     .foregroundStyle(Color.dsTextSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, DSSpacing.lg)
@@ -35,19 +44,19 @@ struct FileSourcePickerSheet: View {
 
             VStack(spacing: 0) {
                 sourceRow(
-                    icon: "tray.fill",
+                    icon: "cabinet.fill",
                     tint: Color.dsBrandPrimary,
-                    title: "Pick from Library",
-                    subtitle: "Files saved to this app",
+                    title: "From Cabinet",
+                    subtitle: "Files you've saved in this app",
                     action: onLibrary
                 )
                 Divider()
                     .padding(.leading, 36 + DSSpacing.md * 2)
                 sourceRow(
-                    icon: "folder.fill",
-                    tint: Color.dsTextSecondary,
-                    title: "Browse Files",
-                    subtitle: "iCloud Drive and other locations",
+                    icon: "iphone",
+                    tint: Color.dsBrandPrimary,
+                    title: "From Device",
+                    subtitle: "Files app, iCloud Drive and more",
                     action: onBrowse
                 )
             }
@@ -55,7 +64,7 @@ struct FileSourcePickerSheet: View {
                         in: RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous))
             .padding(.horizontal, DSSpacing.md)
         }
-        .presentationDetents([.height(message != nil ? 190 : 155)])
+        .presentationDetents([.height(message != nil ? 215 : 185)])
         .presentationDragIndicator(.hidden)
         .presentationBackground(Color.dsBackgroundSecondary)
     }
@@ -108,12 +117,13 @@ extension View {
     /// inside tool views (for when the user cancels the initial picker).
     func fileSourcePicker(
         isPresented: Binding<Bool>,
+        title: LocalizedStringKey = "Choose a source",
         message: LocalizedStringKey? = nil,
         onLibrary: @escaping () -> Void,
         onBrowse: @escaping () -> Void
     ) -> some View {
         sheet(isPresented: isPresented) {
-            FileSourcePickerSheet(onLibrary: onLibrary, onBrowse: onBrowse, message: message)
+            FileSourcePickerSheet(onLibrary: onLibrary, onBrowse: onBrowse, title: title, message: message)
         }
     }
 }

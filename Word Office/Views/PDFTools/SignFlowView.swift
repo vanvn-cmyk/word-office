@@ -25,6 +25,7 @@ struct SignFlowView: View {
     @State private var isLibraryPickerPresented = false
     @State private var isSourcePickerPresented = false
     @State private var didAutoPresent = false
+    @State private var isDismissingFromPicker = false
     /// Placement captured at tap time — set when the user taps an empty
     /// spot on the PDF (no signature yet). Non-nil = show the draw
     /// sheet. Nil = sheet dismissed. The commit action consumes this
@@ -57,7 +58,7 @@ struct SignFlowView: View {
             case .fill:    fillStage
             }
         }
-        .prominentInlineTitle("Sign")
+        .prominentInlineTitle(isLibraryPickerPresented ? "Cabinet" : "Sign")
         .toolbar { toolbarContent }
         // `signatureVM` is a single instance shared across every push into
         // this destination (`ToolsTabView` creates it once, not per-push) —
@@ -72,18 +73,6 @@ struct SignFlowView: View {
             allowedContentTypes: [.pdf],
             onCompletion: handleFilePicked
         )
-        .sheet(isPresented: $isLibraryPickerPresented) {
-            LibraryFilePicker(
-                entries: store.entries,
-                filter: { $0.document.kind == .pdf },
-                allowsMultipleSelection: false,
-                emptyTitle: "No PDFs in Library",
-                emptyMessage: "Import PDF files first, then come back."
-            ) { urls in
-                guard let url = urls.first else { return }
-                handleFilePicked(.success(url))
-            }
-        }
         .overlay {
             if viewModel.isProcessing {
                 ProcessingOverlay(title: "Stamping signature", subtitle: "Re-rendering the PDF with your signature on the chosen page")
@@ -91,6 +80,7 @@ struct SignFlowView: View {
         }
         .errorAlert($viewModel.errorMessage)
         .fileSourcePicker(isPresented: $isSourcePickerPresented,
+                          title: "Choose a PDF to sign",
                           onLibrary: { isLibraryPickerPresented = true },
                           onBrowse: { isPickerPresented = true })
         .task {
@@ -150,23 +140,40 @@ struct SignFlowView: View {
 
     @ViewBuilder
     private var pickStage: some View {
-        // When a source was chosen on the Tools tab, the picker will auto-open
-        // via .task. Don't show the empty state while that's pending — it
-        // creates a "double screen" appearance (Sign empty state + picker sheet).
-        if !didAutoPresent, initialSource != nil {
-            Color.dsBackgroundSecondary.ignoresSafeArea()
+        // Show cabinet picker immediately when initialSource == .library so
+        // the first rendered frame is already the file list (no blank-screen flash).
+        if isLibraryPickerPresented || (initialSource == .library && !didAutoPresent) || isDismissingFromPicker {
+            InlineCabinetPicker(
+                entries: store.entries,
+                filter: { $0.document.kind == .pdf },
+                allowsMultipleSelection: false,
+                emptyTitle: "No PDFs in Cabinet",
+                emptyMessage: "Import PDF files first — they'll appear here."
+            ) { urls in
+                guard let url = urls.first else { return }
+                isLibraryPickerPresented = false
+                handleFilePicked(.success(url))
+            } onCancel: {
+                isDismissingFromPicker = true
+                isLibraryPickerPresented = false
+                if viewModel.stage == .pickPDF { dismiss() }
+            } onBrowse: {
+                isPickerPresented = true
+            }
         } else {
             EmptyStateView(
                 icon: "signature",
                 title: "Choose a PDF to sign",
                 message: "Pick one PDF. You'll tap where you want to sign, then draw your signature.",
-                action: ("Choose a PDF", { isSourcePickerPresented = true })
+                action: ("Choose a PDF", { isSourcePickerPresented = true }),
+                badge: "PDF only"
             )
         }
     }
 
     private func handleFilePicked(_ result: Result<URL, Error>) {
         if case .success(let url) = result {
+            isLibraryPickerPresented = false
             Task { await viewModel.selectPDF(url) }
         }
     }

@@ -1,14 +1,19 @@
+import QuickLook
 import SwiftUI
 import UniformTypeIdentifiers
 
 struct PrintFlowView: View {
     @Bindable var viewModel: PDFToolsViewModel
     @Environment(LibraryStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+
+    var initialSource: FilePickerSource? = nil
 
     @State private var sourceURL: URL?
     @State private var isPickerPresented = false
     @State private var isLibraryPickerPresented = false
     @State private var isSourcePickerPresented = false
+    @State private var didAutoPresent = false
 
     // UTTypes AirPrint / Quick Look can render on device — PDF natively,
     // Office formats through iOS's built-in Quick Look renderers.
@@ -18,30 +23,46 @@ struct PrintFlowView: View {
 
     var body: some View {
         Group {
-            if let sourceURL {
+            if isLibraryPickerPresented {
+                InlineCabinetPicker(
+                    entries: store.entries,
+                    filter: nil,
+                    allowsMultipleSelection: false
+                ) { urls in
+                    sourceURL = urls.first
+                    isLibraryPickerPresented = false
+                } onCancel: {
+                    isLibraryPickerPresented = false
+                    if sourceURL == nil { dismiss() }
+                } onBrowse: {
+                    isPickerPresented = true
+                }
+            } else if let sourceURL {
                 configureState(sourceURL)
             } else {
                 printEmptyState
             }
         }
-        .prominentInlineTitle("Print")
+        .prominentInlineTitle(isLibraryPickerPresented ? "Cabinet" : "Print")
         .toolbar { toolbarContent }
         .fileImporter(
             isPresented: $isPickerPresented,
             allowedContentTypes: Self.printableTypes,
             onCompletion: handleFilePicked
         )
-        .sheet(isPresented: $isLibraryPickerPresented) {
-            LibraryPrintPicker(entries: store.entries) { entry in
-                sourceURL = entry.document.url
-                isLibraryPickerPresented = false
-            }
-        }
         .errorAlert($viewModel.errorMessage)
         .onAppear { viewModel.errorMessage = nil }
-        .task { isSourcePickerPresented = true }
+        .task {
+            guard !didAutoPresent, let source = initialSource, sourceURL == nil else { return }
+            didAutoPresent = true
+            switch source {
+            case .library: isLibraryPickerPresented = true
+            case .browse:  isPickerPresented = true
+            }
+        }
         .fileSourcePicker(
             isPresented: $isSourcePickerPresented,
+            title: "Choose a file to print",
             message: "Select where your file is stored",
             onLibrary: { isLibraryPickerPresented = true },
             onBrowse: { isPickerPresented = true }
@@ -50,15 +71,20 @@ struct PrintFlowView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .confirmationAction) {
-            Button("Print") { Task { await performPrint() } }
-                .fontWeight(.semibold)
-                .disabled(sourceURL == nil || viewModel.isProcessing)
+        if !isLibraryPickerPresented {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Print") { Task { await performPrint() } }
+                    .fontWeight(.semibold)
+                    .disabled(sourceURL == nil || viewModel.isProcessing)
+            }
         }
     }
 
     private func handleFilePicked(_ result: Result<URL, Error>) {
-        if case .success(let url) = result { sourceURL = url }
+        if case .success(let url) = result {
+            sourceURL = url
+            isLibraryPickerPresented = false
+        }
     }
 
     // MARK: - Empty state
@@ -103,53 +129,27 @@ struct PrintFlowView: View {
     // MARK: - Configured state (file selected)
 
     private func configureState(_ url: URL) -> some View {
-        VStack(alignment: .leading, spacing: DSSpacing.md) {
-            DSFileRow(ref: DocumentRef(
-                name: url.lastPathComponent,
-                url: url,
-                modifiedAt: url.contentModificationDateOrNow,
-                kind: DocumentKind.fromUTI(url: url) ?? .pdf
-            ))
-            .padding(.horizontal, DSSpacing.md)
-            .background(Color.dsBackgroundElevated, in: RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous))
-            .padding(.horizontal, DSSpacing.md)
-
-            Text("Tap Print above to open the AirPrint sheet — pick a printer, page range, copies, and other options.")
-                .font(DSFont.footnote)
-                .foregroundStyle(Color.dsTextSecondary)
-                .padding(.horizontal, DSSpacing.lg)
-
-            Spacer(minLength: 0)
+        Group {
+            if url.pathExtension.lowercased() == "pdf" {
+                ReadOnlyPDFPreviewPane(url: url)
+            } else {
+                PrintQLPreview(url: url)
+            }
         }
-        .padding(.top, DSSpacing.md)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.dsBackgroundSecondary)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            HStack(spacing: DSSpacing.sm) {
-                Button {
-                    isLibraryPickerPresented = true
-                } label: {
-                    Label("Library", systemImage: "tray.fill")
-                        .font(DSFont.headline)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-                .tint(Color.dsBrandPrimary)
-
-                Button {
-                    isPickerPresented = true
-                } label: {
-                    Label("Browse", systemImage: "folder")
-                        .font(DSFont.headline)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-                .tint(Color.dsBrandPrimary)
+            Button { isSourcePickerPresented = true } label: {
+                Label("Select other file", systemImage: "folder")
+                    .font(DSFont.headline)
+                    .frame(maxWidth: .infinity)
             }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .tint(Color.dsBrandPrimary)
             .padding(.horizontal, DSSpacing.md)
-            .padding(.bottom, DSSpacing.sm)
+            .padding(.top, DSSpacing.sm)
+            .padding(.bottom, DSSpacing.md)
             .background(Color.dsBackgroundSecondary)
         }
     }
@@ -168,45 +168,35 @@ struct PrintFlowView: View {
     }
 }
 
-// MARK: - Library picker sheet
+// MARK: - QuickLook preview (non-PDF)
 
-/// Simple list of all library entries — user taps one to choose it for
-/// printing. No type filter: AirPrint / Quick Look handles any format the
-/// library accepts (PDF, Word, Excel, PowerPoint).
-private struct LibraryPrintPicker: View {
-    let entries: [LibraryEntry]
-    let onPick: (LibraryEntry) -> Void
+/// Embeds a `QLPreviewController` inline — handles Word, Excel, PowerPoint,
+/// RTF, and any other Office format that AirPrint can also render.
+private struct PrintQLPreview: UIViewControllerRepresentable {
+    let url: URL
 
-    @Environment(\.dismiss) private var dismiss
+    func makeUIViewController(context: Context) -> QLPreviewController {
+        let vc = QLPreviewController()
+        vc.dataSource = context.coordinator
+        return vc
+    }
 
-    var body: some View {
-        NavigationStack {
-            Group {
-                if entries.isEmpty {
-                    ContentUnavailableView(
-                        "No documents in Library",
-                        systemImage: "tray",
-                        description: Text("Import files first, then come back to print.")
-                    )
-                } else {
-                    List(entries) { entry in
-                        Button {
-                            onPick(entry)
-                        } label: {
-                            DSFileRow(ref: entry.document)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .listStyle(.plain)
-                }
-            }
-            .navigationTitle("Pick from Library")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-            }
+    func updateUIViewController(_ uiViewController: QLPreviewController, context: Context) {
+        context.coordinator.url = url
+        uiViewController.reloadData()
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(url: url) }
+
+    final class Coordinator: NSObject, QLPreviewControllerDataSource {
+        var url: URL
+        init(url: URL) { self.url = url }
+
+        func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
+        func previewController(_ controller: QLPreviewController,
+                               previewItemAt index: Int) -> any QLPreviewItem {
+            url as NSURL
         }
     }
 }
+

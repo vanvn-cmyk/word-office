@@ -31,6 +31,7 @@ struct FillFormView: View {
     @State private var isLibraryPickerPresented = false
     @State private var isSourcePickerPresented = false
     @State private var didAutoPresent = false
+    @State private var isDismissingFromPicker = false
     /// Staged preview URL, set after `viewModel.stagePreview()` writes
     /// the filled PDF to temp. Wrapped in `PreviewPayload` because
     /// `URL` isn't `Identifiable` by default and `sheet(item:)` needs it.
@@ -53,7 +54,7 @@ struct FillFormView: View {
             case .fill:    fillStage
             }
         }
-        .prominentInlineTitle("Fill Form")
+        .prominentInlineTitle(isLibraryPickerPresented ? "Cabinet" : "Fill Form")
         // `fillFormVM` is a single instance shared across every push into
         // this destination (`ToolsTabView` creates it once, not per-push) —
         // without this, backing out mid-flow without saving left `stage`/
@@ -67,18 +68,6 @@ struct FillFormView: View {
             allowedContentTypes: [.pdf],
             onCompletion: handleFilePicked
         )
-        .sheet(isPresented: $isLibraryPickerPresented) {
-            LibraryFilePicker(
-                entries: store.entries,
-                filter: { $0.document.kind == .pdf },
-                allowsMultipleSelection: false,
-                emptyTitle: "No PDFs in Library",
-                emptyMessage: "Import PDF files first, then come back."
-            ) { urls in
-                guard let url = urls.first else { return }
-                handleFilePicked(.success(url))
-            }
-        }
         .overlay {
             if viewModel.isProcessing {
                 ProcessingOverlay(title: "Preparing preview", subtitle: "Embedding text into the document")
@@ -86,6 +75,7 @@ struct FillFormView: View {
         }
         .errorAlert($viewModel.errorMessage)
         .fileSourcePicker(isPresented: $isSourcePickerPresented,
+                          title: "Choose a PDF to fill",
                           onLibrary: { isLibraryPickerPresented = true },
                           onBrowse: { isPickerPresented = true })
         .task {
@@ -124,20 +114,43 @@ struct FillFormView: View {
 
     @ViewBuilder
     private var pickStage: some View {
-        if !didAutoPresent, initialSource != nil {
-            Color.dsBackgroundSecondary.ignoresSafeArea()
+        // Show cabinet picker immediately when initialSource == .library so
+        // the first rendered frame is already the file list (no blank-screen flash).
+        if isLibraryPickerPresented || (initialSource == .library && !didAutoPresent) || isDismissingFromPicker {
+            InlineCabinetPicker(
+                entries: store.entries,
+                filter: { $0.document.kind == .pdf },
+                allowsMultipleSelection: false,
+                emptyTitle: "No PDFs in Cabinet",
+                emptyMessage: "Import PDF files first — they'll appear here."
+            ) { urls in
+                guard let url = urls.first else { return }
+                isLibraryPickerPresented = false
+                handleFilePicked(.success(url))
+            } onCancel: {
+                // Set flag BEFORE clearing isLibraryPickerPresented so pickStage
+                // keeps showing InlineCabinetPicker during the pop animation
+                // instead of flashing EmptyStateView for one frame.
+                isDismissingFromPicker = true
+                isLibraryPickerPresented = false
+                if viewModel.stage == .pickPDF { dismiss() }
+            } onBrowse: {
+                isPickerPresented = true
+            }
         } else {
             EmptyStateView(
                 icon: "square.and.pencil",
                 title: "Choose a PDF to fill",
                 message: "Pick one PDF. You'll tap on the page to add text — forms or scans, doesn't matter.",
-                action: ("Choose a PDF", { isSourcePickerPresented = true })
+                action: ("Choose a PDF", { isSourcePickerPresented = true }),
+                badge: "PDF only"
             )
         }
     }
 
     private func handleFilePicked(_ result: Result<URL, Error>) {
         if case .success(let url) = result {
+            isLibraryPickerPresented = false
             Task { await viewModel.selectPDF(url) }
         }
     }

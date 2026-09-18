@@ -6,6 +6,129 @@ Format tham khảo [Keep a Changelog](https://keepachangelog.com/). Entry mới 
 
 ---
 
+## [Unreleased] — 2026-09-18 (Cabinet picker polish + MergeView dismiss fix + ToolCard badge repositioned)
+
+### 🎨 InlineCabinetPicker — file card shadows
+**File:** `Views/Common/InlineCabinetPicker.swift`
+
+Added Level 2 two-layer shadow to both `singleCard` and `multiCard`:
+- `.shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)` — tight ambient
+- `.shadow(color: .black.opacity(0.06), radius: 14, x: 0, y: 6)` — soft spread
+
+Matches the same shadow recipe used on Library grid cards and list rows.
+
+### 🐛 MergeView — Cancel from InlineCabinetPicker now dismisses to Tools tab
+**File:** `Views/PDFTools/MergeSplitCompressView.swift`
+
+When user opened Merge PDFs → Cabinet and tapped Cancel with no files selected, the view was returning to the Merge empty state ("Add PDF files") instead of going all the way back to the Tools tab. Root cause: `onCancel` only set `isLibraryPickerPresented = false`; there was no dismiss call. Added `@Environment(\.dismiss)` + `if urls.isEmpty { dismiss() }` — mirrors the existing `SplitView` cancel pattern.
+
+Also applied the no-blank-flash guard from Sign/Fill: `isLibraryPickerPresented || (initialSource == .library && !didAutoPresent)` so the InlineCabinetPicker shows on the very first rendered frame when coming from the Cabinet source picker.
+
+### 🎨 ToolCard — "PDF only" badge repositioned to top-right corner
+**File:** `Views/Tabs/ToolsTabView.swift`
+
+Badge was rendered at the bottom of the card's VStack (below the subtitle). Moved to `.overlay(alignment: .topTrailing)` on the card with 10pt inset — more prominent, doesn't push the subtitle down, and reads naturally as a constraint tag on the card header.
+
+---
+
+## [Unreleased] — 2026-09-18 (InlineCabinetPicker migration + rich PDF→Word + Print in Tools + FileSourcePicker redesign)
+
+### ✨ InlineCabinetPicker — replaces sheet-based LibraryFilePicker across all PDF tools
+**Files:** `SignFlowView.swift`, `FillFormView.swift`, `MergeSplitCompressView.swift`, `PrintFlowView.swift`, `ConvertFlowView.swift`
+
+All tool views previously opened `LibraryFilePicker` (or `LibraryPrintPicker`) as a `.sheet` — a separate modal with its own navigation bar, blurring the background. Replaced with inline `InlineCabinetPicker` rendered directly in the view body: the cabinet file list replaces the tool's own content area, nav title changes to "Cabinet", reverts to the tool name on selection or cancel.
+
+**No-blank-flash**: Sign + Fill now show the picker on the very first rendered frame when `initialSource == .library` — avoids the empty-state flash between navigation and picker open.
+
+### ✨ PDF → Word: rich conversion via text layer
+**Files:** `Services/Implementations/Native/DOCXCodec.swift`, `ViewModels/PDFToolsViewModel.swift`
+
+New `DOCXCodec.write(_: NSAttributedString, to:)` overload: extracts bold/italic runs from `NSAttributedString` font attributes, detects heading paragraphs from dominant font size, writes properly structured DOCX with `<w:b/>`, `<w:i/>`, and `<w:pStyle>` heading markers.
+
+`PDFToolsViewModel` now branches:
+- Text-layer PDF → `PDFPage.attributedString` → rich DOCX (font structure preserved)
+- Scanned PDF → Vision OCR → plain DOCX (unchanged)
+
+**Result:** PDFs with an embedded text layer (most non-scanned docs) convert to Word with bold headings and paragraph structure instead of a wall of plain text.
+
+### ✨ Print added to Tools grid
+**File:** `Views/Tabs/ToolsTabView.swift`
+
+Print was only reachable via Share → Print. Now appears as a first-class card in the PDF tools section, with source picker wired through the same `withSource()` + `initialSource` pattern as Sign/Fill/Merge.
+
+### 🎨 FileSourcePickerSheet — title header + renamed rows
+**File:** `Views/Common/FileSourcePickerSheet.swift`
+
+- Added `title:` param — a headline shown at the top of the sheet (e.g. "Choose a PDF to sign"). Sheet height grows by 25pt to accommodate.
+- "Pick from Library" → "From Cabinet" with `cabinet.fill` icon
+- "Browse Files" → "From Device" with `iphone` icon
+- `message` font reduced to `.subheadline` (was `.body`) — now plays secondary role under the new title
+
+### 🎨 EmptyStateView — `badge:` prop for constraint labels
+**File:** `Views/Common/EmptyStateView.swift`
+
+New `badge: LocalizedStringKey?` — renders a small red capsule (e.g. "PDF only") between the icon and title. Used by PDF-only tools to set expectations before the user tries to load a Word file.
+
+---
+
+## [Unreleased] — 2026-09-18 (iPad full compat pass + Settings polish + Library foreground fetch + LibraryImportingView)
+
+### ✅ App now Universal — iPad compatibility audit complete
+`TARGETED_DEVICE_FAMILY = "1,2"` was already set. Four layout regressions found and fixed:
+
+**A — Orientation lock gate** (`EditorSheet.swift`): `lockToPortrait()` was called on all devices on editor dismiss — iPad has no orientation lock. Now gated to `userInterfaceIdiom == .phone`.
+
+**B — Kebab / status-picker max-width** (`DocumentCard.swift`, `DocumentGrid.swift`): action sheets inside a `VStack` presented as `fullScreenCover` had no width cap — they spanned the full ~1024pt iPad landscape width. Added `.frame(maxWidth: 540)` + center alignment.
+
+**C — DSTabBarMetrics adaptive** (`DSTabBarMetrics.swift`): three constants (`safeAreaReservation`, `gridContentTrailingSpacer`, `listContentTrailingSpacer`) converted to `UIDevice`-adaptive vars — larger values on iPhone, tighter on iPad where the safe-area geometry differs.
+
+**D — Paywall glow + width** (`PaywallView.swift`): glow `endRadius` 300 → 500 (covered iPad Pro 1024pt properly); bottomCard VStack centred with `.frame(maxWidth: 560)` while background `UnevenRoundedRectangle` stays full-width.
+
+### 🎨 SettingsView title alignment
+Increased title row leading padding `DSSpacing.lg` (20pt) → `DSSpacing.xl` (24pt) to align "Settings" with the page banner. Trailing unchanged.
+
+### 🐛 Library — foreground re-fetch (files added externally not appearing)
+**File:** `Views/Library/LibraryView.swift`
+
+Added `@Environment(\.scenePhase)` observer: when app returns to `.active` and folder permission is `.granted`, calls `loadLibrary()`. Existing entries remain visible while scan runs — no blank flash. Newly added files appear with `.draft` status. Complies with Apple's security-scoped bookmark + foreground-only scan policy.
+
+### 🐛 Folder change — no blank-screen flash
+**File:** `FolderPermissionViewModel.swift`
+
+Removed `store.clear()` from `resetPermission()`. Old entries stay visible until the new folder's `loadLibrary()` finishes and `store.replaceAll()` atomically swaps them.
+
+### ✨ LibraryImportingView overlay
+**File:** `Views/Library/LibraryView.swift`
+
+When `isLoading && entries.isEmpty && hasInitialLoadStarted`: shows `LibraryImportingView` (spinning arc + tray icon + "Scanning your folder…"). Only shown on the very first folder scan — not on foreground re-fetches that already have entries.
+
+---
+
+## [Unreleased] — 2026-09-17 (Editor toolbar audit — 7 fixes across JS + SwiftUI)
+
+### 🐛 `row-insert-below` always inserted above (editor.html)
+`asc_insertCells` was primary path but takes a direction-less `InsertRows` enum — both "Row ↑" and "Row ↓" produced the same result. Fixed by promoting `asc_insertRows(isAbove: Bool, count: Int)` to primary; `asc_insertCells` demoted to last resort.
+
+### 🐛 `find` command: Ctrl+F is a no-op on iOS WKWebView (editor.html)
+Previous primary path dispatched a synthetic `Ctrl+F` keyboard event into the OO iframe — silently ignored by WKWebView's JS engine on iOS. New order: (1) OO direct API (`asc_openFind`, `asc_findText`, `asc_ShowFindBar`, `asc_findAndReplace`, `asc_Find`), (2) `_clickOOBtn(['find','search','find and replace',…])`, (3) Ctrl+F keyboard simulation (kept as desktop/fallback only).
+
+### 🐛 `number-date` format was EU (`dd/mm/yyyy`) (editor.html)
+Changed to `m/d/yyyy` — matches English / US short date convention.
+
+### ✨ Undo/Redo in Word + PPT content rows (EditorTopToolbar.swift)
+Undo and Redo icon buttons added as the **first items** in the Word Home tab and PPT Home tab scrollable content row. Previously only in the navigation bar (top-right) — unreachable by thumb when keyboard is open. Nav bar still has them; content-row adds a thumb-zone shortcut.
+
+### ✨ Excel Format tab — vertical alignment buttons (EditorTopToolbar.swift)
+`cell-valign-top`, `cell-valign-middle`, `cell-valign-bottom` buttons added immediately after the horizontal alignment group. JS handler at `execEditorCommand` line ~3856 was already fully implemented — just needed UI.
+
+### ✨ PPT Home tab — list bullets (EditorTopToolbar.swift)
+`list-bullet` + `list-numbered` added after the PPT vertical-align group. Common need in slide text boxes; handler was already in JS.
+
+### 🎨 Zoom de-duplicated — removed from Word/Excel nav pill (OfficeEditorView.swift)
+Zoom-out/Zoom-in appeared in both the tab-bar trailing area (row 1) AND the navigation bar pill for Word/Excel — two taps for the same action. Removed from nav pill for Word/Excel; PPT keeps it in the nav pill (PPT's custom tab bar has no trailing zoom slot). Nav pill for Word/Excel now: `[undo] [redo] [print] [comment] [Done]`.
+
+---
+
 ## [Unreleased] — 2026-09-17 (Library coachmark: geometry-anchored overlay rebuild + onboarding badge offsets)
 
 ### 🐛 "Hold to change status" coachmark — floating/detached from card, wrong architecture

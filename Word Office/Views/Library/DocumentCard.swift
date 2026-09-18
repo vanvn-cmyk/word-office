@@ -507,18 +507,6 @@ struct FileActionsMenu: View {
                     isSharePresented = true
                 }
             }
-            // Hidden once already Done — nothing to mark. The long-press
-            // "Change status" context menu still exposes all 3 statuses
-            // (including moving back OFF Done) for the less common case.
-            if currentStatus != .done {
-                rowDivider
-                actionRow(
-                    title: "Mark as Done",
-                    systemImage: "checkmark.seal",
-                    iconColor: Color.dsStatusSuccess,
-                    action: onMarkDone
-                )
-            }
             rowDivider
             // Favourite toggle moved out to a standalone icon on the row
             // itself (`DocumentCard.favouriteButton` / the grid tile's
