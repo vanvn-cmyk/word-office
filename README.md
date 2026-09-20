@@ -13,7 +13,7 @@ Native iOS/iPadOS/Mac Catalyst office document editor — DOCX/XLSX/PPTX/PDF vie
 - `Views/` — SwiftUI presentation only
 - `DesignSystem/` — semantic tokens (color, spacing, typography, sizes)
 
-See `Word Office/PHASE_1_ARCHITECTURE.md` for the full architecture spec.
+See `docs/PHASE_1_ARCHITECTURE.md` for the full architecture spec.
 
 ## Sprint 0.2 status
 
@@ -45,15 +45,15 @@ Blocked on external:
 
 | Doc | Purpose |
 |---|---|
-| `Word Office/PHASE_1_ARCHITECTURE.md` | Full architecture v2.2 |
-| `Word Office/product-strategy-master.md` | Product positioning + roadmap |
-| `Word Office/Native-Professional-Workspace-Design-System.md` | Design tokens (Professional Cobalt palette) |
-| `Word Office/Library-Architecture.md` | Library core loop (§10) — flow + traps |
-| `Word Office/Phase0-Implementation-Logic-v2.md` | Per-feature implementation logic |
-| `Word Office/GUIDELINE.md` | Step-by-step checklist |
-| `Word Office/library-preview.html` | 7 UI case mockup (iOS 18 style) |
-| `Word Office/TuHoSo-Flow-Review.html` | Flow review + 15 use cases + Mermaid diagrams |
-| `CHANGELOG.md` | Session history |
+| `docs/PHASE_1_ARCHITECTURE.md` | Full architecture v2.2 |
+| `docs/product-strategy-master.md` | Product positioning + roadmap |
+| `docs/Native-Professional-Workspace-Design-System.md` | Design tokens (Professional Cobalt palette) |
+| `docs/Library-Architecture.md` | Library core loop (§10) — flow + traps |
+| `docs/Phase0-Implementation-Logic-v2.md` | Per-feature implementation logic |
+| `docs/GUIDELINE.md` | Step-by-step checklist |
+| `docs/CHANGELOG.md` | Session history |
+| `docs/TuHoSo-Flow-Review.md` | Flow review + 15 use cases + Mermaid diagrams |
+| `docs/ONLYOFFICE_OFFLINE_ARCHITECTURE.md` | ONLYOFFICE offline integration |
 
 ## License
 

@@ -6,6 +6,99 @@ Format tham khảo [Keep a Changelog](https://keepachangelog.com/). Entry mới 
 
 ---
 
+## [Unreleased] — 2026-09-20 (UX bug fixes — Sign/Split/Merge/PDF→Word/Editor nav)
+
+### 🐛 Sign PDF — multi-page: từng trang một, không scroll
+**File:** `Views/Signature/SignaturePlacementView.swift`
+
+PDF có nhiều trang hiển thị từng trang riêng với pill Next/Back ở dưới. Trước đây user có thể scroll sang trang bằng swipe gesture vì PDFKit internal UIScrollView vẫn active.
+
+Fix: thêm `disableScrollNav(in:)` static method — đệ quy vô hiệu hóa `UIScrollView.isScrollEnabled` trong view hierarchy của PDFView, gọi trong `DispatchQueue.main.async` sau khi view layout xong. `.singlePage` display mode + disabled scroll = chỉ còn navigation bằng button.
+
+### 🐛 PDF → Word — flash màn hình trắng + Done về Tools home
+**File:** `Views/PDFTools/ConvertFlowView.swift`
+
+Hai bug trong cùng một flow (PDF→Word từ cabinet):
+1. **Flash**: `isLibraryPickerPresented = false` được set TRƯỚC khi editor mở → có 1 frame trắng lộ ra. Fix: bỏ `isLibraryPickerPresented = false` ở success path; cabinet tiếp tục visible phía sau fullScreenCover editor.
+2. **Done về Tools home**: cabinet vẫn visible → khi editor dismiss, user tự nhiên quay về cabinet. Cùng fix một lần.
+
+### 🐛 Merge/Split — "couldn't be moved to Documents" (fresh install / simulator reset)
+**File:** `ViewModels/PDFToolsViewModel.swift`
+
+`FileManager.moveItem` thất bại vì thư mục `Documents/` chưa tồn tại trên fresh install hoặc sau simulator reset.
+
+Fix: thêm `ensureDocumentsDir()` private helper — gọi `createDirectory(withIntermediateDirectories: true)` (idempotent). Áp dụng cho tất cả commit functions: `merge`, `convertToPDF`, `convertImagesToPDF`, `commitImagesPDF`, `commitToPDF`, `commitPDFToWord`, `commitPDFToImages`, `commitSplit`, `commitMerge`.
+
+### 🐛 TipCallout / Draft coachmark — disabled
+**Files:** `Views/Library/LibraryView.swift`, `ViewModels/LibraryViewModel.swift`
+
+Coachmark tooltip trong Draft section header không còn dùng tới. `tipOverlay` replaced bằng empty `@ViewBuilder`, `.onChange(of: shouldShowDraftCoachmark)` commented out, `shouldShowDraftCoachmark = true` line commented out.
+
+### 🐛 Split PDF — 1-trang file hiển thị toast thay vì navigate ra màn hình chọn file
+**File:** `Views/PDFTools/MergeSplitCompressView.swift`
+
+Khi user chọn file 1 trang để split: app điều hướng về màn hình "Choose a PDF" (empty state) thay vì chỉ toast lỗi và ở lại cabinet.
+
+Fix hai phần:
+1. `handleFilePicked`: dùng `Task.detached` đếm page count TRƯỚC khi set `sourceURL` / `isLibraryPickerPresented = false`. Nếu count < 2: chỉ toast, return sớm.
+2. `InlineCabinetPicker` callback: bỏ `isLibraryPickerPresented = false` khỏi đây — `handleFilePicked` làm chủ. Áp dụng cả cabinet và browse path (device picker).
+
+### 🐛 Editor Done → về Tools home (bị cấm)
+**File:** `Views/Tabs/ToolsTabView.swift`
+
+`handleEditorDismissed` luôn gọi `navPath = NavigationPath()` → clear toàn bộ nav stack → về Tools home. Đây là banned behavior.
+
+Fix: chỉ clear + push khi có `pendingEditorSignURL` hoặc `pendingEditorPrintURL`. Nếu Done bình thường (không có pending action): navPath không đổi → user quay về đúng màn hình trước (cabinet, device picker...).
+
+### ✨ Image to PDF Sign flow — bỏ PreviewConfirmSheet, auto-commit ngay
+**Files:** `Models/PDFToolDestination.swift`, `Views/PDFTools/SignFlowView.swift`, `Views/Tabs/ToolsTabView.swift`, `Views/PDFTools/ConvertFlowView.swift`
+
+Flow cũ: Sign PDF → ký → PreviewConfirmSheet ("Preview signed PDF" với Save/Replace) → về Tools home.
+Flow mới: Sign PDF → ký → auto-commit → toast → quay về Image to PDF success screen với preview cập nhật sang file đã ký.
+
+Chi tiết:
+- Thêm `case signFromImageToPDF` vào `PDFToolDestination`
+- Thêm `onAutoCommitSigned: ((URL) -> Void)?` vào `SignFlowView` — khi set: stage → `commitPreview(.newFile)` → `markAsNew` → toast → callback với committed URL → `dismiss()`; không qua PreviewConfirmSheet
+- `ToolsTabView`: thêm `@State private var imageToPDFSignedResult: URL?` + `navigateToSignFromImageToPDF` function + destination case handler + wire binding vào `ConvertFlowView.imageToPDFSignedResult`
+- `ConvertFlowView`: thêm `imageToPDFSignedResult: Binding<URL?>` param, `.onChange` watch → update `imageToPDFCommittedURL`; bỏ "Done" button khỏi `imageToPDFSuccessView` (Sign PDF nay là primary CTA `.borderedProminent`)
+
+### 🎨 Badge "New" — sang góc phải sát card
+**File:** `Views/Common/InlineCabinetPicker.swift`
+
+Badge "New" đang padding trailing `DSSpacing.md` (16pt) cho single card, `DSSpacing.md + 32` (48pt) cho multi card → badge xuất hiện ở giữa card thay vì góc phải.
+
+Fix: trailing padding → `4pt` cho cả hai layout. Badge sát với cạnh phải của card.
+
+### 📋 Rule #10 thêm vào rule.md
+**File:** `rule.md`
+
+Nghiêm cấm `navPath = NavigationPath()` trong luồng Done/dismiss bình thường của editor. `navPath` chỉ được clear khi có pending Sign/Print action từ trong editor.
+
+---
+
+## [Unreleased] — 2026-09-19 (ONLYOFFICE editor regression fix + single-step loading)
+
+### 🐛 ONLYOFFICE editor — revert Apple 2.5.2 base href fix (regression)
+**Files:** `OfficeBundle/web-apps/apps/documenteditor/main/index.html`, `spreadsheeteditor/main/index.html`, `presentationeditor/main/index.html`, `OfficeBundle/sdk-core/index.mjs`, `OfficeBridge.swift`
+
+Sep 19 attempt to fix Apple Rule 2.5.2 by changing `<base href>` from CDN to `office://host/...` broke file opening (DOCX/XLSX/PPTX) with "An error has occurred while opening the file". Both the `storeEditorBin` mechanism and blob URL approach failed — root cause: OO SDK uses `document.baseURI` internally for resource resolution and requires the CDN URL.
+
+**Reverted** to committed state (`git checkout HEAD`) for `index.mjs` and `OfficeBridge.swift`; restored CDN base href `https://oonxt.github.io/wasm-onlyoffice-demo/v9.3.0.24-1/...` in all 3 inner editor HTML files. Editor confirmed working (Image #17).
+
+**CRITICAL rule:** Do NOT change `<base href>` in the 3 inner editor HTML files. The oonxt.github.io CDN URL is required for OO SDK to function. Apple 2.5.2 compliance must be solved differently (bundle sdkjs statically — future work).
+
+### ✨ Editor — single-step loading (spinner → document, no OO skeleton)
+**File:** `OfficeBundle/editor.html`
+
+Previously users saw 2 loading states: our custom spinner ("Opening document…") then ONLYOFFICE's own skeleton animation (`.loadmask`). Combined into 1.
+
+**Before:** `onAppReady` → hide `#loading` → show OO skeleton → document renders
+**After:** `onAppReady` → show OO iframe behind `#loading` (z-index 9999 keeps spinner on top) → `_applyMobile` fires when OO document is confirmed ready → hide `#loading` → document appears directly
+
+Added 15s safety timeout to ensure `#loading` always hides even if CDN is slow or `asc_onEndLoadDocument` callback doesn't fire.
+
+---
+
 ## [Unreleased] — 2026-09-18 (Cabinet picker polish + MergeView dismiss fix + ToolCard badge repositioned)
 
 ### 🎨 InlineCabinetPicker — file card shadows

@@ -5,7 +5,7 @@
 Trước khi viết/sửa bất kỳ file code nào (Swift, protocol, implementation, DI wiring, test...),
 phải trình bày kế hoạch/scope trước và **chờ user chốt** ("ok làm đi" / xác nhận rõ ràng).
 Không tự ý implement chỉ vì task nghe hợp lý hay nằm trong roadmap đã có sẵn — kể cả khi
-roadmap (CHANGELOG, PHASE_1_ARCHITECTURE.md, Phase0-Implementation-Logic*.md) đã mô tả rõ
+roadmap (docs/CHANGELOG.md, docs/PHASE_1_ARCHITECTURE.md, docs/Phase0-Implementation-Logic*.md) đã mô tả rõ
 scope, vẫn phải hỏi trước khi bắt tay viết.
 
 **Ngoại lệ**: đọc code, tìm hiểu kiến trúc, tổng hợp trạng thái hiện tại — không cần hỏi trước
@@ -19,14 +19,14 @@ bước mockup nếu user chủ động nói vậy).
 
 ## 3. Nguồn xác định scope/feature MVP
 
-**`Phase0-Implementation-Logic-v2.md` là nguồn CHÍNH** để biết MVP gồm những tính năng gì,
+**`docs/Phase0-Implementation-Logic-v2.md` là nguồn CHÍNH** để biết MVP gồm những tính năng gì,
 scope tới đâu, logic xử lý thế nào cho từng mục (11 hạng mục MVP + Phụ lục A/B ngoài MVP).
 Trước khi implement bất kỳ tính năng nào, đọc lại đúng section liên quan trong file này.
 
-`PHASE_1_ARCHITECTURE.md` chỉ dùng tham khảo **pattern kiến trúc** (MVVM/SOLID/DI/4-layer,
+`docs/PHASE_1_ARCHITECTURE.md` chỉ dùng tham khảo **pattern kiến trúc** (MVVM/SOLID/DI/4-layer,
 Store tách domain §3.1.1, SOLID mapping §3.2) — KHÔNG dùng để soi/bắt lỗi cấu trúc thư mục
-chi tiết (path file, tên folder cụ thể) nếu nó không khớp `Phase0-Implementation-Logic-v2.md`.
-Khi 2 file mâu thuẫn nhau về scope/feature, `Phase0-Implementation-Logic-v2.md` thắng.
+chi tiết (path file, tên folder cụ thể) nếu nó không khớp `docs/Phase0-Implementation-Logic-v2.md`.
+Khi 2 file mâu thuẫn nhau về scope/feature, `docs/Phase0-Implementation-Logic-v2.md` thắng.
 
 ## 4. Review liên tục — 2 agent cố định
 
@@ -58,12 +58,12 @@ git/copy folder), skill nào không cần lo vì có sẵn mọi nơi, skill nà
   Code, không phải third-party skill cài qua `npx skills add`.
 - **KHÔNG đi theo được** — mọi thứ ở `/Users/vuvan/.claude/projects/-Users-vuvan/memory/`
   (memory tự động của Claude, gắn với máy hiện tại/tài khoản, không nằm trong repo). Trạng thái
-  project thật đã ghi đủ trong `CHANGELOG.md`/`GUIDELINE.md` (2 file này đi theo repo) — coi đó
+  project thật đã ghi đủ trong `docs/CHANGELOG.md`/`docs/GUIDELINE.md` (2 file này đi theo repo) — coi đó
   là nguồn chính khi resume ở máy khác, không phụ thuộc memory.
 
 ## 5. Code phải đảm bảo tính kế thừa/mở rộng (OCP)
 
-Theo đúng SOLID mapping ở `PHASE_1_ARCHITECTURE.md` §3.2 — cụ thể **OCP**: thêm format/tính
+Theo đúng SOLID mapping ở `docs/PHASE_1_ARCHITECTURE.md` §3.2 — cụ thể **OCP**: thêm format/tính
 năng mới = tạo implementation mới conform protocol có sẵn (vd `HWPDocumentReading: DocumentReading`),
 **KHÔNG sửa code cũ** (ViewModel, protocol, DI container) để nhét thêm case. Đổi SDK/backend
 (Artifex → khác, GRDB → SwiftData...) = swap implementation, không đổi chỗ gọi.
@@ -166,6 +166,20 @@ bottom padding                                                     = 16pt (md)
 - Không thay thế asset bằng SwiftUI composition hoặc ngược lại
 
 **Vi phạm rule này**: thay S1/S2/S3/S4 hero PNG bằng `OnboardingEditHero`/`OnboardingToolsHero`/`OnboardingTrackDocumentsHero` khi user chỉ yêu cầu "push asset up a little" — phải hỏi trước nếu muốn thay asset.
+
+## 10. Editor Done/dismiss — KHÔNG được navigate về Tools home
+
+**NGHIÊM CẤM** dùng `navPath = NavigationPath()` hoặc bất kỳ cách nào clear toàn bộ nav stack
+khi editor (EditorSheet, fullScreenCover) dismiss theo luồng Done bình thường. Hành vi đúng:
+
+- **Done trong editor** → quay về màn hình trước đó (cabinet, device picker, success screen...)
+- `navPath = NavigationPath()` chỉ được phép khi user CHỦ ĐỘNG bấm Sign hoặc Print từ trong editor,
+  và ngay sau đó push đúng destination cần thiết (`PDFToolDestination.sign` / `.print`).
+- **Không được navigate về Tools home** từ bất kỳ flow Done/dismiss nào nếu user chưa yêu cầu rõ
+  ràng quay về đó.
+
+*Lý do: đã vi phạm nhiều lần (imageToPDF, pdfToWord) khiến user mất navigation context. Đây là
+UX regression nghiêm trọng — thêm vào rule 2026-09-20.*
 
 ---
 
