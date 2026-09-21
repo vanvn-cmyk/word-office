@@ -72,6 +72,8 @@ final class SignatureViewModel {
         signatureImageData = nil
         placement = nil
         pdfDocument = nil
+        isProcessing = true
+        defer { isProcessing = false }
         // Load the PDFDocument off-main so the `.fill` stage's
         // `PDFView` gets an already-parsed doc synchronously — no
         // main-thread parse from `makeUIView` (F8), no page-count-off-
@@ -116,6 +118,20 @@ final class SignatureViewModel {
     func clearSignature() {
         signatureImageData = nil
         placement = nil
+    }
+
+    /// Scales the placed signature rect by `scale`, keeping the centre
+    /// fixed. Width clamped 40–500 pt (PDF coords), height clamped 20–300 pt.
+    func scalePlacement(by scale: CGFloat) {
+        guard let p = placement else { return }
+        let newW = max(40, min(500, p.pageRect.width * scale))
+        let newH = max(20, min(300, p.pageRect.height * scale))
+        let cx = p.pageRect.midX
+        let cy = p.pageRect.midY
+        placement = Placement(
+            pageIndex: p.pageIndex,
+            pageRect: CGRect(x: cx - newW / 2, y: cy - newH / 2, width: newW, height: newH)
+        )
     }
 
     var canSave: Bool {
@@ -216,7 +232,7 @@ final class SignatureViewModel {
             // (View) surfaces a "Replaced in <folder>" toast for the
             // external case instead.
             if result.isInDocumentsFolder {
-                NotificationCenter.default.post(name: .documentsDidChange, object: nil)
+                NotificationCenter.default.postDocumentsDidChange([result.finalURL: .done])
             }
             errorMessage = nil
             return result.finalURL

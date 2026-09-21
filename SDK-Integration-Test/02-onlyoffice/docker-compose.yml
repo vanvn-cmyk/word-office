@@ -1,0 +1,18 @@
+services:
+  onlyoffice:
+    build: .
+    image: onlyoffice-patched:latest
+    ports:
+      - "8090:80"
+      - "8091:8091"
+    environment:
+      - JWT_ENABLED=false
+    volumes:
+      - onlyoffice_data:/var/www/onlyoffice/Data
+      - onlyoffice_log:/var/log/onlyoffice
+      - ./uploads:/var/www/onlyoffice/uploads:ro
+    restart: unless-stopped
+
+volumes:
+  onlyoffice_data:
+  onlyoffice_log:

@@ -14,9 +14,32 @@ import Foundation
 
 extension Notification.Name {
     /// Posted (on the main queue) after a tool successfully writes a
-    /// new file into the app's Documents/ directory. Payload is empty
-    /// — LibraryVM re-scans on receipt rather than trying to insert
-    /// the single new URL, since the scanner is the source of truth
-    /// for metadata + iCloud state.
+    /// new file into the app's Documents/ directory. LibraryVM re-scans
+    /// on receipt — the scanner is the source of truth for metadata +
+    /// iCloud state.
+    ///
+    /// Optional `userInfo` key: `documentsDidChangeSuggestedStatuses`
+    /// — `[String: String]` mapping `url.absoluteString → DocumentStatus.rawValue`.
+    /// For brand-new files (no existing metadata), LibraryVM uses this
+    /// to assign a meaningful initial status instead of always defaulting
+    /// to `.draft`. Example: Sign → `.done`, Merge → `.draft`.
     static let documentsDidChange = Notification.Name("com.wordoffice.documentsDidChange")
+
+    /// `userInfo` key for `documentsDidChange` — value is `[String: String]`.
+    static let documentsDidChangeSuggestedStatuses = "documentsDidChangeSuggestedStatuses"
+}
+
+extension NotificationCenter {
+    /// Posts `.documentsDidChange` with an optional per-URL status hint.
+    /// Call from the main queue (all tool VMs are `@MainActor`).
+    func postDocumentsDidChange(_ statuses: [URL: DocumentStatus] = [:]) {
+        var userInfo: [AnyHashable: Any]? = nil
+        if !statuses.isEmpty {
+            userInfo = [
+                Notification.Name.documentsDidChangeSuggestedStatuses:
+                    Dictionary(uniqueKeysWithValues: statuses.map { ($0.key.absoluteString, $0.value.rawValue) })
+            ]
+        }
+        post(name: .documentsDidChange, object: nil, userInfo: userInfo)
+    }
 }

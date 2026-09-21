@@ -47,6 +47,8 @@ final class FillFormViewModel {
         sourceURL = url
         annotations = []
         pdfDocument = nil
+        isProcessing = true
+        defer { isProcessing = false }
         // Load PDFDocument off-main so the `.fill` stage's `PDFView`
         // representable installs an already-parsed doc synchronously
         // (F8) and the page indicator has the real count on first
@@ -141,7 +143,7 @@ final class FillFormViewModel {
                 documentsURL: documentsURL
             )
             if result.isInDocumentsFolder {
-                NotificationCenter.default.post(name: .documentsDidChange, object: nil)
+                NotificationCenter.default.postDocumentsDidChange([result.finalURL: .done])
             }
             errorMessage = nil
             return result.finalURL

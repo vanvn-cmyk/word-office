@@ -66,6 +66,20 @@ final class LibraryStore {
     func clear() {
         entries = []
     }
+
+    // MARK: - New-file badge (tool output tracking)
+
+    /// URLs committed to the library by tool operations in the current session.
+    /// Views show a "New" badge on these entries; badge clears when the user taps the file.
+    var recentlyAddedURLs: Set<URL> = []
+
+    func markAsNew(_ url: URL) {
+        recentlyAddedURLs.insert(url)
+    }
+
+    func clearNew(_ url: URL) {
+        recentlyAddedURLs.remove(url)
+    }
 }
 
 /// Runtime state for the granted folder. `.checking` covers the async gap

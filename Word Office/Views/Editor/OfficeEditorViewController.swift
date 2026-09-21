@@ -12,6 +12,10 @@ import WebKit
 ///  5. When JS sends `save`, `onFileSaved` is called with the new Data + suggested file name.
 final class OfficeEditorViewController: UIViewController {
 
+    // Shared content process pool — reusing the same process avoids the ~300-500ms
+    // cold-start overhead when the editor is reopened within the same app session.
+    private static let processPool = WKProcessPool()
+
     // MARK: - Properties
 
     private var webView: WKWebView!
@@ -62,6 +66,12 @@ final class OfficeEditorViewController: UIViewController {
         NotificationCenter.default.removeObserver(self)
     }
 
+    override func didReceiveMemoryWarning() {
+        super.didReceiveMemoryWarning()
+        // Release in-memory image cache to ease pressure before iOS kills the process.
+        schemeHandler.clearImageCache()
+    }
+
     // MARK: - Public API
 
     func openFile(at url: URL) {
@@ -95,14 +105,20 @@ final class OfficeEditorViewController: UIViewController {
         pc.present(animated: true, completionHandler: nil)
     }
 
-    /// Store image bytes in OfficeSchemeHandler and tell JS to insert via
-    /// `office://host/img/<uuid>` URL — avoids passing large base64 through the
-    /// JS bridge, which spikes WKWebView memory and triggers iOS OOM kills.
+    /// Inserts an image by converting to a data URL and using insertImageByDataURL,
+    /// which creates an inner-frame blob URL before calling asc_insertImageFromUrl.
+    /// Must NOT use insertImageByURL with a data: URL — that path calls AddImageUrl([dataURL])
+    /// which triggers OO's internal HTTP loader, showing "Loading Image" and hanging
+    /// because OO's WASM HTTP client cannot fetch data: scheme URLs.
     func insertImage(data: Data, mimeType: String = "image/jpeg") {
         guard scriptReady else { return }
-        let officeURL = schemeHandler.storeImage(data: data, mimeType: mimeType)
-        let urlJS = jsStringLiteral(officeURL)
-        webView.evaluateJavaScript("window.insertImageByURL(\(urlJS));")
+        let b64 = data.base64EncodedString()
+        // Store to window property first to avoid parsing a 700KB string literal inline.
+        webView.evaluateJavaScript("window.__pendingImg = 'data:\(mimeType);base64,\(b64)';") { [weak self] _, _ in
+            self?.webView.evaluateJavaScript(
+                "window.insertImageByDataURL(window.__pendingImg); window.__pendingImg = null;"
+            )
+        }
     }
 
     /// Sends the user's filter selection back to the hidden OO filter panel.
@@ -136,6 +152,76 @@ final class OfficeEditorViewController: UIViewController {
         guard scriptReady else { return }
         let typeJS = jsStringLiteral(type)
         webView.evaluateJavaScript("window._insertChart(\(typeJS));")
+    }
+
+    /// Inserts a table using a direct ONLYOFFICE API sequence.
+    /// Bypasses `window.execEditorCommand('insert-table')` which falls back to
+    /// `_clickOOBtn` — clicking OO's hidden toolbar button opens OO's native
+    /// insert-table dialog, which crashes WKWebView on iOS (same mechanism as chart wizard).
+    func insertTable(rows: Int, cols: Int) {
+        guard scriptReady else { return }
+        let r = rows, c = cols
+        let js = """
+        (function(r,c){
+          try {
+            var ed = window._innerWin && window._innerWin.Asc && window._innerWin.Asc.editor;
+            if (!ed) return;
+            var done = false;
+            // Word/PPT APIs first — asc_addTable and put_Table both accept (rows, cols).
+            // asc_fmtTableApply is Excel-only (formats selection as table); calling it in
+            // Word silently succeeds without inserting anything, blocking the real APIs.
+            // put_Table is Word-only — use it first. asc_addTable is Excel-only and may
+            // silently succeed in Word without inserting anything, blocking the real API.
+            var pairs = [
+              ['put_Table',         function(){ ed.put_Table(r, c); }],
+              ['asc_addTable',      function(){ ed.asc_addTable(r, c); }],
+              ['CreateTable',       function(){ ed.CreateTable(r, c); }],
+              ['asc_fmtTableApply', function(){ ed.asc_fmtTableApply(null, null, true); }],
+              ['asc_insertTable',   function(){ ed.asc_insertTable(); }],
+            ];
+            for (var i = 0; i < pairs.length; i++) {
+              if (!done && typeof ed[pairs[i][0]] === 'function') {
+                try { pairs[i][1](); done = true; console.log('[iOS] insertTable via', pairs[i][0]); } catch(e) { console.warn('[iOS] insertTable', pairs[i][0], e); }
+              }
+            }
+          } catch(e) {}
+        })(\(r), \(c));
+        """
+        webView.evaluateJavaScript(js)
+    }
+
+    /// Inserts a text box on the current PPT slide via window._insertTextBox.
+    /// That function uses StartAddShape('textRect') + mouse simulation to draw the box
+    /// at a centred position, then auto-double-clicks to enter text-edit mode immediately.
+    func insertTextBox() {
+        guard scriptReady else { return }
+        webView.evaluateJavaScript("window._insertTextBox();")
+    }
+
+    /// Inserts a Unicode symbol/special character at the current cursor position.
+    /// Tries ONLYOFFICE's internal typeText APIs, falls back to execCommand insertText.
+    func insertSymbol(_ char: String) {
+        guard scriptReady else { return }
+        let charJS = jsStringLiteral(char)
+        let js = """
+        (function(c) {
+          var ed = window._innerWin && window._innerWin.Asc && window._innerWin.Asc.editor;
+          if (ed) {
+            if (typeof ed.asc_typeText === 'function') { try { ed.asc_typeText(c); return; } catch(_) {} }
+            if (typeof ed.asc_TypeText === 'function') { try { ed.asc_TypeText(c); return; } catch(_) {} }
+          }
+          try {
+            window._innerWin && window._innerWin.focus();
+            var iDoc = window._innerWin && window._innerWin.document;
+            if (iDoc) {
+              var sdk = iDoc.getElementById('editor_sdk') || iDoc.body;
+              sdk.focus();
+              iDoc.execCommand('insertText', false, c);
+            }
+          } catch(_) {}
+        })(\(charJS));
+        """
+        webView.evaluateJavaScript(js)
     }
 
     /// Inserts a shape via window._insertShape. The type is an OO shape preset name (rect, ellipse, etc.).
@@ -176,16 +262,21 @@ final class OfficeEditorViewController: UIViewController {
     // MARK: - JS string helpers
 
     /// Returns a JS string literal (with surrounding quotes and proper escaping) for the given Swift string.
+    /// Uses JSONEncoder — JSONSerialization requires Array/Dictionary at top level and throws NSException
     private func jsStringLiteral(_ s: String) -> String {
-        guard let data = try? JSONSerialization.data(withJSONObject: s),
-              let str  = String(data: data, encoding: .utf8) else { return "\"\"" }
-        return str
+        if let data = try? JSONEncoder().encode(s),
+           let str  = String(data: data, encoding: .utf8) { return str }
+        return "\"\""
     }
 
     // MARK: - Setup
 
     private func setupWebView() {
         let config = WKWebViewConfiguration()
+
+        // Share the content process across editor instances so reopening a document
+        // reuses the warm process instead of spawning a new one (~300-500ms savings).
+        config.processPool = Self.processPool
 
         // Register `office://` custom scheme for local bundle assets + in-memory stores
         config.setURLSchemeHandler(schemeHandler, forURLScheme: "office")
@@ -825,6 +916,11 @@ final class OfficeEditorViewController: UIViewController {
         webView.scrollView.bounces = false
         webView.scrollView.showsVerticalScrollIndicator = false
         webView.scrollView.showsHorizontalScrollIndicator = false
+        // Prevent UIScrollView from delaying touches to detect scrolling — the toolbar
+        // rows are ScrollViews and this makes button taps feel immediate.
+        webView.scrollView.delaysContentTouches = false
+        // Suppress long-press link preview (300ms delay on every tap in the WebView).
+        webView.allowsLinkPreview = false
         webView.isOpaque = false
         webView.backgroundColor = .systemBackground
         webView.translatesAutoresizingMaskIntoConstraints = false

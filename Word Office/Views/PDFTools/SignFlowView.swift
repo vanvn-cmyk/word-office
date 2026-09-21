@@ -20,6 +20,17 @@ struct SignFlowView: View {
     /// `ToolsTabView.destinationView` doesn't need a special-case.
     var initialSource: FilePickerSource? = nil
     var onOpenFile: ((URL) -> Void)? = nil
+    /// When Sign is invoked from the officeToPDF success screen (source =
+    /// `.prePickedURLs`), this callback receives the STAGED (uncommitted)
+    /// signed PDF temp URL instead of showing `PreviewConfirmSheet`.
+    /// ConvertFlowView's binding updates its preview to the signed version;
+    /// the user taps Done on the success screen to commit the final file.
+    var onPrePickedSigned: ((URL) -> Void)? = nil
+    /// When Sign is invoked from the imageToPDF success screen, this
+    /// callback receives the COMMITTED signed URL immediately (no
+    /// PreviewConfirmSheet, no Done step). The success screen refreshes
+    /// its preview to the signed version automatically.
+    var onAutoCommitSigned: ((URL) -> Void)? = nil
 
     @State private var isPickerPresented = false
     @State private var isLibraryPickerPresented = false
@@ -59,6 +70,11 @@ struct SignFlowView: View {
             }
         }
         .prominentInlineTitle(isLibraryPickerPresented ? "Cabinet" : "Sign")
+        .navigationBarBackButtonHidden(
+            isLibraryPickerPresented ||
+            (!didAutoPresent && initialSource == .library) ||
+            (viewModel.stage == .fill && initialSource == .library)
+        )
         .toolbar { toolbarContent }
         // `signatureVM` is a single instance shared across every push into
         // this destination (`ToolsTabView` creates it once, not per-push) —
@@ -84,11 +100,16 @@ struct SignFlowView: View {
                           onLibrary: { isLibraryPickerPresented = true },
                           onBrowse: { isPickerPresented = true })
         .task {
-            guard !didAutoPresent, let source = initialSource, viewModel.stage == .pickPDF else { return }
+            guard !didAutoPresent, let source = initialSource else { return }
             didAutoPresent = true
             switch source {
-            case .library: isLibraryPickerPresented = true
-            case .browse:  isPickerPresented = true
+            case .prePickedURLs(let urls):
+                if let url = urls.first { await viewModel.selectPDF(url) }
+            case .library:
+                guard viewModel.stage == .pickPDF else { return }
+                isLibraryPickerPresented = true
+            case .browse:
+                isPickerPresented = true
             }
         }
         .sheet(item: $pendingPlacement) { pending in
@@ -102,11 +123,12 @@ struct SignFlowView: View {
         .sheet(item: $previewPayload, onDismiss: {
             if shouldDismissAfterPreviewCloses {
                 shouldDismissAfterPreviewCloses = false
-                // Reset AFTER the sheet has left the screen so the empty
-                // `.pickPDF` state isn't visible during the dismiss
-                // animation (F11).
                 viewModel.reset()
-                dismiss()
+                if initialSource == .library {
+                    isLibraryPickerPresented = true
+                } else {
+                    dismiss()
+                }
             }
         }) { payload in
             PreviewConfirmSheet(
@@ -127,6 +149,17 @@ struct SignFlowView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
+        // Back to cabinet when user came via library and is in the fill stage.
+        if viewModel.stage == .fill && initialSource == .library {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    viewModel.reset()
+                    isLibraryPickerPresented = true
+                } label: {
+                    Image(systemName: "chevron.left").fontWeight(.semibold).foregroundStyle(Color.dsBrandPrimary)
+                }
+            }
+        }
         if viewModel.stage == .fill {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save") { Task { await performSave() } }
@@ -151,8 +184,12 @@ struct SignFlowView: View {
                 emptyMessage: "Import PDF files first — they'll appear here."
             ) { urls in
                 guard let url = urls.first else { return }
-                isLibraryPickerPresented = false
-                handleFilePicked(.success(url))
+                // Keep picker visible while PDF loads → stage .pickPDF→.fill
+                // with cabinet behind; body switches to fillStage directly.
+                Task {
+                    await viewModel.selectPDF(url)
+                    isLibraryPickerPresented = false
+                }
             } onCancel: {
                 isDismissingFromPicker = true
                 isLibraryPickerPresented = false
@@ -173,7 +210,8 @@ struct SignFlowView: View {
 
     private func handleFilePicked(_ result: Result<URL, Error>) {
         if case .success(let url) = result {
-            isLibraryPickerPresented = false
+            // isLibraryPickerPresented is managed by the cabinet callback;
+            // browse path has system picker already dismissed — nothing to clear.
             Task { await viewModel.selectPDF(url) }
         }
     }
@@ -191,7 +229,8 @@ struct SignFlowView: View {
                     placement: viewModel.placement,
                     onTapPDF: handlePDFTap,
                     onMoveViaDrag: viewModel.movePlacement,
-                    onClearSignature: viewModel.clearSignature
+                    onClearSignature: viewModel.clearSignature,
+                    onScalePlacement: viewModel.scalePlacement
                 )
             }
         } else {
@@ -245,12 +284,36 @@ struct SignFlowView: View {
         }
     }
 
-    /// User tapped Save in toolbar — stage a preview to temp then
-    /// present the confirm sheet. Nothing lands in Documents/ until
-    /// they explicitly Confirm.
+    /// User tapped Save in toolbar — stage a preview to temp then:
+    /// • `onAutoCommitSigned` wired (imageToPDF): commit immediately, pass
+    ///   committed URL back, dismiss — no PreviewConfirmSheet.
+    /// • `onPrePickedSigned` wired (officeToPDF/merge/split): pass staged
+    ///   temp URL back; the success screen's Done commits it later.
+    /// • Otherwise: show `PreviewConfirmSheet` for save-mode selection.
     private func performSave() async {
         guard let staged = await viewModel.stagePreview() else { return }
-        previewPayload = PreviewPayload(url: staged)
+        if let callback = onAutoCommitSigned {
+            // imageToPDF path — auto-commit, no user confirmation needed.
+            // No toast here: the caller's success screen is the confirmation,
+            // and a toast fired just before dismiss() bleeds through to it.
+            guard let committed = await viewModel.commitPreview(staged, mode: .newFile) else { return }
+            store.markAsNew(committed)
+            callback(committed)
+            viewModel.reset()
+            dismiss()
+        } else if let callback = onPrePickedSigned {
+            // Called from officeToPDF success screen — skip PreviewConfirmSheet.
+            // Delete the original officeToPDF temp; Done on the success screen
+            // commits the signed staged version via ConvertFlowView's binding.
+            if let sourceURL = viewModel.sourceURL {
+                try? FileManager.default.removeItem(at: sourceURL.deletingLastPathComponent())
+            }
+            callback(staged)
+            viewModel.reset()
+            dismiss()
+        } else {
+            previewPayload = PreviewPayload(url: staged)
+        }
     }
 
     private func commitSave(_ stagedURL: URL, mode: PreviewSaveMode) async {
@@ -281,12 +344,13 @@ struct SignFlowView: View {
         let toastFilename: String
         switch mode {
         case .newFile:
-            toastTitle = "Your signed document was saved to Home"
+            toastTitle = "Your signed document was saved to your Library"
             toastFilename = final.lastPathComponent
         case .replaceOriginal:
             toastTitle = "The original file has been replaced"
             toastFilename = viewModel.sourceURL?.lastPathComponent ?? final.lastPathComponent
         }
+        if mode == .newFile { store.markAsNew(final) }
         toaster.show(.success, title: toastTitle, filename: toastFilename)
         // Dismiss FIRST, then reset — flipping stage back to `.pickPDF`
         // while the preview sheet is still animating out would flash the
@@ -297,12 +361,11 @@ struct SignFlowView: View {
             previewPayload = nil
         } else {
             viewModel.reset()
-            // User swipe-dismissed the preview sheet while commitPreview was
-            // running. onDismiss already fired with flag=false (no pop). The
-            // sheet is gone, so setting previewPayload=nil is a no-op and
-            // onDismiss won't fire again — pop directly instead of leaving
-            // shouldDismissAfterPreviewCloses=true to trip on the next Cancel.
-            dismiss()
+            if initialSource == .library {
+                isLibraryPickerPresented = true
+            } else {
+                dismiss()
+            }
         }
     }
 }
@@ -317,7 +380,9 @@ struct SignatureDrawSheet: View {
     let onCancel: () -> Void
 
     @State private var drawing = PKDrawing()
-    @State private var isClearConfirmationPresented = false
+    @State private var signCanvas: PKCanvasView?
+    @State private var canUndo = false
+    @State private var canRedo = false
 
     var body: some View {
         NavigationStack {
@@ -328,15 +393,20 @@ struct SignatureDrawSheet: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, DSSpacing.md)
 
-                SignatureCanvasView(drawing: $drawing)
-                    .frame(maxWidth: .infinity, minHeight: 220)
-                    .background(Color.dsBackgroundElevated, in: RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous)
-                            .stroke(Color.dsBorderSubtle, lineWidth: 1)
-                            .allowsHitTesting(false)
-                    )
-                    .padding(.horizontal, DSSpacing.md)
+                SignatureCanvasView(
+                    drawing: $drawing,
+                    liveCanvas: $signCanvas,
+                    canUndo: $canUndo,
+                    canRedo: $canRedo
+                )
+                .frame(maxWidth: .infinity, minHeight: 220)
+                .background(Color.dsBackgroundElevated, in: RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous)
+                        .stroke(Color.dsBorderSubtle, lineWidth: 1)
+                        .allowsHitTesting(false)
+                )
+                .padding(.horizontal, DSSpacing.md)
 
                 Text("Signature is stored on this device only — never uploaded")
                     .font(DSFont.footnote)
@@ -354,7 +424,7 @@ struct SignatureDrawSheet: View {
                     Button("Cancel", action: onCancel)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Sign here") {
+                    Button("Next") {
                         if let data = drawing.pngData() {
                             onCommit(data)
                         }
@@ -362,28 +432,25 @@ struct SignatureDrawSheet: View {
                     .fontWeight(.semibold)
                     .disabled(drawing.strokes.isEmpty)
                 }
-                ToolbarItem(placement: .bottomBar) {
-                    Button(role: .destructive) {
-                        isClearConfirmationPresented = true
+                ToolbarItemGroup(placement: .bottomBar) {
+                    Button {
+                        signCanvas?.undoManager?.undo()
                     } label: {
-                        Label("Clear", systemImage: "arrow.uturn.backward")
+                        Image(systemName: "chevron.left")
+                            .fontWeight(.semibold)
                     }
-                    .disabled(drawing.strokes.isEmpty)
+                    .disabled(!canUndo)
+
+                    Spacer()
+
+                    Button {
+                        signCanvas?.undoManager?.redo()
+                    } label: {
+                        Image(systemName: "chevron.right")
+                            .fontWeight(.semibold)
+                    }
+                    .disabled(!canRedo)
                 }
-            }
-            // Wiping an in-progress drawing is irreversible (no undo
-            // manager wired to this canvas) — per `~/CLAUDE.md`'s
-            // destructive-action rule, confirm before it's gone.
-            .confirmationDialog(
-                "Clear this signature?",
-                isPresented: $isClearConfirmationPresented,
-                titleVisibility: .visible
-            ) {
-                Button("Clear Signature", role: .destructive) {
-                    drawing = PKDrawing()
-                }
-            } message: {
-                Text("This can't be undone.")
             }
         }
         .presentationDetents([.medium, .large])

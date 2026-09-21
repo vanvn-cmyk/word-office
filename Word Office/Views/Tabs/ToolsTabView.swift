@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Tools home — unified 2-column card grid across Convert / Organize /
 /// Fill & Sign, per approved mockup `Wireframe/Tools-Home-CardGrid-v1.html`.
@@ -49,9 +50,36 @@ struct ToolsTabView: View {
     @State private var navPath = NavigationPath()
     @State private var isImageConvertSheetPresented = false
     /// Set when the user taps a file-requiring tool card. Cleared after
-    /// navigation in `handleSourcePickerDismiss`.
+    /// navigation in `handleSourcePickerDismiss` or `handleDevicePick`.
     @State private var pendingDestination: PDFToolDestination? = nil
     @State private var isSourcePickerPresented = false
+    /// Opens the system file importer on the Tools grid (before navigation)
+    /// when the user picks "Device" from `FileSourcePickerSheet`.
+    @State private var isDevicePickerPresented = false
+    /// URL captured from EditorSheet's Sign/Print quick-action buttons.
+    /// Consumed in `onDismiss` of the editor fullScreenCover to push the
+    /// appropriate tool destination after the cover finishes dismissing.
+    @State private var pendingEditorSignURL: URL? = nil
+    @State private var pendingEditorPrintURL: URL? = nil
+    /// Set before opening the editor from a pdfToWord conversion so
+    /// `handleEditorDismissed` can show a save-confirmation toast.
+    @State private var pendingEditorDoneToast: (title: String, filename: String)? = nil
+    /// Set when the editor is opened from the Scan & OCR flow so that
+    /// `handleEditorDismissed` pops navPath to root instead of leaving the
+    /// user on the blank "Add pages to recognize" screen the flow resets to.
+    @State private var shouldPopNavAfterEditorDismisses = false
+    /// Shared binding for ConvertFlowView's officeToPDF result URL.
+    /// Updated by Sign when invoked from the success screen so the preview refreshes.
+    @State private var officeToPDFResult: URL? = nil
+    /// Signed staged temp URL passed back from Sign when invoked from the Merge
+    /// success screen — MergeView reads this via `@Binding` to update its preview.
+    @State private var mergeSignedResult: URL? = nil
+    /// Same pattern for the Split (single-output) success screen.
+    @State private var splitSignedResult: URL? = nil
+    /// Committed signed URL passed back from Sign when invoked from the
+    /// imageToPDF success screen — ConvertFlowView reads via @Binding to
+    /// update its preview without a PreviewConfirmSheet step.
+    @State private var imageToPDFSignedResult: URL? = nil
 
     init(container: DependencyContainer) {
         self.container = container
@@ -124,9 +152,15 @@ struct ToolsTabView: View {
             .navigationDestination(for: PDFToolDestination.self) { destination in
                 destinationView(for: destination)
             }
-            .fullScreenCover(item: $editingRef) { ref in
-                EditorSheet(container: container, ref: ref)
+            .fullScreenCover(item: $editingRef, onDismiss: handleEditorDismissed) { ref in
+                EditorSheet(
+                    container: container,
+                    ref: ref,
+                    onSign:  { url in pendingEditorSignURL  = url },
+                    onPrint: { url in pendingEditorPrintURL = url }
+                )
             }
+            .toastHost(toaster)
             .sheet(item: $galleryPayload, onDismiss: openPendingEditorIfNeeded) { payload in
                 ToolResultGalleryView(urls: payload.urls) { tappedURL in
                     pendingEditorURL = tappedURL
@@ -140,13 +174,12 @@ struct ToolsTabView: View {
             .sheet(isPresented: $isImageConvertSheetPresented) {
                 ImageConvertPickerSheet { direction in
                     isImageConvertSheetPresented = false
-                    // imageToPDF uses PhotosPicker inside ConvertFlowView —
-                    // no source picker needed. pdfToImage shows source picker
-                    // the same way as other file-requiring tools.
                     if direction == .imageToPDF {
-                        navPath.append(PDFToolDestination.convert(direction))
+                        // imageToPDF uses PhotosPicker inside the tool — no source picker.
+                        navPath.append(PDFToolDestination.convert(direction, source: nil))
                     } else {
-                        isImageConvertSheetPresented = false
+                        // pdfToImage needs a PDF — show the same Cabinet/Device sheet
+                        // as the other tools so the user can pick from either source.
                         pendingDestination = .convert(direction)
                         isSourcePickerPresented = true
                     }
@@ -155,7 +188,23 @@ struct ToolsTabView: View {
             .sheet(isPresented: $isSourcePickerPresented, onDismiss: handleSourcePickerDismiss) {
                 FileSourcePickerSheet(
                     onLibrary: { pendingDestination = withSource(.library) },
-                    onBrowse:  { pendingDestination = withSource(.browse)  },
+                    // Present the UIDocumentPickerViewController directly via UIKit
+                    // on the next run-loop tick (after dismiss() clears rootVC's
+                    // presentedViewController). This lets the file picker animate
+                    // IN concurrently with the source sheet animating OUT —
+                    // eliminating the dead gap a SwiftUI-queued .fileImporter would leave.
+                    onBrowse: {
+                        isDevicePickerPresented = true   // guard for handleSourcePickerDismiss
+                        let types = devicePickerContentTypes
+                        let multi  = devicePickerAllowsMultiple
+                        Task { @MainActor in
+                            DeviceFilePickerCoordinator.present(
+                                allowedTypes: types,
+                                allowsMultipleSelection: multi,
+                                onCompletion: handleDevicePick
+                            )
+                        }
+                    },
                     title: "Choose a source"
                 )
             }
@@ -166,24 +215,51 @@ struct ToolsTabView: View {
     /// be set back into `pendingDestination` before dismiss fires.
     private func withSource(_ source: FilePickerSource) -> PDFToolDestination? {
         switch pendingDestination {
-        case .merge:              return .merge(source: source)
-        case .split:              return .split(source: source)
+        case .merge:               return .merge(source: source)
+        case .split:               return .split(source: source)
         case .convert(let dir, _): return .convert(dir, source: source)
-        case .fillForm:           return .fillForm(source: source)
-        case .sign:               return .sign(source: source)
-        case .print:              return .print(source: source)
-        default:                  return pendingDestination
+        case .fillForm:            return .fillForm(source: source)
+        case .sign:                return .sign(source: source)
+        case .print:               return .print(source: source)
+        default:                   return pendingDestination
         }
     }
 
     /// Called by SwiftUI after the source-picker sheet fully dismisses.
-    /// Navigates to `pendingDestination` only if the user actually selected a
-    /// source (Library or Browse). A swipe-dismiss without picking leaves the
-    /// source nil — skip navigation and just clear pending state.
+    /// Navigates only if the user chose Library. If Device was chosen,
+    /// `isDevicePickerPresented` is already true — skip navigation and keep
+    /// `pendingDestination` so `handleDevicePick` knows where to go.
     private func handleSourcePickerDismiss() {
+        guard !isDevicePickerPresented else { return }
         defer { pendingDestination = nil }
         guard let dest = pendingDestination, sourceWasSelected(dest) else { return }
         navPath.append(dest)
+    }
+
+    /// Fires after the grid-level device file picker completes.
+    /// On success: navigate to the tool with pre-picked URLs.
+    /// On cancel / error: clear pending state.
+    private func handleDevicePick(_ result: Result<[URL], Error>) {
+        defer {
+            pendingDestination = nil
+            isDevicePickerPresented = false
+        }
+        guard case .success(let urls) = result, !urls.isEmpty,
+              let dest = pendingDestination else { return }
+        navPath.append(withPrePickedURLs(urls, for: dest))
+    }
+
+    private func withPrePickedURLs(_ urls: [URL], for dest: PDFToolDestination) -> PDFToolDestination {
+        let src = FilePickerSource.prePickedURLs(urls)
+        switch dest {
+        case .merge:               return .merge(source: src)
+        case .split:               return .split(source: src)
+        case .convert(let dir, _): return .convert(dir, source: src)
+        case .fillForm:            return .fillForm(source: src)
+        case .sign:                return .sign(source: src)
+        case .print:               return .print(source: src)
+        default:                   return dest
+        }
     }
 
     private func sourceWasSelected(_ dest: PDFToolDestination) -> Bool {
@@ -195,6 +271,37 @@ struct ToolsTabView: View {
         default:
             return true
         }
+    }
+
+    /// Allowed content types for the grid-level device file importer,
+    /// derived from which tool the user tapped.
+    private var devicePickerContentTypes: [UTType] {
+        switch pendingDestination {
+        case .merge, .split, .fillForm, .sign:
+            return [.pdf]
+        case .print:
+            return [.pdf, .rtf, .plainText]
+                + ["docx", "doc", "xlsx", "xls", "pptx", "ppt"]
+                    .compactMap { UTType(filenameExtension: $0) }
+        case .convert(let dir, _):
+            switch dir {
+            case .officeToPDF:
+                return ["docx", "doc", "xlsx", "xls", "pptx", "ppt"]
+                    .compactMap { UTType(filenameExtension: $0) }
+            case .pdfToWord, .pdfToImage:
+                return [.pdf]
+            case .imageToPDF:
+                return []  // imageToPDF uses PhotosPicker, not fileImporter
+            }
+        default:
+            return [.pdf]
+        }
+    }
+
+    /// Merge allows multiple selections; all other tools accept one file.
+    private var devicePickerAllowsMultiple: Bool {
+        if case .merge = pendingDestination { return true }
+        return false
     }
 
     /// Big page title on the leading edge, premium crown on the trailing
@@ -233,6 +340,84 @@ struct ToolsTabView: View {
     /// Presents the multi-file gallery sheet.
     private func showGallery(_ urls: [URL]) {
         galleryPayload = GalleryPayload(urls: urls)
+    }
+
+    /// Pushes Sign on top of the current nav stack (e.g. the officeToPDF or
+    /// imageToPDF success screen), pre-loading `url`. Dismiss from Sign pops back
+    /// to the caller — NOT to Tools home.
+    private func navigateToSign(_ url: URL) {
+        navPath.append(PDFToolDestination.signFromOfficeToPDF(source: .prePickedURLs([url])))
+    }
+
+    private func navigateToSignFromMerge(_ url: URL) {
+        mergeSignedResult = nil
+        navPath.append(PDFToolDestination.signFromMerge(source: .prePickedURLs([url])))
+    }
+
+    private func navigateToSignFromSplit(_ url: URL) {
+        splitSignedResult = nil
+        navPath.append(PDFToolDestination.signFromSplit(source: .prePickedURLs([url])))
+    }
+
+    private func navigateToSignFromImageToPDF(_ url: URL) {
+        imageToPDFSignedResult = nil
+        navPath.append(PDFToolDestination.signFromImageToPDF(source: .prePickedURLs([url])))
+    }
+
+    private func navigateToPrint(_ url: URL) {
+        navPath.append(PDFToolDestination.print(source: .prePickedURLs([url])))
+    }
+
+    private func convertView(direction: ConvertDirection, source: FilePickerSource?) -> ConvertFlowView {
+        // officeToPDF lifts its result URL into ToolsTabView so Sign can update
+        // the preview via the shared binding when invoked from the success screen.
+        let resultBinding: Binding<URL?> = direction == .officeToPDF ? $officeToPDFResult : .constant(nil)
+        var view = ConvertFlowView(viewModel: pdfToolsVM, direction: direction, initialSource: source, onOpenFile: openFile, onShowGallery: showGallery, conversionResult: resultBinding)
+        if direction == .officeToPDF {
+            view.onOpenFile = nil
+            view.onSign = navigateToSign
+            view.onPrint = navigateToPrint
+        } else if direction == .pdfToWord {
+            view.onOpenFile = { [self] url in
+                pendingEditorDoneToast = (title: "Word file saved to your Library", filename: url.lastPathComponent)
+                openFile(url)
+            }
+        } else if direction == .imageToPDF {
+            view.onOpenFile = nil
+            view.onSign = { [self] url in navPath.append(PDFToolDestination.signFromImageToPDF(source: .prePickedURLs([url]))) }
+            view.onPrint = navigateToPrint
+            view.imageToPDFSignedResult = $imageToPDFSignedResult
+        }
+        return view
+    }
+
+    /// Fires from EditorSheet's `onDismiss` fullScreenCover callback.
+    /// navPath is only replaced when the user triggered Sign or Print from
+    /// inside the editor (pendingEditor* set). Otherwise navPath is left
+    /// untouched so Done returns the user to the screen they came from
+    /// (cabinet, device picker, etc.) — never to the Tools home grid.
+    private func handleEditorDismissed() {
+        if let url = pendingEditorSignURL {
+            pendingEditorSignURL = nil
+            navPath = NavigationPath()
+            navPath.append(PDFToolDestination.sign(source: .prePickedURLs([url])))
+        } else if let url = pendingEditorPrintURL {
+            pendingEditorPrintURL = nil
+            navPath = NavigationPath()
+            navPath.append(PDFToolDestination.print(source: .prePickedURLs([url])))
+        }
+        // Show save-confirmation toast when returning from a pdfToWord editor session.
+        if let toast = pendingEditorDoneToast {
+            pendingEditorDoneToast = nil
+            toaster.show(.success, title: toast.title, filename: toast.filename)
+        }
+        // Scan & OCR resets itself to an empty add-pages screen after saving, so
+        // returning to it after editor Done is a dead end. Pop to Tools home instead.
+        if shouldPopNavAfterEditorDismisses {
+            shouldPopNavAfterEditorDismisses = false
+            navPath = NavigationPath()
+        }
+        // Normal Done/dismiss: navPath unchanged → user returns to previous screen.
     }
 
     /// Fires from the gallery sheet's `onDismiss` — opens whichever file
@@ -427,17 +612,63 @@ struct ToolsTabView: View {
         Group {
             switch destination {
             case .merge(let source):
-                MergeView(viewModel: pdfToolsVM, initialSource: source, onOpenFile: openFile)
+                MergeView(viewModel: pdfToolsVM, initialSource: source, onOpenFile: openFile,
+                          onSign: navigateToSignFromMerge, onPrint: navigateToPrint,
+                          signedResult: $mergeSignedResult)
             case .split(let source):
-                SplitView(viewModel: pdfToolsVM, initialSource: source, onOpenFile: openFile, onShowGallery: showGallery)
+                SplitView(viewModel: pdfToolsVM, initialSource: source, onOpenFile: openFile, onShowGallery: showGallery,
+                          onSign: navigateToSignFromSplit, onPrint: navigateToPrint,
+                          signedResult: $splitSignedResult)
             case .convert(let direction, let source):
-                ConvertFlowView(viewModel: pdfToolsVM, direction: direction, initialSource: source, onOpenFile: openFile, onShowGallery: showGallery)
+                convertView(direction: direction, source: source)
             case .scan:
-                ScanFlowView(viewModel: ocrVM, onOpenFile: openFile, onShowGallery: showGallery)
+                ScanFlowView(
+                    viewModel: ocrVM,
+                    onOpenFile: { [self] url in
+                        shouldPopNavAfterEditorDismisses = true
+                        openFile(url)
+                    },
+                    onShowGallery: { [self] urls in
+                        shouldPopNavAfterEditorDismisses = true
+                        showGallery(urls)
+                    }
+                )
             case .fillForm(let source):
                 FillFormView(viewModel: fillFormVM, initialSource: source, onOpenFile: openFile)
             case .sign(let source):
-                SignFlowView(viewModel: signatureVM, initialSource: source, onOpenFile: openFile)
+                SignFlowView(
+                    viewModel: signatureVM,
+                    initialSource: source,
+                    onOpenFile: openFile
+                )
+            case .signFromOfficeToPDF(let source):
+                SignFlowView(
+                    viewModel: signatureVM,
+                    initialSource: source,
+                    onOpenFile: openFile,
+                    onPrePickedSigned: { signedURL in officeToPDFResult = signedURL }
+                )
+            case .signFromMerge(let source):
+                SignFlowView(
+                    viewModel: signatureVM,
+                    initialSource: source,
+                    onOpenFile: openFile,
+                    onPrePickedSigned: { signedURL in mergeSignedResult = signedURL }
+                )
+            case .signFromSplit(let source):
+                SignFlowView(
+                    viewModel: signatureVM,
+                    initialSource: source,
+                    onOpenFile: openFile,
+                    onPrePickedSigned: { signedURL in splitSignedResult = signedURL }
+                )
+            case .signFromImageToPDF(let source):
+                SignFlowView(
+                    viewModel: signatureVM,
+                    initialSource: source,
+                    onOpenFile: openFile,
+                    onAutoCommitSigned: { committedURL in imageToPDFSignedResult = committedURL }
+                )
             case .print(let source):
                 PrintFlowView(viewModel: pdfToolsVM, initialSource: source)
             }
@@ -464,17 +695,16 @@ private struct ToolCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             IconBadge(systemImage: icon, tint: tint, size: 34)
-            Spacer(minLength: DSSpacing.md)
             Text(title)
                 .font(DSFont.callout.weight(.semibold))
                 .foregroundStyle(Color.dsTextPrimary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.9)
+                .padding(.top, DSSpacing.md)
             Text(subtitle)
                 .font(DSFont.footnote)
                 .foregroundStyle(Color.dsTextTertiary)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(2, reservesSpace: true)
                 .padding(.top, 2)
         }
         .toolCardSurface()
@@ -508,17 +738,16 @@ private struct ConvertToolCard: View {
                     .foregroundStyle(Color.dsTextTertiary.opacity(0.7))
                 IconBadge(systemImage: trailingIcon, tint: trailingTint, size: 30)
             }
-            Spacer(minLength: DSSpacing.md)
             Text(direction.title)
                 .font(DSFont.callout.weight(.semibold))
                 .foregroundStyle(Color.dsTextPrimary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.9)
+                .padding(.top, DSSpacing.md)
             Text(subtitle)
                 .font(DSFont.footnote)
                 .foregroundStyle(Color.dsTextTertiary)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(2, reservesSpace: true)
                 .padding(.top, 2)
         }
         .toolCardSurface()
@@ -561,7 +790,7 @@ private struct ConvertToolCard: View {
     }
     private var subtitle: LocalizedStringKey {
         switch direction {
-        case .officeToPDF: "From Word, Excel or PowerPoint"
+        case .officeToPDF: "From Word documents"
         case .pdfToWord:   "Save as an editable Word file"
         case .pdfToImage:  "Export each page as an image"
         case .imageToPDF:  "Combine photos into one PDF"
@@ -640,7 +869,7 @@ private struct ToolCardSurface: ViewModifier {
     func body(content: Content) -> some View {
         content
             .padding(DSSpacing.md - 2) // 14pt
-            .frame(maxWidth: .infinity, minHeight: 120, alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: 152, maxHeight: 152, alignment: .topLeading)
             .background(
                 RoundedRectangle(cornerRadius: corner, style: .continuous)
                     .fill(surfaceFill)

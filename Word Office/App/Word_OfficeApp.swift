@@ -24,6 +24,8 @@ struct Word_OfficeApp: App {
     /// App-scope toast presenter — injected via `.environment(_:)` so any
     /// view can trigger a bottom toast via `@Environment(DSToastPresenter.self)`.
     @State private var toastPresenter = DSToastPresenter()
+    @State private var usageTracker = AppUsageTracker()
+    @State private var feedbackTrigger = FeedbackTriggerService()
 
     @Environment(\.scenePhase) private var scenePhase
     @State private var isShowingSplash = true
@@ -37,6 +39,8 @@ struct Word_OfficeApp: App {
                     .environment(sessionStore)
                     .environment(libraryStore)
                     .environment(toastPresenter)
+                    .environment(usageTracker)
+                    .environment(feedbackTrigger)
                     .preferredColorScheme(themeStore.preferredColorScheme)
                     .tint(Color.dsBrandPrimary)
                     .onChange(of: scenePhase) { _, newPhase in
@@ -66,16 +70,32 @@ struct Word_OfficeApp: App {
         }
     }
 
-    /// Flush the pending autosave when the app enters background so an OS kill
-    /// cannot lose the last 2 s of edits (the debounce window that the scheduler
-    /// would otherwise wait out). MVP has a single active editor at a time —
-    /// tracked via `SessionStore.currentDocument`. Multi-doc future: iterate all
-    /// pending IDs held by the scheduler.
+    /// Handles app lifecycle transitions:
+    /// - `.background`: flush autosave + reschedule re-engagement notifications.
+    /// - `.active`:     cancel re-engagement (user is back — no point nagging).
+    @MainActor
     private func handleScenePhaseChange(_ phase: ScenePhase) {
-        guard phase == .background else { return }
-        guard let ref = sessionStore.currentDocument else { return }
-        let scheduler = container.autosaveScheduler
-        let id = ref.id
-        Task { await scheduler.flush(id: id) }
+        switch phase {
+        case .background:
+            usageTracker.didEnterBackground()
+            // Flush pending autosave
+            if let ref = sessionStore.currentDocument {
+                let autosave = container.autosaveScheduler
+                let id = ref.id
+                Task { await autosave.flush(id: id) }
+            }
+            // Reschedule re-engagement with the current draft count.
+            // draftCount = 0 → cancelReEngagement() inside scheduleReEngagement.
+            let draftCount = libraryStore.draftCount
+            Task { await LocalNotificationScheduler.shared.scheduleReEngagement(draftCount: draftCount) }
+
+        case .active:
+            usageTracker.didBecomeActive()
+            // User opened the app — remove any pending re-engagement notifications.
+            LocalNotificationScheduler.shared.cancelReEngagement()
+
+        default:
+            break
+        }
     }
 }

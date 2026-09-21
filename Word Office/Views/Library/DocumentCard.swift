@@ -17,8 +17,12 @@ struct DocumentCard: View {
     var onMarkDone: (() -> Void)? = nil
     var onDeleteFile: (() -> Void)? = nil
 
+    @Environment(LibraryStore.self) private var libraryStore
+
     var body: some View {
+        let isNew = libraryStore.recentlyAddedURLs.contains(entry.document.url)
         Button {
+            libraryStore.clearNew(entry.document.url)
             onTap?()
         } label: {
             HStack(spacing: DSSpacing.sm) {
@@ -26,14 +30,18 @@ struct DocumentCard: View {
                     .frame(width: 36, height: 36)
 
                 VStack(alignment: .leading, spacing: DSSpacing.xxs) {
-                    Text(entry.document.name)
-                        .font(DSFont.headline)
-                        .foregroundStyle(Color.dsTextPrimary)
-                        .lineLimit(1)
-                        // Room for the trailing icon column so a long
-                        // filename elides before running under the star/
-                        // kebab instead of behind them.
-                        .padding(.trailing, 30)
+                    HStack(alignment: .center, spacing: DSSpacing.xs) {
+                        Text(entry.document.name)
+                            .font(DSFont.headline)
+                            .foregroundStyle(Color.dsTextPrimary)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if isNew { NewBadge() }
+                    }
+                    // Room for the trailing icon column so a long
+                    // filename elides before running under the star/
+                    // kebab instead of behind them.
+                    .padding(.trailing, 30)
 
                     // `StatusPill` paused from rendering here 2026-09-13 —
                     // Home now groups rows by status section (Draft/
@@ -231,6 +239,10 @@ struct FileActionsMenu: View {
     /// menu subview.
     @Environment(DSToastPresenter.self) private var toaster
 
+    private var isZipFile: Bool {
+        shareURL.pathExtension.lowercased() == "zip"
+    }
+
     var body: some View {
         Button {
             // Disable UIKit animations at system level before presenting
@@ -386,7 +398,6 @@ struct FileActionsMenu: View {
                         .transition(.move(edge: .bottom))
                 }
             }
-            .ignoresSafeArea(.container, edges: .bottom)
         }
         .onAppear {
             guard !cardIsPresented else { return }
@@ -418,11 +429,7 @@ struct FileActionsMenu: View {
 
             actionsCard
                 .padding(.horizontal, DSSpacing.md)
-                // sm (12) between the last row and the safe-area edge —
-                // safe area itself is filled by the sheet background
-                // (ignoresSafeArea) so the sheet reads flush with the
-                // screen bottom. Apple sheets use similar tight gap.
-                .padding(.bottom, DSSpacing.sm)
+                .padding(.bottom, DSSpacing.xs)
         }
         .background(
             UnevenRoundedRectangle(
@@ -460,21 +467,24 @@ struct FileActionsMenu: View {
         }
     }
 
-    /// The rows themselves — no card frame around them anymore, because
-    /// the parent `actionsSheet` provides the bottom-anchored rounded-
-    /// top background (Apple bottom-sheet pattern). Hairline dividers
-    /// between rows still indent past the icon column (iOS Settings
-    /// convention).
     private var actionsCard: some View {
         VStack(spacing: 0) {
+            // Filename header — HIG: contextual action sheets show what
+            // they're acting on so the user knows before tapping.
+            Text(shareURL.lastPathComponent)
+                .font(.system(size: 19, weight: .semibold))
+                .foregroundStyle(Color.dsTextPrimary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.horizontal, DSSpacing.md)
+                .padding(.top, DSSpacing.sm)
+                .padding(.bottom, DSSpacing.sm)
+            rowDivider
             actionRow(
                 title: "Rename",
                 systemImage: "pencil"
             ) {
-                // Prefill the alert's field with the current stem so the
-                // user isn't renaming from a blank slate. Delay presenting
-                // the alert until AFTER the sheet's dismiss animation
-                // completes — same 350 ms pattern as the Share flow.
                 renameStem = shareURL.deletingPathExtension().lastPathComponent
                 Task { @MainActor in
                     try? await Task.sleep(for: .milliseconds(350))
@@ -484,38 +494,32 @@ struct FileActionsMenu: View {
             rowDivider
             actionRow(
                 title: "Save to Device",
-                systemImage: "square.and.arrow.down",
-                action: onSaveExport
-            )
-            rowDivider
-            actionRow(
-                title: "Convert to ZIP",
-                systemImage: "doc.zipper",
-                action: onConvertToZip
-            )
-            rowDivider
-            actionRow(
-                title: "Share",
-                systemImage: "square.and.arrow.up"
+                systemImage: "square.and.arrow.down"
             ) {
-                // Sheet dismisses after this block runs; wait one dismiss
-                // animation (~350 ms) so the share sheet slides up onto
-                // a settled screen instead of racing the actions sheet's
-                // exit.
                 Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(350))
-                    isSharePresented = true
+                    try? await Task.sleep(for: .milliseconds(400))
+                    onSaveExport()
+                }
+            }
+            if !isZipFile {
+                rowDivider
+                actionRow(
+                    title: "Convert to ZIP",
+                    systemImage: "doc.zipper",
+                    action: onConvertToZip
+                )
+                rowDivider
+                actionRow(
+                    title: "Share",
+                    systemImage: "square.and.arrow.up"
+                ) {
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(350))
+                        isSharePresented = true
+                    }
                 }
             }
             rowDivider
-            // Favourite toggle moved out to a standalone icon on the row
-            // itself (`DocumentCard.favouriteButton` / the grid tile's
-            // equivalent) — this slot is "Delete File" instead, an
-            // action that had no home anywhere in the app before.
-            // Destructive red (CLAUDE.md: destructive actions get a red
-            // fill/outline), and doesn't delete on tap — opens the
-            // confirmation `.alert` above; `onDelete` only fires from
-            // that alert's "Delete" button.
             actionRow(
                 title: "Delete File",
                 systemImage: "trash",
@@ -530,16 +534,12 @@ struct FileActionsMenu: View {
         }
     }
 
-    /// Hairline separator between rows — indented past the icon column
-    /// (leading inset = card horizontal padding + icon container width +
-    /// icon-text spacing) so dividers only rule the text area. iOS
-    /// Settings / Mail row convention.
     private var rowDivider: some View {
         Rectangle()
-            .fill(Color.dsBorderSubtle.opacity(0.7))
-            .frame(height: 0.5)
-            .padding(.leading, DSSpacing.md + 30 + DSSpacing.sm)
+            .fill(Color.dsBorderSubtle)
+            .frame(height: 1)
     }
+
 
     private func actionRow(
         title: String,
@@ -564,30 +564,18 @@ struct FileActionsMenu: View {
                 Spacer(minLength: DSSpacing.md)
             }
             .padding(.horizontal, DSSpacing.md)
-            // sm (12) vertical — with the 30pt tinted icon container the
-            // row is now ~54pt on its own, so less outer padding keeps the
-            // grouped card compact.
-            .padding(.vertical, DSSpacing.sm)
+            .padding(.vertical, 10)
             .contentShape(Rectangle())
         }
         .buttonStyle(ActionRowButtonStyle())
     }
 
-    /// Tinted rounded-square icon container — iOS Settings row idiom:
-    /// SF Symbol sits inside a soft brand-tinted background so the icon
-    /// column reads as a coherent visual gutter instead of thin bare
-    /// glyphs. `iconColor.opacity(0.12)` gives just enough separation
-    /// from the white card without competing with the text.
     private func actionRowIcon(systemImage: String, tint: Color) -> some View {
         Image(systemName: systemImage)
-            .font(.system(size: 15, weight: .semibold))
+            .font(.system(size: 20, weight: .medium))
             .foregroundStyle(tint)
             .contentTransition(.symbolEffect(.replace))
             .frame(width: 30, height: 30)
-            .background(
-                tint.opacity(0.12),
-                in: RoundedRectangle(cornerRadius: 7, style: .continuous)
-            )
     }
 }
 

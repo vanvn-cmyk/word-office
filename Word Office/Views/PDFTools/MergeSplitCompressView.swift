@@ -11,29 +11,31 @@ struct MergeView: View {
     @Environment(DSToastPresenter.self) private var toaster
     @Environment(LibraryStore.self) private var store
     @Environment(\.dismiss) private var dismiss
-    /// Callback fired after a successful merge — parent (`ToolsTabView`)
-    /// uses it to open the merged file in the editor. Optional so this view
-    /// can be used stand-alone (e.g. previews) without navigation wiring.
+
     var initialSource: FilePickerSource? = nil
     var onOpenFile: ((URL) -> Void)? = nil
+    /// Parent pushes Sign on top of the nav stack with the merged PDF pre-selected.
+    /// Dismiss from Sign pops back to this preview.
+    var onSign: ((URL) -> Void)? = nil
+    var onPrint: ((URL) -> Void)? = nil
+    /// Written by ToolsTabView when Sign completes from the Merge success screen
+    /// — non-nil means Show the signed preview instead of the original merge temp.
+    /// Done button commits the signed URL via `commitToPDF` and clears this binding.
+    @Binding var signedResult: URL?
 
     @State private var urls: [URL] = []
     @State private var isPickerPresented = false
     @State private var isLibraryPickerPresented = false
     @State private var isSourcePickerPresented = false
     @State private var didAutoPresent = false
-    /// Set to the exact `urls` that produced the last successful merge —
-    /// the file list deliberately stays populated after success so the
-    /// user can add more files and merge again, but re-tapping "Merge" on
-    /// that SAME unchanged selection used to silently write a second,
-    /// distinctly-named output. Disabled only while `urls` matches this;
-    /// any add/remove/reorder changes `urls` and re-enables it.
+    /// Set to the exact `urls` snapshot that produced the staged result —
+    /// prevents re-merging the same unchanged selection.
     @State private var lastMergedSnapshot: [URL]?
+    /// Staged temp URL from `mergeToTemp` — non-nil = show preview screen.
+    /// User taps Done to commit to Library, or back chevron to discard.
+    @State private var mergeResultURL: URL?
 
     var body: some View {
-        // No didFinish branch: success shows a toast (see `performMerge`) and
-        // the file list stays visible so the user can add more files and
-        // merge again without navigating back and re-tapping the tool card.
         Group {
             if isLibraryPickerPresented || (initialSource == .library && !didAutoPresent) {
                 InlineCabinetPicker(
@@ -51,6 +53,8 @@ struct MergeView: View {
                 } onBrowse: {
                     isPickerPresented = true
                 }
+            } else if let resultURL = mergeResultURL {
+                mergeResultPreview(resultURL)
             } else if urls.isEmpty {
                 EmptyStateView(
                     icon: "doc.on.doc",
@@ -63,6 +67,7 @@ struct MergeView: View {
             }
         }
         .prominentInlineTitle(isLibraryPickerPresented ? "Cabinet" : "Merge PDFs")
+        .navigationBarBackButtonHidden(mergeResultURL != nil || isLibraryPickerPresented)
         .toolbar { toolbarContent }
         .fileImporter(
             isPresented: $isPickerPresented,
@@ -81,22 +86,47 @@ struct MergeView: View {
                           onLibrary: { isLibraryPickerPresented = true },
                           onBrowse: { isPickerPresented = true })
         .task {
-            guard !didAutoPresent, let source = initialSource, urls.isEmpty else { return }
+            guard !didAutoPresent, let source = initialSource else { return }
             didAutoPresent = true
             switch source {
-            case .library: isLibraryPickerPresented = true
-            case .browse:  isPickerPresented = true
+            case .prePickedURLs(let picked):
+                urls.append(contentsOf: picked)
+            case .library:
+                guard urls.isEmpty else { return }
+                isLibraryPickerPresented = true
+            case .browse:
+                isPickerPresented = true
             }
         }
-        // `viewModel` (`pdfToolsVM`) is shared across Merge/Split/Convert/
-        // Print — a failure left over from whichever of those the user
-        // visited last otherwise pops up here as if it were a Merge error.
         .onAppear { viewModel.errorMessage = nil }
     }
 
+    // MARK: - Toolbar
+
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        if !isLibraryPickerPresented {
+        // Back from result preview → file list (discards temp file).
+        if mergeResultURL != nil {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    if let signed = signedResult {
+                        try? FileManager.default.removeItem(at: signed.deletingLastPathComponent())
+                        signedResult = nil
+                    }
+                    if let url = mergeResultURL {
+                        try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+                        mergeResultURL = nil
+                    }
+                    lastMergedSnapshot = nil
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Color.dsBrandPrimary)
+                }
+            }
+        }
+        // Merge button — hidden on cabinet picker or result preview.
+        if !isLibraryPickerPresented && mergeResultURL == nil {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Merge") { Task { await performMerge() } }
                     .fontWeight(.semibold)
@@ -105,12 +135,77 @@ struct MergeView: View {
         }
     }
 
-    private func handleFilesPicked(_ result: Result<[URL], Error>) {
-        if case .success(let picked) = result {
-            urls.append(contentsOf: picked)
-            isLibraryPickerPresented = false
+    // MARK: - Merge result preview
+
+    @ViewBuilder
+    private func mergeResultPreview(_ url: URL) -> some View {
+        // Show signed version if user went Sign PDF → Done in the Sign flow.
+        let displayURL = signedResult ?? url
+        VStack(spacing: 0) {
+            VStack(spacing: DSSpacing.sm) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 44))
+                    .foregroundStyle(Color.dsBrandPrimary)
+                VStack(spacing: 2) {
+                    Text("PDFs merged")
+                        .font(DSFont.headline)
+                        .foregroundStyle(Color.dsTextPrimary)
+                    Text("\(urls.count) files combined")
+                        .font(DSFont.footnote)
+                        .foregroundStyle(Color.dsTextSecondary)
+                }
+            }
+            .padding(.top, DSSpacing.lg)
+            .padding(.bottom, DSSpacing.md)
+
+            MergePDFFirstPagePreview(url: displayURL)
+                .id(displayURL)
+                .background(Color.dsBackgroundElevated)
+                .clipShape(RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous)
+                        .stroke(Color.dsBorderSubtle, lineWidth: 1)
+                )
+                .padding(.horizontal, DSSpacing.lg)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            VStack(spacing: DSSpacing.xs) {
+                if let onSign {
+                    Button { onSign(displayURL) } label: {
+                        Label("Sign PDF", systemImage: "signature")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .tint(Color.dsBrandPrimary)
+                }
+                if let onPrint {
+                    Button { onPrint(displayURL) } label: {
+                        Label("Print", systemImage: "printer")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .tint(Color.dsBrandPrimary)
+                }
+                Button {
+                    Task { await commitMergeAction(displayURL: displayURL) }
+                } label: {
+                    Text("Done")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .tint(Color.dsBrandPrimary)
+                .disabled(viewModel.isProcessing)
+            }
+            .padding(.horizontal, DSSpacing.lg)
+            .padding(.top, DSSpacing.md)
+            .padding(.bottom, DSSpacing.lg)
         }
     }
+
+    // MARK: - File list
 
     private var fileList: some View {
         List {
@@ -136,9 +231,6 @@ struct MergeView: View {
                     Label("Add more files", systemImage: "plus")
                 }
             } header: {
-                // EditButton inline with the section title — keeps the
-                // toolbar unambiguous ("Merge" = sole primary CTA) while
-                // the Edit/Done toggle lives near the list it controls.
                 HStack {
                     Text("\(urls.count) files · will merge in this order")
                     Spacer()
@@ -150,15 +242,63 @@ struct MergeView: View {
         }
     }
 
+    // MARK: - Actions
+
+    private func handleFilesPicked(_ result: Result<[URL], Error>) {
+        if case .success(let picked) = result {
+            urls.append(contentsOf: picked)
+            isLibraryPickerPresented = false
+        }
+    }
+
     private func performMerge() async {
-        await viewModel.merge(urls)
-        if let url = viewModel.lastMergedURL {
+        if let tempURL = await viewModel.mergeToTemp(urls) {
             lastMergedSnapshot = urls
-            toaster.show(.success, title: "Your document was saved to your Library", filename: url.lastPathComponent)
-            // Navigate straight to the merged file so the user lands on the
-            // result instead of the picker they just used — matches the
-            // "toast then jump to the new file's screen" flow.
-            onOpenFile?(url)
+            mergeResultURL = tempURL
+        }
+    }
+
+    private func commitMergeAction(displayURL: URL) async {
+        guard let tempURL = mergeResultURL else { return }
+        let finalURL: URL?
+        if let signed = signedResult {
+            // Signed version: commit via generic commitToPDF, then clean up the
+            // unsigned merge temp so the staging directory doesn't accumulate.
+            finalURL = await viewModel.commitToPDF(signed)
+            try? FileManager.default.removeItem(at: tempURL.deletingLastPathComponent())
+        } else {
+            finalURL = await viewModel.commitMerge(tempURL)
+        }
+        if let finalURL {
+            store.markAsNew(finalURL)
+            signedResult = nil
+            mergeResultURL = nil
+            urls = []
+            lastMergedSnapshot = nil
+            toaster.show(.success, title: "Your document was saved to your Library", filename: finalURL.lastPathComponent)
+            isSourcePickerPresented = true
+        }
+    }
+}
+
+/// Non-interactive single-page PDFView for the merge result preview screen.
+private struct MergePDFFirstPagePreview: UIViewRepresentable {
+    let url: URL
+
+    func makeUIView(context: Context) -> PDFView {
+        let view = PDFView()
+        view.displayMode = .singlePage
+        view.displayDirection = .horizontal
+        view.autoScales = true
+        view.isUserInteractionEnabled = false
+        view.backgroundColor = .clear
+        view.document = PDFDocument(url: url)
+        return view
+    }
+
+    func updateUIView(_ view: PDFView, context: Context) {
+        if view.document?.documentURL != url {
+            view.document = PDFDocument(url: url)
         }
     }
 }
@@ -170,22 +310,16 @@ struct SplitView: View {
     @Environment(DSToastPresenter.self) private var toaster
     @Environment(LibraryStore.self) private var store
     @Environment(\.dismiss) private var dismiss
-    /// Fires when the split produces exactly one file (single range) — the
-    /// user lands directly in the editor for that file, matching Merge and
-    /// the single-output Convert flows.
+
     var initialSource: FilePickerSource? = nil
     var onOpenFile: ((URL) -> Void)? = nil
-    /// Fires when the split produces two or more files — parent presents
-    /// `ToolResultGalleryView` so the user can review, save-all, share-all,
-    /// or open any individual output. Session 10 gap fix (2026-09-04) —
-    /// the old "navigate to first, hide the rest" default lost visibility
-    /// of the other N-1 outputs behind the tab-back button.
     var onShowGallery: (([URL]) -> Void)? = nil
+    var onSign: ((URL) -> Void)? = nil
+    var onPrint: ((URL) -> Void)? = nil
+    /// Written by ToolsTabView when Sign completes from the Split single-output
+    /// success screen — updates the preview to show the signed version.
+    @Binding var signedResult: URL?
 
-    /// Wraps a page range with a stable identity — `ClosedRange<Int>` alone
-    /// isn't `Identifiable`, and using the array index/offset as `ForEach` id
-    /// (the tempting shortcut) breaks on delete: SwiftUI would reuse the wrong
-    /// row's identity/state for whatever shifted into that offset.
     private struct PageRange: Identifiable {
         let id = UUID()
         let range: ClosedRange<Int>
@@ -200,16 +334,12 @@ struct SplitView: View {
     @State private var isLibraryPickerPresented = false
     @State private var isSourcePickerPresented = false
     @State private var didAutoPresent = false
-    /// Same guard as `MergeView.lastMergedSnapshot` — `ranges` stays
-    /// populated after a successful split so the user can add more ranges
-    /// and split again, but re-tapping "Split" on the SAME unchanged
-    /// ranges used to silently write a second set of output files.
     @State private var lastSplitSnapshot: [ClosedRange<Int>]?
+    /// Staged temp URLs from `splitToTemp` — non-empty = show result screen.
+    /// User taps Done to commit to Library, or back chevron to discard.
+    @State private var splitResultURLs: [URL] = []
 
     var body: some View {
-        // No didFinish branch: success shows a toast (see `performSplit`) and
-        // the configure view stays visible so the user can add more ranges
-        // and split again without navigating back and re-tapping the tool.
         Group {
             if isLibraryPickerPresented {
                 InlineCabinetPicker(
@@ -220,7 +350,9 @@ struct SplitView: View {
                     emptyMessage: "Import PDF files first — they'll appear here."
                 ) { picked in
                     guard let url = picked.first else { return }
-                    isLibraryPickerPresented = false
+                    // Don't close the cabinet here — handleFilePicked's async
+                    // page-count check controls isLibraryPickerPresented so a
+                    // 1-page rejection keeps the cabinet visible (no flash).
                     handleFilePicked(.success(url))
                 } onCancel: {
                     isLibraryPickerPresented = false
@@ -228,6 +360,8 @@ struct SplitView: View {
                 } onBrowse: {
                     isPickerPresented = true
                 }
+            } else if !splitResultURLs.isEmpty {
+                splitResultPreview(splitResultURLs)
             } else if let sourceURL {
                 configureState(sourceURL)
             } else {
@@ -240,6 +374,7 @@ struct SplitView: View {
             }
         }
         .prominentInlineTitle(isLibraryPickerPresented ? "Cabinet" : "Split PDF")
+        .navigationBarBackButtonHidden(!splitResultURLs.isEmpty || isLibraryPickerPresented)
         .toolbar { toolbarContent }
         .fileImporter(isPresented: $isPickerPresented, allowedContentTypes: [.pdf], onCompletion: handleFilePicked)
         .overlay {
@@ -253,22 +388,44 @@ struct SplitView: View {
                           onLibrary: { isLibraryPickerPresented = true },
                           onBrowse: { isPickerPresented = true })
         .task {
-            guard !didAutoPresent, let source = initialSource, sourceURL == nil else { return }
+            guard !didAutoPresent, let source = initialSource else { return }
             didAutoPresent = true
             switch source {
-            case .library: isLibraryPickerPresented = true
-            case .browse:  isPickerPresented = true
+            case .prePickedURLs(let urls):
+                sourceURL = urls.first
+            case .library:
+                guard sourceURL == nil else { return }
+                isLibraryPickerPresented = true
+            case .browse:
+                isPickerPresented = true
             }
         }
-        // `viewModel` (`pdfToolsVM`) is shared across Merge/Split/Convert/
-        // Print — a failure left over from whichever of those the user
-        // visited last otherwise pops up here as if it were a Split error.
         .onAppear { viewModel.errorMessage = nil }
     }
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        if !isLibraryPickerPresented, sourceURL != nil {
+        // Back from result preview → configure screen (discards temp files).
+        if !splitResultURLs.isEmpty {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    if let signed = signedResult {
+                        try? FileManager.default.removeItem(at: signed.deletingLastPathComponent())
+                        signedResult = nil
+                    }
+                    if let firstTemp = splitResultURLs.first {
+                        try? FileManager.default.removeItem(at: firstTemp.deletingLastPathComponent())
+                    }
+                    splitResultURLs = []
+                    lastSplitSnapshot = nil
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Color.dsBrandPrimary)
+                }
+            }
+        }
+        if !isLibraryPickerPresented && splitResultURLs.isEmpty, sourceURL != nil {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Split") { Task { await performSplit() } }
                     .fontWeight(.semibold)
@@ -277,16 +434,139 @@ struct SplitView: View {
         }
     }
 
+    // MARK: - Result preview
+
+    @ViewBuilder
+    private func splitResultPreview(_ urls: [URL]) -> some View {
+        if urls.count == 1, let only = urls.first {
+            // Single output: PDF preview + Done/Sign/Print like merge result.
+            // Show signed version if user went Sign PDF → Done in the Sign flow.
+            let displayURL = signedResult ?? only
+            VStack(spacing: 0) {
+                VStack(spacing: DSSpacing.sm) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 44))
+                        .foregroundStyle(Color.dsBrandPrimary)
+                    VStack(spacing: 2) {
+                        Text("PDF split")
+                            .font(DSFont.headline)
+                            .foregroundStyle(Color.dsTextPrimary)
+                        Text("1 file ready")
+                            .font(DSFont.footnote)
+                            .foregroundStyle(Color.dsTextSecondary)
+                    }
+                }
+                .padding(.top, DSSpacing.lg)
+                .padding(.bottom, DSSpacing.md)
+
+                MergePDFFirstPagePreview(url: displayURL)
+                    .id(displayURL)
+                    .background(Color.dsBackgroundElevated)
+                    .clipShape(RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous)
+                            .stroke(Color.dsBorderSubtle, lineWidth: 1)
+                    )
+                    .padding(.horizontal, DSSpacing.lg)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                VStack(spacing: DSSpacing.xs) {
+                    if let onSign {
+                        Button { onSign(displayURL) } label: {
+                            Label("Sign PDF", systemImage: "signature")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                        .tint(Color.dsBrandPrimary)
+                    }
+                    if let onPrint {
+                        Button { onPrint(displayURL) } label: {
+                            Label("Print", systemImage: "printer")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                        .tint(Color.dsBrandPrimary)
+                    }
+                    Button {
+                        Task { await commitSplitAction(displayURL: displayURL, original: only) }
+                    } label: {
+                        Text("Done")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .tint(Color.dsBrandPrimary)
+                    .disabled(viewModel.isProcessing)
+                }
+                .padding(.horizontal, DSSpacing.lg)
+                .padding(.top, DSSpacing.md)
+                .padding(.bottom, DSSpacing.lg)
+            }
+        } else {
+            // Multiple outputs: list of filenames + Done
+            VStack(spacing: 0) {
+                VStack(spacing: DSSpacing.sm) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 44))
+                        .foregroundStyle(Color.dsBrandPrimary)
+                    VStack(spacing: 2) {
+                        Text("PDF split")
+                            .font(DSFont.headline)
+                            .foregroundStyle(Color.dsTextPrimary)
+                        Text("\(urls.count) files ready")
+                            .font(DSFont.footnote)
+                            .foregroundStyle(Color.dsTextSecondary)
+                    }
+                }
+                .padding(.top, DSSpacing.lg)
+                .padding(.bottom, DSSpacing.sm)
+
+                List {
+                    ForEach(urls, id: \.self) { url in
+                        Label(url.lastPathComponent, systemImage: "doc.fill")
+                            .font(DSFont.body)
+                            .foregroundStyle(Color.dsTextPrimary)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                Button {
+                    Task { await commitSplitAction() }
+                } label: {
+                    Text("Done")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .tint(Color.dsBrandPrimary)
+                .disabled(viewModel.isProcessing)
+                .padding(.horizontal, DSSpacing.lg)
+                .padding(.top, DSSpacing.md)
+                .padding(.bottom, DSSpacing.lg)
+            }
+        }
+    }
+
+    // MARK: - Configure state
+
     private func handleFilePicked(_ result: Result<URL, Error>) {
         guard case .success(let url) = result else { return }
-        sourceURL = url
-        isLibraryPickerPresented = false
+        // Page-count check runs BEFORE we close the cabinet or set sourceURL —
+        // so a 1-page rejection stays on the cabinet (or empty state for browse)
+        // and only shows the toast, without flashing the split form or landing
+        // on "Choose a PDF" instead of the picker.
         Task {
-            // Off the main actor — opening/parsing a large PDF just to read its
-            // page count can still be a noticeable synchronous stall otherwise.
             let count = await Task.detached(priority: .utility) {
                 PDFPageCounter.pageCount(of: url)
             }.value
+            if count < 2 {
+                toaster.show(.error, title: "Can't split — this file has only 1 page", filename: url.lastPathComponent)
+                return
+            }
+            isLibraryPickerPresented = false
+            sourceURL = url
             pageCount = count
             rangeEnd = count
         }
@@ -294,38 +574,7 @@ struct SplitView: View {
 
     @ViewBuilder
     private func configureState(_ url: URL) -> some View {
-        if pageCount == 1 {
-            singlePageWarning(url)
-        } else {
-            splitForm(url)
-        }
-    }
-
-    // A single-page PDF has nothing to split. Instead of a second disconnected
-    // card section, use ContentUnavailableView to fill the screen meaningfully
-    // and give the user a direct action to recover.
-    private func singlePageWarning(_ url: URL) -> some View {
-        VStack(spacing: 0) {
-            List {
-                Section {
-                    DSFileRow(ref: DocumentRef(name: url.lastPathComponent, url: url, modifiedAt: url.contentModificationDateOrNow, kind: .pdf))
-                }
-            }
-            .listStyle(.insetGrouped)
-            .frame(height: 90)
-            .disabled(true)
-
-            ContentUnavailableView {
-                Label("Can't Split This PDF", systemImage: "exclamationmark.triangle")
-            } description: {
-                Text("This file has only 1 page. Choose a PDF with at least 2 pages.")
-            } actions: {
-                Button("Choose a PDF") { isSourcePickerPresented = true }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Color.dsBrandPrimary)
-            }
-        }
-        .background(Color.dsBackgroundSecondary)
+        splitForm(url)
     }
 
     private func splitForm(_ url: URL) -> some View {
@@ -364,28 +613,50 @@ struct SplitView: View {
                     }
                 }
             }
-            // pageCount == 0: async fetch still in flight — show nothing
-            // until the real count lands (avoids a flash of wrong UI).
         }
     }
+
+    // MARK: - Actions
 
     private func performSplit() async {
         guard let sourceURL else { return }
         let requestedRanges = ranges.map(\.range)
-        await viewModel.split(sourceURL, ranges: requestedRanges)
-        let outputs = viewModel.lastSplitURLs
-        guard !outputs.isEmpty else { return }
+        let temps = await viewModel.splitToTemp(sourceURL, ranges: requestedRanges)
+        guard !temps.isEmpty else { return }
         lastSplitSnapshot = requestedRanges
-        let count = outputs.count
-        toaster.show(.success, title: "\(count) file\(count == 1 ? "" : "s") saved to your Library")
-        // Single output → straight to editor, matching Merge and single-
-        // range Convert flows. Multi-output → gallery so the user can
-        // review, save-all, share-all, or pick any file to open.
-        if count == 1, let only = outputs.first {
-            onOpenFile?(only)
-        } else {
-            onShowGallery?(outputs)
+        splitResultURLs = temps
+    }
+
+    /// Commits the split result to Library. When invoked from the single-output
+    /// success screen, `displayURL` may be the signed staged temp and `original`
+    /// the unsigned split temp — in that case commits the signed version via
+    /// `commitToPDF` and cleans up the unsigned temp.
+    private func commitSplitAction(displayURL: URL? = nil, original: URL? = nil) async {
+        guard !splitResultURLs.isEmpty else { return }
+        // Single-output signed case: commit signed, skip the bulk commit.
+        if let signed = signedResult, let displayURL, let original, displayURL == signed {
+            if let finalURL = await viewModel.commitToPDF(signed) {
+                store.markAsNew(finalURL)
+                try? FileManager.default.removeItem(at: original.deletingLastPathComponent())
+                signedResult = nil
+                splitResultURLs = []
+                sourceURL = nil
+                lastSplitSnapshot = nil
+                toaster.show(.success, title: "Your document was saved to your Library", filename: finalURL.lastPathComponent)
+                isSourcePickerPresented = true
+            }
+            return
         }
+        let finals = await viewModel.commitSplit(splitResultURLs)
+        guard !finals.isEmpty else { return }
+        finals.forEach { store.markAsNew($0) }
+        signedResult = nil
+        splitResultURLs = []
+        sourceURL = nil
+        lastSplitSnapshot = nil
+        let count = finals.count
+        toaster.show(.success, title: "\(count) file\(count == 1 ? "" : "s") saved to your Library")
+        isSourcePickerPresented = true
     }
 }
 

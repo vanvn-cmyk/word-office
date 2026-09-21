@@ -3,9 +3,14 @@ import Foundation
 /// Where the user picks a file from when a tool needs one.
 /// Carried as an associated value on `PDFToolDestination` so the tool view
 /// knows which picker to open automatically when it first appears.
+///
+/// `.prePickedURLs` is set by `ToolsTabView` when the user picks "Device" from
+/// the source sheet — the file importer opens on the grid (not inside the tool
+/// view), so the tool receives already-resolved URLs and skips its own picker.
 enum FilePickerSource: Hashable {
     case library
     case browse
+    case prePickedURLs([URL])
 }
 
 /// Navigation destinations from the Tools home (`ToolsTabView`), per the approved
@@ -25,6 +30,21 @@ enum PDFToolDestination: Hashable {
     case scan
     case fillForm(source: FilePickerSource? = nil)
     case sign(source: FilePickerSource? = nil)
+    /// Sign pushed from the officeToPDF success screen — same UI as `.sign`
+    /// but `onPrePickedSigned` is wired so the signed staged temp is returned
+    /// to ConvertFlowView instead of presenting `PreviewConfirmSheet`.
+    case signFromOfficeToPDF(source: FilePickerSource? = nil)
+    /// Sign pushed from the Merge success screen — `onPrePickedSigned` writes
+    /// the signed staged temp back to `ToolsTabView.mergeSignedResult` so the
+    /// Merge preview updates to show the signed version before Done is tapped.
+    case signFromMerge(source: FilePickerSource? = nil)
+    /// Sign pushed from the Split (single-output) success screen — same
+    /// pattern as `signFromMerge` but writes to `splitSignedResult`.
+    case signFromSplit(source: FilePickerSource? = nil)
+    /// Sign pushed from the imageToPDF success screen — auto-commits the
+    /// signed PDF immediately (no PreviewConfirmSheet) and passes the
+    /// committed URL back so the success screen preview refreshes.
+    case signFromImageToPDF(source: FilePickerSource? = nil)
     case print(source: FilePickerSource? = nil)
 }
 

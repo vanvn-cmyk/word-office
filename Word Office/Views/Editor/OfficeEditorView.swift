@@ -38,16 +38,20 @@ struct OfficeEditorView: View {
     // Native insert sheets
     @State private var showLinkSheet        = false
     @State private var showCommentSheet     = false
+    @State private var showTableSheet       = false
     @State private var showChartSheet       = false
     @State private var showShapeSheet       = false
     @State private var showFindReplaceSheet = false
     @State private var showFontPickerSheet  = false
     @State private var pendingLink: (url: String, text: String)? = nil
     @State private var pendingComment: String? = nil
+    @State private var pendingTable: (rows: Int, cols: Int)? = nil
     @State private var pendingChart: String? = nil
     @State private var pendingShape: String? = nil
     @State private var pendingFindReplace: (find: String, replace: String, replaceAll: Bool)? = nil
     @State private var pendingFont: String? = nil
+    @State private var showSymbolSheet    = false
+    @State private var pendingSymbol: String? = nil
 
     private var fileKind: EditorTopToolbar.FileKind {
         EditorTopToolbar.FileKind(ext: ref.url.pathExtension)
@@ -151,6 +155,23 @@ struct OfficeEditorView: View {
                         onCancel: { showCommentSheet = false }
                     )
                 }
+                // Native table insert sheet — safe path avoids _clickOOBtn (opens OO's
+                // table dialog which crashes WKWebView on iOS). insertTable fires in
+                // onDismiss after WKWebView regains focus.
+                .sheet(isPresented: $showTableSheet, onDismiss: {
+                    if let t = pendingTable {
+                        editorVC?.insertTable(rows: t.rows, cols: t.cols)
+                        pendingTable = nil
+                    }
+                }) {
+                    NativeTableView(
+                        onCommit: { rows, cols in
+                            pendingTable = (rows, cols)
+                            showTableSheet = false
+                        },
+                        onCancel: { showTableSheet = false }
+                    )
+                }
                 // Native chart insert sheet — insertChart fires in onDismiss after WKWebView regains focus.
                 .sheet(isPresented: $showChartSheet, onDismiss: {
                     if let chartType = pendingChart {
@@ -211,6 +232,22 @@ struct OfficeEditorView: View {
                         onCancel: { showFontPickerSheet = false }
                     )
                 }
+                // Symbol / special character picker — fires insertSymbol in onDismiss so
+                // WKWebView has fully regained focus before JS is evaluated.
+                .sheet(isPresented: $showSymbolSheet, onDismiss: {
+                    if let sym = pendingSymbol {
+                        editorVC?.insertSymbol(sym)
+                        pendingSymbol = nil
+                    }
+                }) {
+                    NativeSymbolPickerView(
+                        onCommit: { sym in
+                            pendingSymbol = sym
+                            showSymbolSheet = false
+                        },
+                        onCancel: { showSymbolSheet = false }
+                    )
+                }
             }
         }
         .preference(key: EditorDirtyPreferenceKey.self, value: isDirty)
@@ -230,8 +267,14 @@ struct OfficeEditorView: View {
         case "insert-image":        showImagePicker       = true
         case "insert-link":         showLinkSheet          = true
         case "insert-comment":      showCommentSheet       = true
+        case "insert-table":        showTableSheet         = true
         case "insert-chart":        showChartSheet         = true
         case "insert-shape":        showShapeSheet         = true
+        case "insert-symbol":       showSymbolSheet        = true
+        // ppt-insert-textbox: _insertTextBox uses StartAddShape('textRect') + mouse simulation
+        // to draw the box, then auto-double-clicks to enter text-edit mode immediately.
+        // Direct APIs (asc_insertTextBox, asc_setShapePreset) crash on iOS.
+        case "ppt-insert-textbox":  editorVC?.insertTextBox()
         case "word-find-replace":   showFindReplaceSheet   = true
         case "word-font-picker":    showFontPickerSheet    = true
         case "print":               editorVC?.printDocument()
@@ -251,8 +294,10 @@ struct OfficeEditorView: View {
         let maxPx: CGFloat = isWord ? 1200 : 1600
         let targetBytes = isWord ? 400_000 : 600_000
 
-        let imageData: Data
-        if let src = UIImage(data: raw) {
+        // Decode + resize + compress off the main thread — camera photos (12MP) can
+        // take 500ms+ which visibly freezes the editor UI if done on MainActor.
+        let imageData: Data = await Task.detached(priority: .userInitiated) {
+            guard let src = UIImage(data: raw) else { return raw }
             let scale = min(maxPx / src.size.width, maxPx / src.size.height, 1.0)
             let size  = CGSize(width: (src.size.width * scale).rounded(),
                                height: (src.size.height * scale).rounded())
@@ -265,10 +310,8 @@ struct OfficeEditorView: View {
                 q -= 0.10
                 out = resized.jpegData(compressionQuality: q) ?? out
             }
-            imageData = out
-        } else {
-            imageData = raw
-        }
+            return out
+        }.value
 
         editorVC?.insertImage(data: imageData, mimeType: "image/jpeg")
     }

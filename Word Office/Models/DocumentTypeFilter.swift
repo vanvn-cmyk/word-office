@@ -1,4 +1,4 @@
-import Foundation
+               import Foundation
 
 /// Groups `DocumentKind` into the type tabs shown on `LibraryView`.
 /// `.all` matches every kind, including formats with no dedicated tab

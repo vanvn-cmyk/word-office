@@ -21,8 +21,8 @@
 // dialogs must look like system dialogs so the user recognises the
 // decision surface across every iOS app.
 
+import PDFKit
 import SwiftUI
-import UIKit
 
 /// Where the staged preview should land when the user commits.
 /// Declared at file scope (not nested in `PreviewConfirmSheet`) so
@@ -71,113 +71,167 @@ struct PreviewConfirmSheet: View {
     let onCancel: () -> Void
 
     @Environment(\.dismiss) private var dismiss
-    /// Set true from either dialog action so `.onDisappear` knows this
-    /// dismissal was a commit, not a cancel. Without this flag, a
-    /// swipe-to-dismiss (which bypasses the Back button's `onCancel`
-    /// call) would leak the staged temp file — see Code Review #2.
     @State private var didCommit = false
-    @State private var isChoiceDialogPresented = false
-    /// Guards against double-tapping Print while the sheet is already up.
-    @State private var isPrinting = false
+    @State private var currentPage: Int = 1
+    @State private var totalPages: Int = 1
 
     var body: some View {
         NavigationStack {
-            ReadOnlyPDFPreviewPane(url: url)
-                .navigationTitle(title)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Back") { dismiss() }
-                    }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button(confirmLabel) {
-                            // When the source lives outside the app's
-                            // library folder, "Replace original"
-                            // isn't a safe option to expose (see
-                            // `canReplaceOriginal` doc) — skip the
-                            // choice dialog and commit directly as a
-                            // new file into `documentsURL`. Same one-
-                            // tap experience the user got before this
-                            // choice dialog was added, no surprise.
-                            if canReplaceOriginal {
-                                isChoiceDialogPresented = true
-                            } else {
-                                didCommit = true
-                                onConfirm(.newFile)
-                            }
-                        }
-                        .fontWeight(.semibold)
-                    }
+            ZStack(alignment: .bottom) {
+                PreviewPagedPDFView(url: url, currentPage: $currentPage, totalPages: $totalPages)
+
+                if totalPages > 1 {
+                    pageNavigator
+                        .padding(.bottom, DSSpacing.md)
                 }
-                .toolbar {
-                    ToolbarItem(placement: .bottomBar) {
-                        Button {
-                            Task { await performPrint() }
-                        } label: {
-                            Label("Share & Print", systemImage: "square.and.arrow.up")
-                        }
-                        .disabled(isPrinting)
-                    }
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Back") { dismiss() }
                 }
-                // System confirmation dialog — Apple's own pattern for
-                // multi-choice actions that include a destructive
-                // option (see `references/latest-apis.md`
-                // §Presentation). System styling is intentional: users
-                // recognise this surface across iOS, so bespoke DS
-                // buttons here would fight the recognition instead of
-                // helping it.
-                //
-                // Order matters: safer action first, destructive
-                // second, cancel automatic (`role: .cancel` places it
-                // separately at the bottom). Matches iOS Files.app's
-                // own "Keep Both / Replace / Cancel" ordering.
-                .confirmationDialog(
-                    "Save changes",
-                    isPresented: $isChoiceDialogPresented,
-                    titleVisibility: .visible
-                ) {
-                    Button("Save as new file") {
-                        didCommit = true
-                        onConfirm(.newFile)
-                    }
-                    Button("Replace original", role: .destructive) {
-                        didCommit = true
-                        onConfirm(.replaceOriginal)
-                    }
-                    Button("Cancel", role: .cancel) { }
-                } message: {
-                    Text("Keep the original untouched, or overwrite it with these changes?")
-                }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                saveBar
+            }
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
-        // Uniform cleanup path — fires for Back tap, swipe-down, AND
-        // any other dismissal SwiftUI may add. `didCommit` guards
-        // against firing onCancel on the happy path.
         .onDisappear {
-            if !didCommit {
-                onCancel()
-            }
+            if !didCommit { onCancel() }
         }
     }
 
-    // MARK: - Print
+    // MARK: - Page navigator pill
 
-    private func performPrint() async {
-        guard !isPrinting else { return }
-        isPrinting = true
-        defer { isPrinting = false }
+    private var pageNavigator: some View {
+        HStack(spacing: DSSpacing.sm) {
+            Button {
+                currentPage = max(1, currentPage - 1)
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 30, height: 30)
+                    .contentShape(Rectangle())
+            }
+            .disabled(currentPage <= 1)
 
-        let info = UIPrintInfo(dictionary: nil)
-        info.jobName = url.deletingPathExtension().lastPathComponent
-        info.outputType = .general
+            Text("\(currentPage) / \(totalPages)")
+                .font(.system(size: 13, weight: .medium).monospacedDigit())
+                .foregroundStyle(Color.primary)
+                .frame(minWidth: 52)
 
-        let controller = UIPrintInteractionController.shared
-        controller.printInfo = info
-        controller.printingItem = url
+            Button {
+                currentPage = min(totalPages, currentPage + 1)
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 30, height: 30)
+                    .contentShape(Rectangle())
+            }
+            .disabled(currentPage >= totalPages)
+        }
+        .padding(.horizontal, DSSpacing.sm)
+        .padding(.vertical, 6)
+        .background(.ultraThinMaterial, in: Capsule())
+        .shadow(color: .black.opacity(0.10), radius: 6, x: 0, y: 2)
+    }
 
-        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-            controller.present(animated: true) { _, _, _ in cont.resume() }
+    // MARK: - Save action bar (bottom inset)
+
+    private var saveBar: some View {
+        VStack(spacing: DSSpacing.xs) {
+            Button {
+                didCommit = true
+                onConfirm(.newFile)
+            } label: {
+                Text("Save as new file")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .tint(Color.dsBrandPrimary)
+
+            if canReplaceOriginal {
+                Button(role: .destructive) {
+                    didCommit = true
+                    onConfirm(.replaceOriginal)
+                } label: {
+                    Text("Replace original")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .tint(Color.dsStatusError)
+            }
+        }
+        .padding(.horizontal, DSSpacing.lg)
+        .padding(.vertical, DSSpacing.sm)
+        .background(Color.dsBackgroundSecondary)
+    }
+}
+
+// MARK: - Single-page PDFView with page-change binding
+
+/// PDFView in single-page mode, wired to parent `currentPage`/`totalPages`
+/// bindings so the page-navigator pill in `PreviewConfirmSheet` drives
+/// navigation. Matches the same pattern used in `PrintFlowView`.
+private struct PreviewPagedPDFView: UIViewRepresentable {
+    let url: URL
+    @Binding var currentPage: Int
+    @Binding var totalPages: Int
+
+    func makeUIView(context: Context) -> PDFView {
+        let view = PDFView()
+        view.displayMode = .singlePage
+        view.displayDirection = .horizontal
+        view.usePageViewController(true, withViewOptions: nil)
+        view.autoScales = true
+        view.backgroundColor = .systemBackground
+        view.document = PDFDocument(url: url)
+        let count = view.document?.pageCount ?? 1
+        DispatchQueue.main.async {
+            self.totalPages = count
+            self.currentPage = 1
+        }
+        NotificationCenter.default.addObserver(
+            context.coordinator,
+            selector: #selector(Coordinator.pageChanged(_:)),
+            name: .PDFViewPageChanged,
+            object: view
+        )
+        return view
+    }
+
+    func updateUIView(_ uiView: PDFView, context: Context) {
+        if uiView.document?.documentURL != url {
+            uiView.document = PDFDocument(url: url)
+            let count = uiView.document?.pageCount ?? 1
+            DispatchQueue.main.async {
+                self.totalPages = count
+                self.currentPage = 1
+            }
+            return
+        }
+        guard let doc = uiView.document,
+              let target = doc.page(at: currentPage - 1),
+              uiView.currentPage !== target else { return }
+        uiView.go(to: target)
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(currentPage: $currentPage) }
+
+    final class Coordinator: NSObject {
+        @Binding var currentPage: Int
+        init(currentPage: Binding<Int>) { _currentPage = currentPage }
+
+        @objc func pageChanged(_ notification: Notification) {
+            guard let pdfView = notification.object as? PDFView,
+                  let page = pdfView.currentPage,
+                  let doc  = pdfView.document else { return }
+            let idx = doc.index(for: page) + 1
+            Task { @MainActor [weak self] in self?.currentPage = idx }
         }
     }
 }

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(ThemeStore.self) private var themeStore
+    @Environment(FeedbackTriggerService.self) private var feedbackTrigger
 
     /// Resets the granted-folder bookmark and sends `RootView` back to onboarding.
     /// Wired to `FolderPermissionViewModel.resetPermission()` by the caller — this
@@ -10,7 +11,9 @@ struct SettingsView: View {
 
     @State private var isRatingDialogPresented = false
     @State private var isPaywallPresented = false
+    @State private var isFeedbackPresented = false
     @AppStorage("root.hasCompletedOnboarding") private var hasCompletedOnboarding: Bool = false
+    @AppStorage("library.openDocumentTipSeen") private var tipSeen: Bool = false
 
     /// Not live yet — app hasn't shipped, so there's nothing real to link to.
     /// Rows render like any other enabled row either way (see
@@ -73,6 +76,19 @@ struct SettingsView: View {
                 }
 
                 Section("General") {
+                    Button {
+                        feedbackTrigger.markShown()
+                        isFeedbackPresented = true
+                    } label: {
+                        Label {
+                            Text("Send feedback")
+                                .font(DSFont.body)
+                                .foregroundStyle(Color.dsTextPrimary)
+                        } icon: {
+                            SettingsRowIcon(systemName: "bubble.and.pencil", tint: Color.dsBrandPrimary)
+                        }
+                    }
+                    .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
                     ShareLink(item: shareAppMessage) {
                         Label {
                             Text("Share app")
@@ -82,6 +98,7 @@ struct SettingsView: View {
                             SettingsRowIcon(systemName: "square.and.arrow.up", tint: Color.dsBrandPrimary)
                         }
                     }
+                    .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
                     Button {
                         isRatingDialogPresented = true
                     } label: {
@@ -90,39 +107,33 @@ struct SettingsView: View {
                                 .font(DSFont.body)
                                 .foregroundStyle(Color.dsTextPrimary)
                         } icon: {
-                            // `dsPremiumGoldEnd` (the darker, more muted side
-                            // of the gold pair), not `dsPremiumGoldStart` —
-                            // the bright-yellow start color is too
-                            // high-luminance for this tint recipe: a
-                            // 12%-opacity tint of it sits almost as light as
-                            // the full-strength icon on top, so the two blur
-                            // together into a solid blob instead of reading
-                            // as "icon on badge." The darker gold has enough
-                            // contrast to render like every other row's flat,
-                            // single-color icon here.
                             SettingsRowIcon(systemName: "star.fill", tint: Color.dsPremiumGoldEnd)
                         }
                     }
-                    // `lock.shield.fill` — consistent with the privacy
-                    // iconography used in onboarding S4.
+                    .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
                     SettingsLegalRow(title: "Privacy Policy", systemName: "lock.shield.fill", url: privacyPolicyURL)
+                        .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
                     SettingsLegalRow(title: "Terms of Service", systemName: "doc.text.fill", url: termsOfServiceURL)
+                        .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
                 }
 
+                #if DEBUG
                 Section("Developer") {
                     Button {
-                        UserDefaults.standard.removeObject(forKey: SampleFileSeeder.didSeedDefaultsKey)
+                        tipSeen = false
                         hasCompletedOnboarding = false
                     } label: {
                         Label {
-                            Text("Reset Onboarding")
+                            Text("Reset onboarding + tip")
                                 .font(DSFont.body)
                                 .foregroundStyle(Color.dsTextPrimary)
                         } icon: {
-                            SettingsRowIcon(systemName: "arrow.counterclockwise", tint: Color.dsTextSecondary)
+                            SettingsRowIcon(systemName: "arrow.counterclockwise", tint: .orange)
                         }
                     }
+                    .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
                 }
+                #endif
 
                 // Fake trailing spacer — same pattern as LibraryView.
                 Section {
@@ -171,6 +182,9 @@ struct SettingsView: View {
             .toolbarVisibility(.hidden, for: .navigationBar)
             .sheet(isPresented: $isRatingDialogPresented) {
                 RatingDialogView()
+            }
+            .sheet(isPresented: $isFeedbackPresented) {
+                FeedbackSheetView()
             }
             // `.fullScreenCover` — see the matching call site in
             // `LibraryView` for the rationale (paywall is a full-page

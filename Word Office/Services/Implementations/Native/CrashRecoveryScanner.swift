@@ -18,37 +18,39 @@ final class CrashRecoveryScanner: CrashRecoveryScanning {
     }
 
     func scanForOrphans() async -> [CrashRecoveryOrphan] {
-        guard let items = try? fileManager.contentsOfDirectory(
-            at: documentsURL,
-            includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) else {
-            return []
-        }
-
-        return items.compactMap { url -> CrashRecoveryOrphan? in
-            let name = url.lastPathComponent
-            guard name.hasSuffix(Self.orphanSuffix) else { return nil }
-            guard
-                let values = try? url.resourceValues(forKeys: [
-                    .contentModificationDateKey,
-                    .isRegularFileKey
-                ]),
-                values.isRegularFile == true
-            else {
-                return nil
+        // Blocking FS call — run off the caller's executor, consistent with
+        // DocumentLibraryScanner/PDFKitMerger/PDFKitSplitter.
+        let documentsURL = self.documentsURL
+        return await Task.detached(priority: .utility) {
+            guard let items = try? FileManager.default.contentsOfDirectory(
+                at: documentsURL,
+                includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            ) else {
+                return []
             }
-
-            let originalName = String(name.dropLast(Self.orphanSuffix.count))
-            let originalURL = documentsURL.appendingPathComponent(originalName)
-
-            return CrashRecoveryOrphan(
-                originalURL: originalURL,
-                autosaveURL: url,
-                name: originalName,
-                modifiedAt: values.contentModificationDate ?? Date()
-            )
-        }
+            return items.compactMap { url -> CrashRecoveryOrphan? in
+                let name = url.lastPathComponent
+                guard name.hasSuffix(CrashRecoveryScanner.orphanSuffix) else { return nil }
+                guard
+                    let values = try? url.resourceValues(forKeys: [
+                        .contentModificationDateKey,
+                        .isRegularFileKey
+                    ]),
+                    values.isRegularFile == true
+                else {
+                    return nil
+                }
+                let originalName = String(name.dropLast(CrashRecoveryScanner.orphanSuffix.count))
+                let originalURL = documentsURL.appendingPathComponent(originalName)
+                return CrashRecoveryOrphan(
+                    originalURL: originalURL,
+                    autosaveURL: url,
+                    name: originalName,
+                    modifiedAt: values.contentModificationDate ?? Date()
+                )
+            }
+        }.value
     }
 
     func discardOrphan(_ orphan: CrashRecoveryOrphan) async throws {

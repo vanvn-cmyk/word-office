@@ -21,6 +21,10 @@ struct EditorSheet: View {
     let ref: DocumentRef
     /// Called immediately before dismiss — use to record status changes.
     var onDone: (() -> Void)? = nil
+    /// Called (before dismiss) when the user wants to Sign the current PDF.
+    var onSign: ((URL) -> Void)? = nil
+    /// Called (before dismiss) when the user wants to Print the current PDF.
+    var onPrint: ((URL) -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
     @Environment(DSToastPresenter.self) private var toaster
@@ -39,6 +43,29 @@ struct EditorSheet: View {
                         } label: {
                             Image(systemName: "xmark")
                                 .fontWeight(.light)
+                        }
+                    }
+                    // Sign & Print quick actions — only for PDFs (read-only in editor)
+                    if ref.url.pathExtension.lowercased() == "pdf", onSign != nil || onPrint != nil {
+                        ToolbarItem(placement: .primaryAction) {
+                            HStack(spacing: DSSpacing.xs) {
+                                if let onSign {
+                                    Button {
+                                        onSign(ref.url)
+                                        closeEditor()
+                                    } label: {
+                                        Label("Sign", systemImage: "signature")
+                                    }
+                                }
+                                if let onPrint {
+                                    Button {
+                                        onPrint(ref.url)
+                                        closeEditor()
+                                    } label: {
+                                        Label("Print", systemImage: "printer")
+                                    }
+                                }
+                            }
                         }
                     }
                 }

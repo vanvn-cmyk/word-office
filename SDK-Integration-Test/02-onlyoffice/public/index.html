@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>ONLYOFFICE Fidelity Test</title>
+<style>
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { font-family: -apple-system, sans-serif; margin: 0; padding: 20px; background: #F7F4EF; color: #1A1814; }
+  h1 { font-size: 20px; margin: 0 0 14px; }
+  .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+  button { height: 38px; padding: 0 16px; border-radius: 8px; border: none; background: #C4603A; color: #fff; font-weight: 600; cursor: pointer; font-size: 14px; }
+  button:disabled { background: #ccc; cursor: not-allowed; }
+  button.secondary { background: #fff; color: #C4603A; border: 1px solid #C4603A; }
+  button.success { background: #16a34a; }
+  #status { font-size: 13px; color: #6B6560; white-space: pre-wrap; margin-bottom: 12px;
+    max-height: 100px; overflow: auto; background: #fff; border: 1px solid #E2DDD6;
+    border-radius: 8px; padding: 8px 12px; }
+  #errorBox { background: #FEF2F2; border: 1px solid #FCA5A5; border-radius: 8px;
+    padding: 12px 16px; margin-bottom: 12px; }
+  #errorBox .title { color: #DC2626; font-weight: 600; }
+  #errorBox details { margin-top: 6px; font-size: 12px; }
+  #errorBox summary { cursor: pointer; color: #6B6560; }
+  #errorBox pre { white-space: pre-wrap; background: #fff; border: 1px solid #E2DDD6;
+    border-radius: 6px; padding: 8px; margin-top: 4px; }
+  #editorWrap { width: 100%; height: 75vh; border: 1px solid #E2DDD6; border-radius: 8px;
+    background: #fff; overflow: hidden; }
+  #placeholder { display: flex; align-items: center; justify-content: center; height: 100%;
+    color: #9B9590; font-size: 15px; }
+  #onlyoffice-editor { width: 100%; height: 100%; border: none; }
+  .hint { font-size: 12px; color: #6B6560; margin-bottom: 14px; }
+  #saveStatus { font-size: 13px; color: #6B6560; margin-left: 4px; }
+</style>
+</head>
+<body>
+  <h1>ONLYOFFICE Fidelity Test</h1>
+  <div class="toolbar">
+    <input type="file" id="fileInput" accept=".docx,.doc,.xlsx,.xls,.pptx,.ppt,.odt,.ods,.odp,.rtf,.csv,.pdf" />
+    <button id="loadBtn">Open &amp; Edit</button>
+    <button id="downloadBtn" class="success" disabled>Download Result</button>
+    <span id="saveStatus"></span>
+  </div>
+  <div class="hint">Pick a Word, Excel, or PowerPoint file — especially one with images, charts, or animations. Edit in the panel below, then click Save (Ctrl+S) inside the editor. When saved, "Download Result" will activate.</div>
+  <div id="errorBox" hidden></div>
+  <div id="status"></div>
+  <div id="editorWrap">
+    <div id="placeholder">Choose a file and click "Open &amp; Edit" to start.</div>
+    <div id="onlyoffice-editor" hidden></div>
+  </div>
+
+  <script>
+    const fileInput   = document.getElementById('fileInput');
+    const loadBtn     = document.getElementById('loadBtn');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const statusEl    = document.getElementById('status');
+    const errorBox    = document.getElementById('errorBox');
+    const placeholder = document.getElementById('placeholder');
+    const editorDiv   = document.getElementById('onlyoffice-editor');
+    const saveStatus  = document.getElementById('saveStatus');
+
+    let currentId = null;
+    let pollTimer = null;
+    let docEditor = null;
+
+    function log(msg) {
+      statusEl.textContent += msg + '\n';
+      statusEl.scrollTop = statusEl.scrollHeight;
+    }
+
+    function showError(msg, detail) {
+      errorBox.hidden = false;
+      errorBox.innerHTML = `<div class="title">${esc(msg)}</div>` +
+        (detail ? `<details><summary>Technical details</summary><pre>${esc(detail)}</pre></details>` : '');
+    }
+
+    function clearError() { errorBox.hidden = true; errorBox.innerHTML = ''; }
+
+    function esc(s) {
+      return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+    }
+
+    function startPolling(id) {
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = setInterval(async () => {
+        try {
+          const r = await fetch(`/api/status/${id}`);
+          const d = await r.json();
+          if (d.ready) {
+            clearInterval(pollTimer);
+            downloadBtn.disabled = false;
+            saveStatus.textContent = '✓ Saved — ready to download';
+            saveStatus.style.color = '#16a34a';
+            log('File saved by ONLYOFFICE — "Download Result" is now active.');
+          }
+        } catch (_) {}
+      }, 1500);
+    }
+
+    const DOCS_ORIGIN = 'http://localhost:8090';
+
+    function loadOnlyOfficeScript() {
+      return new Promise((resolve, reject) => {
+        if (window.DocsAPI) { resolve(); return; }
+        const s = document.createElement('script');
+        s.src = `${DOCS_ORIGIN}/web-apps/apps/api/documents/api.js`;
+        s.onload = () => window.DocsAPI ? resolve() : reject(new Error('DocsAPI undefined after load'));
+        s.onerror = () => reject(new Error('Failed to load api.js from Document Server'));
+        document.head.appendChild(s);
+        setTimeout(() => reject(new Error('api.js load timeout after 15s')), 15000);
+      });
+    }
+
+    loadBtn.addEventListener('click', async () => {
+      const file = fileInput.files[0];
+      if (!file) { log('Please choose a file first.'); return; }
+
+      loadBtn.disabled = true;
+      downloadBtn.disabled = true;
+      saveStatus.textContent = '';
+      statusEl.textContent = '';
+      clearError();
+
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      if (docEditor) { try { docEditor.destroyEditor(); } catch (_) {} docEditor = null; }
+
+      log(`Uploading "${file.name}"...`);
+
+      try {
+        // 1. Upload
+        const form = new FormData();
+        form.append('file', file);
+        const uploadRes = await fetch('/api/upload', { method: 'POST', body: form });
+        const uploadData = await uploadRes.json();
+        if (!uploadRes.ok) throw new Error(uploadData.error || 'Upload failed');
+
+        currentId = uploadData.id;
+        log('Uploaded. Fetching editor config...');
+
+        // 2. Get editor config
+        const configRes = await fetch(`/api/editor-config/${currentId}`);
+        const config = await configRes.json();
+        if (!configRes.ok) throw new Error(config.error || 'Config failed');
+
+        // 3. Check Document Server health
+        log('Checking Document Server...');
+        try {
+          const health = await fetch(`/api/healthcheck`);
+          if (!health.ok) throw new Error('not ready');
+          log('Document Server is ready.');
+        } catch {
+          throw new Error(`Document Server not ready at localhost:${docsPort}. Wait 1-2 min after "docker compose up -d" then retry.`);
+        }
+
+        // 4. Load ONLYOFFICE editor JS
+        log('Loading ONLYOFFICE editor...');
+        await loadOnlyOfficeScript();
+
+        // 5. Init editor
+        placeholder.hidden = true;
+        editorDiv.hidden = false;
+        editorDiv.innerHTML = '';
+
+        const editorContainer = document.createElement('div');
+        editorContainer.id = 'editor-container';
+        editorContainer.style.cssText = 'width:100%;height:100%';
+        editorDiv.appendChild(editorContainer);
+
+        log('[debug] calling DocEditor...');
+        docEditor = new DocsAPI.DocEditor('editor-container', {
+          ...config,
+          height: '100%',
+          width: '100%',
+          events: {
+            onAppReady() {
+              log('Editor ready. Make changes, then save with Ctrl+S (or the Save button in the editor toolbar).');
+              startPolling(currentId);
+            },
+            onDocumentStateChange(e) {
+              if (e.data) {
+                saveStatus.textContent = 'Unsaved changes — press Ctrl+S (or Cmd+S) to save';
+                saveStatus.style.color = '#C4603A';
+              }
+            },
+            onError(e) {
+              showError('Editor error', JSON.stringify(e.data));
+            }
+          }
+        });
+      } catch (err) {
+        log('[ERROR] ' + err.message);
+        showError(err.message, err.stack);
+        placeholder.hidden = false;
+        editorDiv.hidden = true;
+      } finally {
+        loadBtn.disabled = false;
+      }
+    });
+
+    downloadBtn.addEventListener('click', () => {
+      if (!currentId) return;
+      const a = document.createElement('a');
+      a.href = `/api/download/${currentId}`;
+      a.click();
+    });
+  </script>
+</body>
+</html>

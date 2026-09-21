@@ -1,3 +1,4 @@
+import CoreText
 import WebKit
 
 /// Handles `office://host/…` requests from WKWebView and serves files
@@ -23,6 +24,7 @@ final class OfficeSchemeHandler: NSObject, WKURLSchemeHandler {
     private let _lock = NSLock()
     private var _images: [String: (data: Data, mime: String)] = [:]
     private var _docs:   [String: Data] = [:]
+    private var _fonts:  [String: Data] = [:]   // system font cache by PostScript name
 
     // MARK: - Image store
 
@@ -34,6 +36,12 @@ final class OfficeSchemeHandler: NSObject, WKURLSchemeHandler {
         let key  = "\(uuid).\(ext)"
         _lock.lock(); _images[key] = (data, mimeType); _lock.unlock()
         return "office://host/img/\(key)"
+    }
+
+    /// Evict all cached images from memory — called on `didReceiveMemoryWarning`
+    /// to reduce pressure before iOS terminates the app.
+    func clearImageCache() {
+        _lock.lock(); _images.removeAll(); _lock.unlock()
     }
 
     // MARK: - Document store
@@ -101,6 +109,41 @@ final class OfficeSchemeHandler: NSObject, WKURLSchemeHandler {
             return
         }
 
+        // ── System fonts (office://host/sysfonts/<PostScriptName>) ─────────────────
+        // Used by converter.html to populate x2t's /working/fonts/ via the media
+        // parameter so x2t.wasm can embed fonts when generating PDFs.
+        if rawPath.hasPrefix("sysfonts/") {
+            let psName = String(rawPath.dropFirst("sysfonts/".count))
+            _lock.lock()
+            let cached = _fonts[psName]
+            _lock.unlock()
+            if let data = cached {
+                respond(to: urlSchemeTask, url: url, status: 200, mimeType: "font/ttf", data: data)
+                activeTasks.remove(taskId)
+                return
+            }
+            ioQueue.async { [weak self] in
+                let data = OfficeSchemeHandler.readSystemFont(psName: psName)
+                if let self, let data {
+                    self._lock.lock()
+                    self._fonts[psName] = data
+                    self._lock.unlock()
+                }
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.activeTasks.contains(taskId) else { return }
+                    if let data {
+                        self.respond(to: urlSchemeTask, url: url, status: 200,
+                                     mimeType: "font/ttf", data: data)
+                    } else {
+                        self.respond(to: urlSchemeTask, url: url, status: 404,
+                                     body: "Font not found: \(psName)")
+                    }
+                    self.activeTasks.remove(taskId)
+                }
+            }
+            return
+        }
+
         guard let bundleURL else {
             respond(to: urlSchemeTask, url: url, status: 503, body: "OfficeBundle missing from app bundle")
             activeTasks.remove(taskId)
@@ -162,6 +205,23 @@ final class OfficeSchemeHandler: NSObject, WKURLSchemeHandler {
 
     func webView(_ webView: WKWebView, stop urlSchemeTask: any WKURLSchemeTask) {
         activeTasks.remove(ObjectIdentifier(urlSchemeTask))
+    }
+
+    // MARK: - System font reader
+
+    /// Resolves `psName` (PostScript name) to the on-device font file and returns
+    /// its raw bytes. Returns nil if the font does not exist on this device.
+    /// CTFontCreateWithName always succeeds (falls back to system font), so we
+    /// verify the returned PS name matches before reading to avoid serving the
+    /// wrong font data.
+    private static func readSystemFont(psName: String) -> Data? {
+        let font = CTFontCreateWithName(psName as CFString, 12, nil)
+        let actualPS = CTFontCopyPostScriptName(font) as String
+        guard actualPS == psName else { return nil }
+        guard let urlRef = CTFontCopyAttribute(font, kCTFontURLAttribute) else { return nil }
+        // kCTFontURLAttribute returns CFURL — bridge through NSURL to URL.
+        guard let nsURL = (urlRef as AnyObject) as? NSURL else { return nil }
+        return try? Data(contentsOf: nsURL as URL)
     }
 
     // MARK: - MIME helpers

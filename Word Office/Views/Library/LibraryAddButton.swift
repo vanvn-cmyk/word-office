@@ -41,15 +41,9 @@ struct LibraryAddButton: View {
     /// `Menu`/`.popover` UX). If this were `@State private` here, the scrim
     /// couldn't observe or write the flag.
     @Binding var isMenuOpen: Bool
+    let onOpenEditor: (DocumentRef) -> Void
     @State private var isPresentingImporter = false
     @State private var isPresentingScan = false
-    @State private var comingSoonKind: DocumentKind?
-    /// "Create new" rows no longer create a blank document directly — they
-    /// open `TemplateGalleryView` first (tab preselected to the tapped
-    /// kind), matching the reference flow: tap a kind → pick Blank or a
-    /// template. `templateGalleryKind` only matters while the cover is up.
-    @State private var isPresentingTemplateGallery = false
-    @State private var templateGalleryKind: DocumentKind = .docx
 
     /// Eager-init in `init` (via `State(wrappedValue:)`) rather than lazily
     /// in `.task { ocrVM = container.make…() }` on `body`. The lazy pattern
@@ -63,10 +57,11 @@ struct LibraryAddButton: View {
     /// exposure and needs the same eager-init fix.
     @State private var ocrVM: OCRViewModel
 
-    init(viewModel: LibraryViewModel, container: DependencyContainer, isMenuOpen: Binding<Bool>) {
+    init(viewModel: LibraryViewModel, container: DependencyContainer, isMenuOpen: Binding<Bool>, onOpenEditor: @escaping (DocumentRef) -> Void) {
         self._viewModel = Bindable(wrappedValue: viewModel)
         self.container = container
         self._isMenuOpen = isMenuOpen
+        self.onOpenEditor = onOpenEditor
         self._ocrVM = State(wrappedValue: container.makeOCRViewModel())
     }
 
@@ -101,12 +96,13 @@ struct LibraryAddButton: View {
         // rendered downward from FAB.top instead of upward.
         fabButton
             .overlay(alignment: .bottomTrailing) {
-                if isMenuOpen {
-                    addMenuContent
-                        .fixedSize()
-                        .padding(.bottom, Self.fabDiameter + DSSpacing.lg)
-                        .transition(.scale(scale: 0.85, anchor: .bottomTrailing).combined(with: .opacity))
-                }
+                addMenuContent
+                    .fixedSize()
+                    .padding(.bottom, Self.fabDiameter + DSSpacing.lg)
+                    .scaleEffect(isMenuOpen ? 1 : 0.92, anchor: .bottomTrailing)
+                    .opacity(isMenuOpen ? 1 : 0)
+                    .offset(y: isMenuOpen ? 0 : 8)
+                    .allowsHitTesting(isMenuOpen)
             }
             .fileImporter(
                 isPresented: $isPresentingImporter,
@@ -116,18 +112,6 @@ struct LibraryAddButton: View {
                 if case .success(let urls) = result {
                     Task { await viewModel.importFiles(from: urls) }
                 }
-            }
-            .alert(
-                "Coming soon",
-                isPresented: Binding(
-                    get: { comingSoonKind != nil },
-                    set: { if !$0 { comingSoonKind = nil } }
-                ),
-                presenting: comingSoonKind
-            ) { _ in
-                Button("OK", role: .cancel) { comingSoonKind = nil }
-            } message: { kind in
-                Text("Creating a blank \(kind.displayName) document needs the full Office SDK, which isn't wired in yet. Word documents already work — or import an existing file")
             }
             .sheet(isPresented: $isPresentingScan) {
                 NavigationStack {
@@ -141,13 +125,8 @@ struct LibraryAddButton: View {
                 // stay invisible for the 3s dismiss window.
                 .toastHost(toaster)
             }
-            .fullScreenCover(isPresented: $isPresentingTemplateGallery) {
-                TemplateGalleryView(initialKind: templateGalleryKind) { kind in
-                    isPresentingTemplateGallery = false
-                    Task { await handleCreate(kind: kind) }
-                }
-            }
     }
+
 
     // MARK: - FAB
 
@@ -167,8 +146,13 @@ struct LibraryAddButton: View {
         // glass surfaces have — better than a custom scale animation.
         // `GlassEffectContainer` in `RootView.customTabBar` groups this
         // with the tab pill for coherent glass sampling.
+        .buttonStyle(.plain)
         .glassEffect(.regular.tint(Color.dsBrandPrimary).interactive(), in: .circle)
         .shadow(color: Color.dsBrandPrimary.opacity(0.28), radius: 12, y: 6)
+        // Explicit circular hit area — keeps the button's interactive
+        // zone exactly on the circle so the rectangular frame corners
+        // (which are visually transparent) don't respond to taps.
+        .contentShape(Circle())
         .accessibilityLabel(isMenuOpen ? "Close" : "Add")
     }
 
@@ -181,7 +165,7 @@ struct LibraryAddButton: View {
     /// menu row, scrim tap, tab switch, or FAB re-tap, uses the same
     /// idempotent guard + 0.15s ease-out, so they can never drift apart.
     private func openMenu() {
-        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { isMenuOpen = true }
+        withAnimation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.82)) { isMenuOpen = true }
     }
 
     // MARK: - Menu content
@@ -189,11 +173,10 @@ struct LibraryAddButton: View {
     private var addMenuContent: some View {
         VStack(alignment: .leading, spacing: 0) {
             menuSectionHeader("Create new")
-            ForEach([DocumentKind.docx, .xlsx, .pptx], id: \.self) { kind in
+            ForEach([DocumentKind.docx, .xlsx], id: \.self) { kind in
                 menuRow(image: iconAssetName(for: kind), title: createLabel(for: kind)) {
                     $isMenuOpen.closeMenuAnimated(reduceMotion: reduceMotion)
-                    templateGalleryKind = kind
-                    isPresentingTemplateGallery = true
+                    Task { await handleCreate(kind: kind) }
                 }
             }
 
@@ -281,8 +264,8 @@ struct LibraryAddButton: View {
 
     private func handleCreate(kind: DocumentKind) async {
         let outcome = await viewModel.createBlankDocument(kind: kind)
-        if outcome == .unsupported {
-            comingSoonKind = kind
+        if case .created(let ref) = outcome {
+            await MainActor.run { onOpenEditor(ref) }
         }
     }
 

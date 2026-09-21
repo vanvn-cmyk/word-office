@@ -2,6 +2,120 @@ import ImageIO
 import SwiftUI
 import UIKit
 
+// MARK: - Zoom helpers
+
+private struct ZoomItem: Identifiable {
+    let id = UUID()
+    let url: URL
+    let thumbnail: UIImage?
+}
+
+/// Full-screen zoomable image using UIScrollView for native pinch/pan.
+private struct ZoomableImageSheet: View {
+    let item: ZoomItem
+    @Environment(\.dismiss) private var dismiss
+    @State private var fullImage: UIImage?
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let img = fullImage ?? item.thumbnail {
+                    ZoomableScrollImage(image: img)
+                        .ignoresSafeArea(edges: .bottom)
+                } else {
+                    ProgressView()
+                }
+            }
+            .background(Color.black)
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(item.url.lastPathComponent)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }.foregroundStyle(.white)
+                }
+            }
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .task {
+                guard let data = try? Data(contentsOf: item.url),
+                      let img = UIImage(data: data) else { return }
+                fullImage = img
+            }
+        }
+    }
+}
+
+private struct ZoomableScrollImage: UIViewControllerRepresentable {
+    let image: UIImage
+
+    func makeUIViewController(context: Context) -> ZoomViewController {
+        ZoomViewController(image: image)
+    }
+    func updateUIViewController(_ vc: ZoomViewController, context: Context) {
+        vc.update(image: image)
+    }
+}
+
+final class ZoomViewController: UIViewController, UIScrollViewDelegate {
+    private var image: UIImage
+    private let scrollView = UIScrollView()
+    private let imageView: UIImageView
+
+    init(image: UIImage) {
+        self.image = image
+        self.imageView = UIImageView(image: image)
+        super.init(nibName: nil, bundle: nil)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    func update(image: UIImage) {
+        self.image = image
+        imageView.image = image
+        view.setNeedsLayout()
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .black
+        scrollView.delegate = self
+        scrollView.minimumZoomScale = 1
+        scrollView.maximumZoomScale = 6
+        scrollView.showsVerticalScrollIndicator = false
+        scrollView.showsHorizontalScrollIndicator = false
+        scrollView.backgroundColor = .black
+        scrollView.frame = view.bounds
+        scrollView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.addSubview(scrollView)
+        imageView.contentMode = .scaleAspectFit
+        scrollView.addSubview(imageView)
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        let bounds = scrollView.bounds
+        guard bounds.size != .zero else { return }
+        let size = image.size
+        guard size.width > 0, size.height > 0 else { return }
+        let scale = min(bounds.width / size.width, bounds.height / size.height)
+        let fitted = CGSize(width: size.width * scale, height: size.height * scale)
+        imageView.frame = CGRect(
+            x: (bounds.width - fitted.width) / 2,
+            y: (bounds.height - fitted.height) / 2,
+            width: fitted.width,
+            height: fitted.height
+        )
+        scrollView.contentSize = bounds.size
+    }
+
+    func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
+
+    func scrollViewDidZoom(_ scrollView: UIScrollView) {
+        let b = scrollView.bounds
+        let f = imageView.frame
+        imageView.frame.origin.x = f.width  < b.width  ? (b.width  - f.width)  / 2 : 0
+        imageView.frame.origin.y = f.height < b.height ? (b.height - f.height) / 2 : 0
+    }
+}
+
 /// Result of a completed tool operation — the parent decides how to
 /// present the output. Single editable file → the in-app editor.
 /// Multi-file or non-editable batch (images) → `ToolResultGalleryView`.
@@ -30,14 +144,22 @@ struct ToolResultGalleryView: View {
     /// sheet then presents its own editor for that file — sequencing
     /// two sheets is the parent's job (via `.sheet(item:onDismiss:)`).
     let onOpenFile: (URL) -> Void
+    /// Called when the user taps Done. If nil, falls back to plain dismiss().
+    /// Parent uses this to also navigate back to the Cabinet picker.
+    var onDone: (() -> Void)? = nil
+    /// When provided, "Save All" calls this async closure (commits files to the
+    /// Library) instead of presenting the DocumentPickerExporter.
+    var onSaveAll: (() async -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
     @State private var showingExporter = false
+    @State private var didSaveAll = false
     /// Filesize labels precomputed off-main when the sheet opens. Body
     /// renders `sizeLabels[url]` synchronously — no per-frame disk read.
     /// Pre-fix: `url.resourceValues(forKeys: [.fileSizeKey])` ran during
     /// body eval for every visible row/tile, which was a real hitch risk
     /// once a PDF→Image export produced 20+ pages worth of PNGs.
+    @State private var zoomItem: ZoomItem?
     @State private var sizeLabels: [URL: String] = [:]
     /// ImageIO-downsampled thumbnails cached in memory. `AsyncImage(url:)`
     /// would load the full-resolution PNG for every tile — a 2x-scale
@@ -59,17 +181,27 @@ struct ToolResultGalleryView: View {
         NavigationStack {
             content
                 .navigationTitle("Results")
-                .navigationBarTitleDisplayMode(.large)
+                .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
-                        Button("Done") { dismiss() }
-                            .fontWeight(.semibold)
+                        Button("Done") {
+                            // Fire onDone BEFORE dismiss() so the parent can
+                            // update its state (e.g. show cabinet) while the
+                            // sheet is still animating out — prevents the
+                            // stateContent from flashing through mid-dismissal.
+                            onDone?()
+                            dismiss()
+                        }
+                        .fontWeight(.semibold)
                     }
                 }
                 .safeAreaInset(edge: .bottom) { actionBar }
                 .background(Color.dsBackgroundSecondary)
                 .sheet(isPresented: $showingExporter) {
                     DocumentPickerExporter(urls: urls)
+                }
+                .sheet(item: $zoomItem) { item in
+                    ZoomableImageSheet(item: item)
                 }
                 .task(id: urls) { await preloadMetadata() }
         }
@@ -88,17 +220,16 @@ struct ToolResultGalleryView: View {
     // MARK: - Grid (all-image)
 
     private var gridLayout: some View {
-        ScrollView {
-            LazyVGrid(
-                columns: [
-                    GridItem(.flexible(), spacing: DSSpacing.sm),
-                    GridItem(.flexible(), spacing: DSSpacing.sm)
-                ],
-                spacing: DSSpacing.sm
-            ) {
+        let columns: [GridItem] = urls.count == 1
+            ? [GridItem(.flexible())]
+            : [GridItem(.flexible(), spacing: DSSpacing.sm), GridItem(.flexible(), spacing: DSSpacing.sm)]
+        return ScrollView {
+            LazyVGrid(columns: columns, spacing: DSSpacing.sm) {
                 ForEach(urls, id: \.self) { url in
-                    Button { openAndDismiss(url) } label: {
-                        imageTile(url)
+                    Button {
+                        zoomItem = ZoomItem(url: url, thumbnail: thumbnails[url])
+                    } label: {
+                        imageTile(url, singleColumn: urls.count == 1)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(Text(url.lastPathComponent))
@@ -108,24 +239,24 @@ struct ToolResultGalleryView: View {
         }
     }
 
-    private func imageTile(_ url: URL) -> some View {
+    private func imageTile(_ url: URL, singleColumn: Bool = false) -> some View {
         VStack(spacing: 0) {
             thumbnailView(url)
                 .frame(maxWidth: .infinity)
                 .aspectRatio(3.0 / 4.0, contentMode: .fit)
-                .clipped()
 
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .center, spacing: 1) {
                 Text(url.lastPathComponent)
                     .font(DSFont.caption)
                     .foregroundStyle(Color.dsTextPrimary)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: singleColumn ? .center : .leading)
                 Text(sizeLabels[url] ?? " ")
                     .font(DSFont.caption)
                     .foregroundStyle(Color.dsTextTertiary)
+                    .frame(maxWidth: .infinity, alignment: singleColumn ? .center : .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, DSSpacing.xs)
             .padding(.vertical, DSSpacing.xxs)
         }
@@ -227,14 +358,24 @@ struct ToolResultGalleryView: View {
     private var actionBar: some View {
         HStack(spacing: DSSpacing.sm) {
             Button {
-                showingExporter = true
+                if let onSaveAll {
+                    // Staged flow: commit temp files to Library.
+                    Task {
+                        await onSaveAll()
+                        didSaveAll = true
+                    }
+                } else {
+                    showingExporter = true
+                }
             } label: {
-                Label("Save All", systemImage: "square.and.arrow.down")
+                Label(didSaveAll ? "Saved" : "Save All",
+                      systemImage: didSaveAll ? "checkmark" : "square.and.arrow.down")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
             .controlSize(.large)
             .tint(Color.dsBrandPrimary)
+            .disabled(didSaveAll)
 
             ShareLink(items: urls, preview: { url in
                 SharePreview(Text(url.lastPathComponent))

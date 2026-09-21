@@ -16,6 +16,11 @@ import Observation
 final class LibraryViewModel {
     var errorMessage: String?
     private(set) var isLoading: Bool = false
+    /// Set to `true` when `dismissGetStartedIfRealFilesExist()` just promoted
+    /// all `.getStarted` entries to `.done` because the user imported a real
+    /// file. LibraryView observes this to show the "Your file is here" coachmark
+    /// even if the user already dismissed a prior tip session.
+    var shouldShowDraftCoachmark: Bool = false
 
     /// True when the user tapped "Maybe Later" on onboarding S4 and no
     /// external folder has been granted yet — the library only contains
@@ -78,6 +83,13 @@ final class LibraryViewModel {
     /// Pending trailing-debounce reload — see `scheduleDebouncedReload()`.
     /// Same `nonisolated(unsafe)` reasoning as the observer above.
     nonisolated(unsafe) private var pendingReloadTask: Task<Void, Never>?
+
+    /// Accumulates per-URL status hints posted by tool VMs via
+    /// `NotificationCenter.postDocumentsDidChange(_:)`. Consumed once
+    /// during the next `joinWithMetadata` call — only applied to brand-new
+    /// files (no existing metadata row). Keyed by `url.absoluteString`
+    /// to avoid retaining URL objects across async boundaries.
+    private var pendingSuggestedStatuses: [String: DocumentStatus] = [:]
 
     // MARK: - Import conflict queue (Session 19)
 
@@ -195,8 +207,20 @@ final class LibraryViewModel {
             forName: .documentsDidChange,
             object: nil,
             queue: .main
-        ) { [weak self] _ in
+        ) { [weak self] notification in
+            // Extract per-URL suggested statuses from the tool VM, then
+            // schedule the debounced reload. Accumulate rather than replace
+            // so multiple rapid notifications (split producing N files)
+            // don't lose earlier hints before the reload fires.
+            let raw = notification.userInfo?[Notification.Name.documentsDidChangeSuggestedStatuses] as? [String: String]
             Task { @MainActor in
+                if let raw {
+                    for (urlStr, statusStr) in raw {
+                        if let status = DocumentStatus(rawValue: statusStr) {
+                            self?.pendingSuggestedStatuses[urlStr] = status
+                        }
+                    }
+                }
                 self?.scheduleDebouncedReload()
             }
         }
@@ -322,6 +346,9 @@ final class LibraryViewModel {
             let sorted = try await sortByDueReminders(merged, at: now)
             guard generation == loadGeneration else { return }
             store.replaceAll(sorted)
+            pendingSuggestedStatuses.removeAll()
+            await dismissGetStartedIfRealFilesExist()
+            await LocalNotificationScheduler.shared.scheduleOrCancelStaleDraft(entries: sorted)
             errorMessage = nil
         } catch {
             guard generation == loadGeneration else { return }
@@ -330,6 +357,22 @@ final class LibraryViewModel {
     }
 
     // MARK: - Mutations
+
+    /// When the user imports a real file (`.draft` appears), promote any
+    /// remaining `.getStarted` sample entries to `.done` so the Get Started
+    /// section disappears and only the user's own work is in Draft.
+    private func dismissGetStartedIfRealFilesExist() async {
+        let getStartedEntries = store.entries.filter { $0.metadata.status == .getStarted }
+        let hasRealDraftFile = store.entries.contains { $0.metadata.status == .draft }
+        guard !getStartedEntries.isEmpty, hasRealDraftFile else { return }
+        for var entry in getStartedEntries {
+            entry.metadata.status = .done
+            try? await metadataStore.upsert(entry.metadata)
+            store.upsert(entry)
+        }
+        // TipCallout disabled — not used.
+        // shouldShowDraftCoachmark = true
+    }
 
     /// Change status manually (swipe / menu). Never auto-inferred from behaviour
     /// (Library-Architecture.md §7 trap #2).
@@ -353,6 +396,11 @@ final class LibraryViewModel {
         entry.metadata.remindAt = date
         entry.metadata.lastModifiedAt = Date()
         await persist(entry)
+        if let date {
+            await LocalNotificationScheduler.shared.scheduleReminder(for: entry, at: date)
+        } else {
+            LocalNotificationScheduler.shared.cancelReminder(for: entryID)
+        }
     }
 
     // MARK: - Delete (kebab menu → "Delete File")
@@ -398,15 +446,16 @@ final class LibraryViewModel {
         return .deleted
     }
 
-    /// Bump `lastOpenedAt` and promote a Draft to Reviewed on first open.
-    /// Only fires from `.draft` — opening an already-Reviewed or -Done file
-    /// is a no-op on status (no downgrade, no redundant write), so re-opening
-    /// something already past this stage can't accidentally regress or double-fire.
+    /// Bump `lastOpenedAt` and advance status one step on first open.
+    /// `.getStarted` → `.reviewed` (user engaged with the tutorial content).
+    /// `.draft` → `.reviewed` (user has opened and presumably read the file).
+    /// Files already past `.draft` are left unchanged — no downgrade, no redundant write.
     func recordOpen(_ entryID: String) async {
         guard var entry = store.entries.first(where: { $0.id == entryID }) else { return }
         entry.metadata.lastOpenedAt = Date()
-        if entry.metadata.status == .draft {
-            entry.metadata.status = .reviewed
+        switch entry.metadata.status {
+        case .getStarted, .draft: entry.metadata.status = .reviewed
+        default: break
         }
         try? await metadataStore.upsert(entry.metadata)
         store.upsert(entry)
@@ -674,8 +723,8 @@ final class LibraryViewModel {
             return .failed("The file could not be found.")
         }
         do {
-            _ = try await documentZipper.zip(entry.document.url, into: documentsURL)
-            NotificationCenter.default.post(name: .documentsDidChange, object: nil)
+            let zipURL = try await documentZipper.zip(entry.document.url, into: documentsURL)
+            NotificationCenter.default.postDocumentsDidChange([zipURL: .done])
 
             guard deleteSource else { return .createdKeepingSource }
 
@@ -838,31 +887,36 @@ final class LibraryViewModel {
 
     // MARK: - Create new (FAB → "Create new")
 
-    enum CreateDocumentOutcome: Sendable, Equatable {
-        case created
-        /// `.xlsx`/`.pptx` — `MockArtifexDocumentWriter` no-ops those today (real writer
-        /// arrives with the Artifex SDK swap). Surfaced honestly instead of leaving a
-        /// dead 0-byte file the user can't actually open in Excel/PowerPoint.
+    enum CreateDocumentOutcome: Sendable {
+        case created(DocumentRef)
         case unsupported
         case failed(String)
     }
 
-    /// Blank document from the FAB "Create new" menu. Only `.docx` produces a real,
-    /// openable file today — `DOCXCodec` writes a genuine minimal OOXML package
-    /// (same codec Scan's "Export as Word" uses), unlike the legacy `LocalFileServiceImpl
-    /// .create` 0-byte stub it's built on top of.
+    /// Blank document from the FAB "Create new" menu.
+    /// `.docx` — `DOCXCodec` generates a minimal OOXML package from XML strings.
+    /// `.xlsx` — `XLSXCodec` generates a minimal single-sheet OOXML package from XML strings.
+    /// `.pptx` — `PPTXCodec` copies `blank.pptx` from the app bundle (one empty slide).
     @discardableResult
     func createBlankDocument(kind: DocumentKind) async -> CreateDocumentOutcome {
-        guard kind == .docx else { return .unsupported }
         do {
             let ref = try await documentCreator.create(name: "Untitled", kind: kind)
-            try DOCXCodec.write(AttributedString(""), to: ref.url)
+            switch kind {
+            case .docx:
+                try DOCXCodec.write(AttributedString(""), to: ref.url)
+            case .xlsx:
+                try XLSXCodec.writeBlank(to: ref.url)
+            case .pptx:
+                try PPTXCodec.writeBlank(to: ref.url)
+            default:
+                return .unsupported
+            }
             let now = Date()
             let docID = ref.url.documentID(within: documentsURL)
             let metadata = DocumentMetadata(id: docID, lastOpenedAt: now, lastModifiedAt: now)
             try? await metadataStore.upsert(metadata)
             store.upsert(LibraryEntry(document: ref, metadata: metadata, downloadState: .local))
-            return .created
+            return .created(ref)
         } catch {
             errorMessage = error.localizedDescription
             return .failed(error.localizedDescription)
@@ -894,12 +948,16 @@ final class LibraryViewModel {
             if let existingMetadata = existing[docID] {
                 metadata = existingMetadata
             } else {
-                // First scan encounter — sample files get a designated status
-                // so the Library shows all three sections (Draft / Reviewed /
-                // Done) right after onboarding's "Maybe Later". Every other
-                // new file defaults to `.draft`.
+                // First scan encounter — pick initial status from:
+                // 1. Hint posted by the tool VM (e.g. Sign → .done)
+                // 2. Sample-file table (onboarding preset statuses)
+                // 3. Default: .draft
                 let filename = scanEntry.document.url.lastPathComponent
-                let initialStatus = SampleFileSeeder.sampleFileStatuses[filename] ?? .draft
+                let hintedStatus = pendingSuggestedStatuses[scanEntry.document.url.absoluteString]
+                let isZip = scanEntry.document.url.pathExtension.lowercased() == "zip"
+                let initialStatus = hintedStatus
+                    ?? SampleFileSeeder.sampleFileStatuses[filename]
+                    ?? (isZip ? .done : .draft)
                 let created = DocumentMetadata(
                     id: docID,
                     status: initialStatus,

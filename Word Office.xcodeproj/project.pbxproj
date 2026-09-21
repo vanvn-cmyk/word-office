@@ -10,11 +10,14 @@
 		0DBE6288CB788EAE3A8A2925 /* DocumentLibraryScannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42A87D024EEB427FF044F4C1 /* DocumentLibraryScannerTests.swift */; };
 		13BE9831304596A2007D11B1 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = 13BE9830304596A2007D11B1 /* ZIPFoundation */; };
 		1E9F4415E7779D4F79EC4CD8 /* FolderBookmarkStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E64AD9D9E8EA2C36DBEE6D4B /* FolderBookmarkStoreTests.swift */; };
+		2E1685BFA49B4EBFA2613B16 /* FirebaseCrashlytics in Frameworks */ = {isa = PBXBuildFile; productRef = 31FD3E48460C46CAAABD0850 /* FirebaseCrashlytics */; };
 		3A284BBD6758CCCD2F2CCD2C /* MetadataStoreImplTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 960BC3C36D2219ED04D5742B /* MetadataStoreImplTests.swift */; };
 		84E38DB730412DCD007F4CB1 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 84E38DB630412DCD007F4CB1 /* GRDB */; };
 		8EC4BBD32E2369DBC7C946D2 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 233F2F3C1CB91AF291D12A84 /* Foundation.framework */; };
 		A2B3C4D5E6F70012B3C4D5E6 /* OfficeBundle in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60011A2B3C4D5 /* OfficeBundle */; };
+		AAD969DD2A46443B889653B5 /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = 6838E3C8DA0641399751F7B9 /* FirebaseAnalytics */; };
 		FC438DB730412DCD00FC4CB1 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = FC438DB630412DCD00FC4CB1 /* FirebaseCore */; };
+		FDCCE114DA3B4EB7BC35376E /* FirebaseRemoteConfig in Frameworks */ = {isa = PBXBuildFile; productRef = 5E2DF95C1B344D149516A4BE /* FirebaseRemoteConfig */; };
 		FF72F5C74D3F4D7C6103DFCA /* LibraryViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC48563032893CC0EB65D522 /* LibraryViewModelTests.swift */; };
 /* End PBXBuildFile section */
 
@@ -76,6 +79,9 @@
 				84E38DB730412DCD007F4CB1 /* GRDB in Frameworks */,
 				13BE9831304596A2007D11B1 /* ZIPFoundation in Frameworks */,
 				FC438DB730412DCD00FC4CB1 /* FirebaseCore in Frameworks */,
+				AAD969DD2A46443B889653B5 /* FirebaseAnalytics in Frameworks */,
+				2E1685BFA49B4EBFA2613B16 /* FirebaseCrashlytics in Frameworks */,
+				FDCCE114DA3B4EB7BC35376E /* FirebaseRemoteConfig in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -171,6 +177,9 @@
 				84E38DB630412DCD007F4CB1 /* GRDB */,
 				13BE9830304596A2007D11B1 /* ZIPFoundation */,
 				FC438DB630412DCD00FC4CB1 /* FirebaseCore */,
+				6838E3C8DA0641399751F7B9 /* FirebaseAnalytics */,
+				31FD3E48460C46CAAABD0850 /* FirebaseCrashlytics */,
+				5E2DF95C1B344D149516A4BE /* FirebaseRemoteConfig */,
 			);
 			productName = "Word Office";
 			productReference = 84659567303D96BC00A6CAAC /* Word Office.app */;
@@ -570,6 +579,21 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 13BE982F304596A2007D11B1 /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
 			productName = ZIPFoundation;
+		};
+		31FD3E48460C46CAAABD0850 /* FirebaseCrashlytics */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FC438DB530412DCD00FC4CB1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCrashlytics;
+		};
+		5E2DF95C1B344D149516A4BE /* FirebaseRemoteConfig */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FC438DB530412DCD00FC4CB1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseRemoteConfig;
+		};
+		6838E3C8DA0641399751F7B9 /* FirebaseAnalytics */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FC438DB530412DCD00FC4CB1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAnalytics;
 		};
 		84E38DB630412DCD007F4CB1 /* GRDB */ = {
 			isa = XCSwiftPackageProductDependency;

@@ -30,6 +30,8 @@ struct RootView: View {
     let container: DependencyContainer
 
     @Environment(LibraryStore.self) private var libraryStore
+    @Environment(AppUsageTracker.self) private var usageTracker
+    @Environment(FeedbackTriggerService.self) private var feedbackTrigger
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var libraryVM: LibraryViewModel?
     @State private var permissionVM: FolderPermissionViewModel?
@@ -39,6 +41,12 @@ struct RootView: View {
     /// expose that. Key intentionally namespaced under `root.` so future
     /// per-feature flags stay grouped.
     @AppStorage("root.hasCompletedOnboarding") private var hasCompletedOnboarding: Bool = false
+    /// Set to true on the first meaningful action (tool op or editor Done).
+    /// Triggers the one-time notification permission sheet.
+    @AppStorage("noti.firstActionDone") private var firstActionDone: Bool = false
+    /// Set to true after the permission sheet is shown — never show again.
+    @AppStorage("noti.permissionAsked") private var permissionAsked: Bool = false
+    @State private var showNotificationPermissionSheet = false
     @State private var selectedTab: RootTab = .library
     /// FAB "+" menu open state — lifted from `LibraryAddButton` so
     /// `libraryShell` can render a screen-wide invisible scrim that
@@ -113,6 +121,15 @@ struct RootView: View {
         .task {
             initializeViewModelsIfNeeded()
             await permissionVM?.checkExistingPermission()
+            // Kick off library load immediately after permission resolves so
+            // `isLoading = true` is set before LibraryView's first render —
+            // avoids the brief blank-white-rows state while files scan.
+            // LibraryView's own `.task(id:)` will call loadLibrary() too and
+            // supersede this one via loadGeneration, but `isLoading` stays
+            // true throughout so the loading skeleton shows instead of blank.
+            if libraryStore.folderPermissionState == .granted {
+                await libraryVM?.loadLibrary()
+            }
             #if DEBUG
             // Auto-open a test file when launched with --open-xlsx or --open-docx.
             // Usage: simctl launch UDID BUNDLE -- --open-xlsx
@@ -122,7 +139,7 @@ struct RootView: View {
                 : nil
             if let ext, let kind = DocumentKind(rawValue: ext) {
                 let docsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-                let prefix = ext == "xlsx" ? "Get Started Excel" : "Get Started Word"
+                let prefix = ext == "xlsx" ? "Sample Spreadsheet" : "Sample Document"
                 let fileURL = docsURL.appendingPathComponent("\(prefix).\(ext)")
                 if FileManager.default.fileExists(atPath: fileURL.path) {
                     editingRef = DocumentRef(name: fileURL.lastPathComponent, url: fileURL, modifiedAt: Date(), kind: kind)
@@ -220,21 +237,99 @@ struct RootView: View {
                         .transition(.opacity)
                 }
 
-                if !isTabBarVisualHidden {
+                // Keep the tab bar visible whenever the FAB menu is open —
+                // even if the scroll auto-hide fires concurrently (a touch on
+                // the FAB can pass through to the scroll view, causing a tiny
+                // content-offset bounce that races `isScrolling=true` ahead
+                // of the button action). The `|| isFABMenuOpen` guard keeps
+                // `customTabBar` in the hierarchy so the menu overlay survives.
+                if !isTabBarVisualHidden || isFABMenuOpen {
                     customTabBar
                         .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+
+                // Mascot task assistant — bottom-right, Library tab only.
+                // Display-only: allowsHitTesting false keeps all taps
+                // falling through to the Library content beneath it.
+                // Hidden while the FAB menu is open — the mascot overlaps
+                // the bottom-right corner of the menu card.
+                if selectedTab == .library && !isFABMenuOpen {
+                    VStack {
+                        Spacer(minLength: 0)
+                        HStack {
+                            Spacer(minLength: 0)
+                            MascotAssistantView()
+                                .padding(.trailing, 16)
+                                .padding(.bottom, 118)
+                        }
+                    }
+                    // .allowsHitTesting(false) removed — MascotAssistantView now
+                    // applies it internally to its display content so the dismiss
+                    // X button remains interactive while the bubble/avatar still
+                    // passes through taps. Spacer() elements here are not
+                    // hit-testable, so library content is unaffected.
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+                }
+
+                if feedbackTrigger.shouldShowOverlay {
+                    FeedbackSurveyOverlay {
+                        feedbackTrigger.overlayDidComplete()
+                    }
+                    .transition(.opacity)
+                }
+            }
+            // If the FAB menu opens while the auto-hide decided to
+            // collapse the tab bar (scroll-bounce race), force it back
+            // visible so the menu overlay is never orphaned.
+            .onChange(of: isFABMenuOpen) { _, isOpen in
+                if isOpen && isTabBarVisualHidden {
+                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) {
+                        isTabBarVisualHidden = false
+                    }
                 }
             }
             // Switching tab with the FAB menu open would leave the menu
             // dangling over an unrelated tab. Close it as part of the same
             // interaction.
             .onChange(of: selectedTab) { $isFABMenuOpen.closeMenuAnimated(reduceMotion: reduceMotion) }
+            .onChange(of: selectedTab) { _, newTab in
+                guard newTab == .library || newTab == .tools else { return }
+                feedbackTrigger.check(usageTracker: usageTracker)
+            }
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: feedbackTrigger.shouldShowOverlay)
+            .sheet(isPresented: Binding(
+                get: { feedbackTrigger.shouldShowSheet },
+                set: { if !$0 { feedbackTrigger.sheetDidDismiss() } }
+            )) {
+                FeedbackSheetView()
+            }
             .fullScreenCover(item: $editingRef) { ref in
                 EditorSheet(container: container, ref: ref, onDone: {
                     guard let entry = libraryVM.store.entries.first(where: { $0.document.url == ref.url })
                     else { return }
                     Task { await libraryVM.setStatus(.done, for: entry.id) }
+                    handleFirstAction()
                 })
+            }
+            // One-time notification permission sheet — shown after the first
+            // action (editor Done or any tool op via documentsDidChange).
+            .sheet(isPresented: $showNotificationPermissionSheet) {
+                NotificationPermissionSheet(
+                    onAllow: {
+                        showNotificationPermissionSheet = false
+                        Task { await LocalNotificationScheduler.shared.requestAuthorization() }
+                    },
+                    onSkip: {
+                        showNotificationPermissionSheet = false
+                    }
+                )
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+            }
+            // Tool ops post .documentsDidChange — use as first-action signal.
+            .onReceive(NotificationCenter.default.publisher(for: .documentsDidChange)) { _ in
+                handleFirstAction()
             }
         } else {
             checkingView
@@ -262,12 +357,30 @@ struct RootView: View {
                 .tabBarPillStyle()
 
                 if let libraryVM {
-                    LibraryAddButton(viewModel: libraryVM, container: container, isMenuOpen: $isFABMenuOpen)
+                    LibraryAddButton(
+                        viewModel: libraryVM,
+                        container: container,
+                        isMenuOpen: $isFABMenuOpen,
+                        onOpenEditor: { editingRef = $0 }
+                    )
                 }
             }
         }
         .padding(.horizontal, DSSpacing.md)
         .padding(.bottom, DSSpacing.sm)
+        // Absorb taps that land in the empty space inside the glass
+        // container (between the pill and FAB, or in the padding zone).
+        // Without this, those taps fall through to library cards or the
+        // scroll view, causing accidental card opens (Bug 1) and a
+        // content-offset bounce that races the auto-hide and collapses
+        // the tab bar before the FAB menu can appear (Bug 2).
+        // `onTapGesture { }` only absorbs taps, not drags, so scroll
+        // initiation from below the content area is unaffected.
+        .background(
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture { }
+        )
     }
 
     private func tabBarButton(_ tab: RootTab, label: String, systemImage: String, isCustomAsset: Bool = false) -> some View {
@@ -357,6 +470,23 @@ struct RootView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.dsBackgroundPrimary)
+    }
+
+    // MARK: - Notifications
+
+    /// Fires once — after the user's first meaningful action (editor Done or any
+    /// tool op). Shows the custom `NotificationPermissionSheet` after a short
+    /// delay so it doesn't clash with the toast/transition that accompanies the
+    /// action. Both AppStorage flags are flipped immediately so back-to-back
+    /// calls (e.g. two rapid tool ops) only show the sheet once.
+    private func handleFirstAction() {
+        guard !firstActionDone, !permissionAsked else { return }
+        firstActionDone = true
+        permissionAsked = true
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(800))
+            showNotificationPermissionSheet = true
+        }
     }
 
     // MARK: - Lazy VM init

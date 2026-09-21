@@ -229,6 +229,8 @@ struct EditorTopToolbar: View {
                         vDivider()
                         iconBtn("link",        label: "Hyperlink",     cmd: "insert-link")
                         iconBtn("text.bubble", label: "Comment",       cmd: "insert-comment")
+                        vDivider()
+                        chipBtn("Symbol",      label: "Insert symbol", cmd: "insert-symbol")
 
                     case .formula:
                         // AutoSum — the most common formula action
@@ -397,6 +399,8 @@ struct EditorTopToolbar: View {
                         iconBtn("text.bubble",   label: "Comment",       cmd: "insert-comment")
                         iconBtn("bookmark",      label: "Bookmark",      cmd: "insert-bookmark")
                         vDivider()
+                        chipBtn("Symbol",        label: "Insert symbol", cmd: "insert-symbol")
+                        vDivider()
                         chipBtn("Pg Break",      label: "Page break",    cmd: "insert-page-break")
                         chipBtn("Header",        label: "Header",        cmd: "insert-header")
                         chipBtn("Footer",        label: "Footer",        cmd: "insert-footer")
@@ -468,6 +472,7 @@ struct EditorTopToolbar: View {
 
                     case .insert:
                         iconBtn("photo",         label: "Insert image",  cmd: "insert-image")
+                        chipBtn("Table",         label: "Insert table",  cmd: "insert-table")
                         chipBtn("Shape",         label: "Insert shape",  cmd: "insert-shape")
                         chipBtn("Chart",         label: "Insert chart",  cmd: "insert-chart")
                         vDivider()
@@ -475,6 +480,7 @@ struct EditorTopToolbar: View {
                         iconBtn("text.bubble",   label: "Comment",       cmd: "insert-comment")
                         vDivider()
                         chipBtn("Text Box",      label: "Insert text box", cmd: "ppt-insert-textbox")
+                        chipBtn("Symbol",        label: "Insert symbol",   cmd: "insert-symbol")
 
                     case .slide:
                         // Slide management

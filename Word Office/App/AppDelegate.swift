@@ -1,5 +1,5 @@
-import UIKit
 import FirebaseCore
+import UIKit
 
 final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(
@@ -7,6 +7,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         FirebaseApp.configure()
+        CrashlyticsService.setCrashCollectionEnabled(true)
+        Task { await RemoteConfigService.shared.fetchAndActivate() }
         return true
     }
 

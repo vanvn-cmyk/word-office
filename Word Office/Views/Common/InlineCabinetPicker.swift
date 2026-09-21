@@ -18,6 +18,7 @@ struct InlineCabinetPicker: View {
     /// Optional: if provided, shows a "From Device" row pinned to the bottom.
     var onBrowse: (() -> Void)? = nil
 
+    @Environment(LibraryStore.self) private var libraryStore
     @State private var selectedURLs: Set<URL> = []
 
     private var filtered: [LibraryEntry] {
@@ -65,8 +66,12 @@ struct InlineCabinetPicker: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") { onCancel() }
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button { onCancel() } label: {
+                    Image(systemName: "chevron.left")
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Color.dsBrandPrimary)
+                }
             }
             if allowsMultipleSelection {
                 ToolbarItem(placement: .confirmationAction) {
@@ -85,8 +90,11 @@ struct InlineCabinetPicker: View {
 
     @ViewBuilder
     private func singleCard(_ entry: LibraryEntry) -> some View {
+        let url = entry.document.url
+        let isNew = libraryStore.recentlyAddedURLs.contains(url)
         Button {
-            onPick([entry.document.url])
+            libraryStore.clearNew(url)
+            onPick([url])
         } label: {
             DSFileRow(ref: entry.document)
                 .padding(.horizontal, DSSpacing.md)
@@ -96,6 +104,9 @@ struct InlineCabinetPicker: View {
                             in: RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous))
                 .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
                 .shadow(color: .black.opacity(0.06), radius: 14, x: 0, y: 6)
+                .overlay(alignment: .topTrailing) {
+                    if isNew { NewBadge().padding(.top, 8).padding(.trailing, 4) }
+                }
         }
         .buttonStyle(.plain)
     }
@@ -104,8 +115,12 @@ struct InlineCabinetPicker: View {
     private func multiCard(_ entry: LibraryEntry) -> some View {
         let url = entry.document.url
         let isSelected = selectedURLs.contains(url)
+        let isNew = libraryStore.recentlyAddedURLs.contains(url)
         Button {
-            if isSelected { selectedURLs.remove(url) } else { selectedURLs.insert(url) }
+            if isSelected { selectedURLs.remove(url) } else {
+                libraryStore.clearNew(url)
+                selectedURLs.insert(url)
+            }
         } label: {
             HStack {
                 DSFileRow(ref: entry.document)
@@ -123,8 +138,34 @@ struct InlineCabinetPicker: View {
             )
             .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
             .shadow(color: .black.opacity(0.06), radius: 14, x: 0, y: 6)
+            .overlay(alignment: .topTrailing) {
+                if isNew { NewBadge().padding(.top, 8).padding(.trailing, 4) }
+            }
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: - Multi-select confirm bar
+
+    private var multiSelectBar: some View {
+        let count = selectedURLs.count
+        return VStack(spacing: 0) {
+            Divider()
+            Button {
+                onPick(Array(selectedURLs))
+            } label: {
+                Text(count == 0 ? "Add" : "Add \(count) File\(count == 1 ? "" : "s")")
+                    .font(DSFont.headline)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .tint(Color.dsBrandPrimary)
+            .disabled(selectedURLs.isEmpty)
+            .padding(.horizontal, DSSpacing.lg)
+            .padding(.vertical, DSSpacing.md)
+        }
+        .background(Color(uiColor: .systemBackground))
     }
 
     // MARK: - Browse footer
@@ -152,5 +193,18 @@ struct InlineCabinetPicker: View {
             .padding(.bottom, DSSpacing.sm)
         }
         .background(Color(uiColor: .systemBackground))
+    }
+}
+
+/// Small "New" pill badge shown on file rows when a tool operation just
+/// committed a file to the Library — clears when the user taps the file.
+struct NewBadge: View {
+    var body: some View {
+        Text("New")
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color.dsBrandPrimary, in: Capsule())
     }
 }

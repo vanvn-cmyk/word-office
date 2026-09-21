@@ -1543,10 +1543,27 @@
               var _done = false;
               try { localStorage.setItem('_oo_insert_pending', 'chart'); } catch(_) {}
 
-              // ── Word / Presentation: asc_insertChart with plain params (no CChartSpace — spreadsheet-only) ──
+              // ── Word / Presentation: try CChartSpace first (required by some ONLYOFFICE builds),
+              // then fall back to plain params. asc_addChartDrawing is NEVER called here — it is a
+              // spreadsheet-only WASM export and causes an uncatchable crash in Word/PPT.
               if (!_done && _currentDocType !== 'spreadsheet') {
                 if (typeof _ed.asc_insertChart === 'function') {
-                  try { _ed.asc_insertChart({ type: chartNum, subtype: 0, style: 1 }); _done = true; console.log('[iOS] _insertChart: asc_insertChart OK (word/ppt)'); } catch(e) { console.warn('[iOS] asc_insertChart (word/ppt):', e); }
+                  // Attempt 1: CChartSpace object (works in newer OO builds)
+                  if (!_done && typeof Asc !== 'undefined' && typeof Asc.CChartSpace === 'function') {
+                    try {
+                      var _sp2 = new Asc.CChartSpace();
+                      _sp2.type = chartNum;
+                      if (typeof Asc.CChart === 'function') {
+                        var _ch2 = new Asc.CChart(); _ch2.type = chartNum; _ch2.subtype = chartNum; _sp2.chart = _ch2;
+                      }
+                      _ed.asc_insertChart(_sp2); _done = true;
+                      console.log('[iOS] _insertChart: asc_insertChart+CChartSpace OK');
+                    } catch(e) { console.warn('[iOS] asc_insertChart+CChartSpace:', e); }
+                  }
+                  // Attempt 2: plain params object (older OO builds)
+                  if (!_done) {
+                    try { _ed.asc_insertChart({ type: chartNum, subtype: 0, style: 1 }); _done = true; console.log('[iOS] _insertChart: asc_insertChart OK (word/ppt)'); } catch(e) { console.warn('[iOS] asc_insertChart (word/ppt):', e); }
+                  }
                 }
                 if (!_done && typeof _ed.asc_AddChart === 'function') {
                   try { _ed.asc_AddChart({ type: chartNum }); _done = true; } catch(e) {}
@@ -1677,6 +1694,81 @@
                 setTimeout(_shRestore, 1500);
               }, 120);
             } catch(outerErr) { console.warn('[iOS] _insertShape outer:', outerErr); }
+          }, 200);
+        };
+
+        // Insert a text box on the current PPT slide via StartAddShape('textRect') and
+        // automatically double-click the placed box so OO enters text-edit mode immediately.
+        window._insertTextBox = function() {
+          if (!_innerWin) return;
+          window._filterInterceptEnabled = false;
+          try { _innerWin._ooInjectEnabled = false; } catch(_) {}
+
+          var _tbDone = false;
+          var _tbRestore = function() {
+            if (_tbDone) return; _tbDone = true;
+            window._filterInterceptEnabled = true;
+            try { _innerWin._ooInjectEnabled = true; } catch(_) {}
+          };
+          setTimeout(_tbRestore, 8000);
+
+          setTimeout(function() {
+            try { _innerWin.focus(); } catch(_) {}
+            try {
+              var _ed = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+              if (!_ed) { _tbRestore(); return; }
+
+              // Enter text-box draw mode
+              if (typeof _ed.StartAddShape === 'function') {
+                _ed.StartAddShape('textRect', true);
+              } else if (typeof _ed.asc_startAddShape === 'function') {
+                _ed.asc_startAddShape('textRect');
+              } else {
+                _showInsertToast('Text box not available in this editor version');
+                _tbRestore(); return;
+              }
+
+              // Simulate mousedown → mousemove → mouseup to draw the box, then dblclick to enter text mode
+              setTimeout(function() {
+                try {
+                  var _doc = _innerWin.document;
+                  var _target = _doc.getElementById('editor_sdk') ||
+                                _doc.getElementById('id_main_scroll') ||
+                                _doc.querySelector('canvas') || _doc.body;
+                  var _r  = _target.getBoundingClientRect();
+                  // Place in centre of slide at a comfortable size (~60% width, 30% height)
+                  var _x1 = _r.left + _r.width  * 0.20;
+                  var _y1 = _r.top  + _r.height * 0.30;
+                  var _x2 = _r.left + _r.width  * 0.80;
+                  var _y2 = _r.top  + _r.height * 0.60;
+                  var _cx = (_x1 + _x2) / 2, _cy = (_y1 + _y2) / 2;
+
+                  function _fire(name, cx, cy) {
+                    try {
+                      _target.dispatchEvent(new _innerWin.MouseEvent(name, {
+                        bubbles: true, cancelable: true,
+                        clientX: cx, clientY: cy, button: 0, detail: name === 'dblclick' ? 2 : 1,
+                        view: _innerWin
+                      }));
+                    } catch(_) {}
+                  }
+
+                  _fire('mousedown', _x1, _y1);
+                  setTimeout(function() {
+                    _fire('mousemove', _cx, _cy);
+                    _fire('mouseup',   _x2, _y2);
+                    try { _doc.body.dispatchEvent(new _innerWin.MouseEvent('mouseup', { bubbles: true, clientX: _x2, clientY: _y2, view: _innerWin })); } catch(_) {}
+                    // Double-click the centre to enter text-edit mode
+                    setTimeout(function() {
+                      _fire('click',    _cx, _cy);
+                      _fire('dblclick', _cx, _cy);
+                      console.log('[iOS] _insertTextBox: placed + dblclick to enter text mode');
+                    }, 150);
+                  }, 80);
+                } catch(evtErr) { console.warn('[iOS] _insertTextBox mouse sim:', evtErr); }
+                setTimeout(_tbRestore, 2000);
+              }, 120);
+            } catch(outerErr) { console.warn('[iOS] _insertTextBox outer:', outerErr); }
           }, 200);
         };
 
@@ -3338,7 +3430,7 @@
           'number-percent':     '0%',
           'number-decimal-inc': '__incDecimal__',
           'number-decimal-dec': '__decDecimal__',
-          'number-date':        'm/d/yyyy',
+          'number-date':        'dd/mm/yyyy',
           'number-time':        'hh:mm:ss',
           'number-text':        '@',
         };
@@ -3793,18 +3885,15 @@
           }
 
           // ── Insert / delete rows & columns ────────────────────────────────────
-          // asc_insertRows(above, count) carries direction; asc_insertCells uses a
-          // direction-less enum (InsertRows=2) so it must be last resort.
+          // Try direct Asc API (asc_insertCells / asc_deleteCells with enum, then
+          // named helpers), falling back to executeFocusedCommand with inner focus.
           if (cmd === 'row-insert-above' || cmd === 'row-insert-below') {
-            var _isAbove = cmd === 'row-insert-above';
-            if      (typeof _ed.asc_insertRows  === 'function') { _ed.asc_insertRows(_isAbove, 1); }
-            else if (typeof _ed.asc_addRow      === 'function') { _ed.asc_addRow(_isAbove); }
-            else {
-              var _io = _A.c_oAscInsertOptions || {};
-              var _rowType = _io.InsertRows !== undefined ? _io.InsertRows : 2;
-              if (typeof _ed.asc_insertCells === 'function') { _ed.asc_insertCells(_rowType); }
-              else { _execFocused(_isAbove ? 'InsertRowAbove' : 'InsertRowBelow'); }
-            }
+            var _io = _A.c_oAscInsertOptions || {};
+            var _rowType = _io.InsertRows !== undefined ? _io.InsertRows : 2;
+            if      (typeof _ed.asc_insertCells === 'function') { _ed.asc_insertCells(_rowType); }
+            else if (typeof _ed.asc_insertRows  === 'function') { _ed.asc_insertRows(cmd === 'row-insert-above', 1); }
+            else if (typeof _ed.asc_addRow      === 'function') { _ed.asc_addRow(cmd === 'row-insert-above'); }
+            else { _execFocused(cmd === 'row-insert-above' ? 'InsertRowAbove' : 'InsertRowBelow'); }
             return;
           }
           if (cmd === 'row-delete') {
@@ -3882,21 +3971,8 @@
             return;
           }
 
-          // Find: open OO's search bar.
-          // Ctrl+F keyboard simulation is a no-op on iOS WKWebView, so try direct
-          // API and _clickOOBtn first; Ctrl+F is kept as last resort for desktop.
+          // Find: open search bar — dispatch Ctrl+F to inner frame so OO handles it
           if (cmd === 'find') {
-            var _fEd = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
-            if (_fEd) {
-              var _findFns = ['asc_openFind','asc_findText','asc_ShowFindBar','asc_showFindBar',
-                              'asc_findAndReplace','asc_Find'];
-              for (var _fi = 0; _fi < _findFns.length; _fi++) {
-                if (typeof _fEd[_findFns[_fi]] === 'function') {
-                  try { _fEd[_findFns[_fi]](); return; } catch(_) {}
-                }
-              }
-            }
-            if (_clickOOBtn(['find','search','find and replace','open find','find bar','magnify'])) return;
             try {
               var _fDoc = _innerWin && _innerWin.document;
               if (_fDoc) {
@@ -3905,8 +3981,10 @@
                   bubbles: true, cancelable: true, key: 'f', keyCode: 70, which: 70,
                   ctrlKey: true, view: _innerWin
                 }));
+                return;
               }
             } catch(_) {}
+            if (_clickOOBtn(['find','search','open find panel','find bar'])) return;
             _execFocused('find');
             return;
           }
@@ -4087,14 +4165,14 @@
             var _xedT = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
             var _doneT = false;
             if (_xedT) {
-              // Word: put_Table(rows, cols) | asc_addTable | CreateTable
-              // Spreadsheet: asc_insertTable | asc_fmtTableApply
+              // Word/PPT first: asc_addTable / put_Table / CreateTable accept (rows, cols).
+              // asc_fmtTableApply is Excel-only: silently succeeds in Word without inserting.
               var _tMethods = [
-                ['asc_fmtTableApply', function(ed) { ed.asc_fmtTableApply(null, null, true); }],
-                ['asc_insertTable',   function(ed) { ed.asc_insertTable(); }],
                 ['put_Table',         function(ed) { ed.put_Table(3, 3); }],
                 ['asc_addTable',      function(ed) { ed.asc_addTable(3, 3); }],
                 ['CreateTable',       function(ed) { ed.CreateTable(3, 3); }],
+                ['asc_fmtTableApply', function(ed) { ed.asc_fmtTableApply(null, null, true); }],
+                ['asc_insertTable',   function(ed) { ed.asc_insertTable(); }],
               ];
               _tMethods.forEach(function(pair) {
                 if (!_doneT && typeof _xedT[pair[0]] === 'function') {

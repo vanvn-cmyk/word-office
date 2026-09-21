@@ -2,6 +2,7 @@
 // near-identical views: pick → convert → success, only the file-type filter,
 // copy, and result kind differ per direction.
 
+import PDFKit
 import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
@@ -24,12 +25,33 @@ struct ConvertFlowView: View {
     /// QuickLook. Session 10 gap fix (2026-09-04) — the previous "toast
     /// + stay at picker" behaviour orphaned the export result.
     var onShowGallery: (([URL]) -> Void)? = nil
+    /// Called after a successful officeToPDF conversion — parent can push
+    /// the Sign destination with the result pre-selected, skipping the
+    /// cabinet re-pick. Only wired for officeToPDF; other directions stay nil.
+    var onSign: ((URL) -> Void)? = nil
+    /// Called after a successful officeToPDF conversion — parent can push
+    /// the Print destination with the result pre-selected.
+    var onPrint: ((URL) -> Void)? = nil
 
     // Office→PDF / PDF→Word
     @State private var singleFileURL: URL?
     @State private var needsOCRNotice: Bool?
+    /// Bound to ToolsTabView's `officeToPDFResult` for officeToPDF — allows
+    /// Sign (when invoked from the success screen) to update the preview by
+    /// writing the signed URL back through the binding. For all other directions
+    /// this binding is `.constant(nil)` and no writes are observed.
+    @Binding var conversionResult: URL?
+    /// Bound to ToolsTabView's `imageToPDFSignedResult` — when Sign
+    /// auto-commits a signed PDF from the imageToPDF success screen, the
+    /// committed URL flows in here and `imageToPDFCommittedURL` is updated
+    /// so the preview refreshes to the signed version.
+    var imageToPDFSignedResult: Binding<URL?> = .constant(nil)
 
-    // PDF→Image
+    // PDF→Image — gallery managed internally so Done can reset to Cabinet
+    @State private var isGalleryPresented = false
+    @State private var galleryURLs: [URL] = []
+    @State private var pendingGalleryEditorURL: URL?
+
     @State private var pageRangeAll = true
     @State private var fromPage = 1
     @State private var toPage = 1
@@ -47,12 +69,23 @@ struct ConvertFlowView: View {
 
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var images: [SelectedImage] = []
+    /// Staged temp URL from `convertImagesToPDFToTemp` — non-nil = show
+    /// preview screen. User taps Continue to commit to Library, or back chevron
+    /// to discard and return to the photo list.
+    @State private var imageToPDFStagedURL: URL?
+    /// Set after `commitImagesPDF` succeeds — shows Sign/Print/Done success screen.
+    @State private var imageToPDFCommittedURL: URL?
+    /// True while auto-converting from the browse path so `stateContent`
+    /// stays blank (processing overlay covers). Prevents the "1 file selected"
+    /// intermediate screen from flashing into view.
+    @State private var isDirectConverting = false
 
     @Environment(LibraryStore.self) private var store
 
     @State private var isPickerPresented = false
     @State private var isLibraryPickerPresented = false
     @State private var isSourcePickerPresented = false
+    @State private var isPhotoPickerPresented = false
     @State private var didAutoPresent = false
 
     /// Identifies exactly what a successful convert ran on, so re-tapping
@@ -84,7 +117,7 @@ struct ConvertFlowView: View {
 
     var body: some View {
         Group {
-            if isLibraryPickerPresented {
+            if isLibraryPickerPresented || (initialSource == .library && !didAutoPresent) {
                 InlineCabinetPicker(
                     entries: store.entries,
                     filter: libraryFilter,
@@ -93,11 +126,23 @@ struct ConvertFlowView: View {
                     emptyMessage: libraryEmptyMessage
                 ) { urls in
                     guard let url = urls.first else { return }
-                    isLibraryPickerPresented = false
+                    // Auto-converting directions keep the cabinet visible behind
+                    // the processing overlay; handleFilePicked controls when to
+                    // flip isLibraryPickerPresented after conversion completes.
+                    if direction == .imageToPDF {
+                        isLibraryPickerPresented = false
+                    }
                     handleFilePicked(.success(url))
                 } onCancel: {
-                    isLibraryPickerPresented = false
-                    if singleFileURL == nil { dismiss() }
+                    if conversionResult != nil {
+                        // Result screen is pending; cabinet was opened for some other
+                        // reason — just close cabinet to reveal the result screen.
+                        isLibraryPickerPresented = false
+                    } else if singleFileURL == nil || direction == .officeToPDF {
+                        dismiss()
+                    } else {
+                        isLibraryPickerPresented = false
+                    }
                 } onBrowse: {
                     isPickerPresented = true
                 }
@@ -106,25 +151,79 @@ struct ConvertFlowView: View {
             }
         }
         .prominentInlineTitle(isLibraryPickerPresented ? "Cabinet" : direction.title)
+        .navigationBarBackButtonHidden(
+            isDirectConverting ||
+            isLibraryPickerPresented ||
+            (!didAutoPresent && initialSource == .library) ||
+            (singleFileURL != nil && initialSource == .library && direction != .officeToPDF && direction != .pdfToWord) ||
+            (conversionResult != nil && initialSource == .library) ||
+            (direction == .imageToPDF && imageToPDFStagedURL != nil) ||
+            (direction == .imageToPDF && imageToPDFCommittedURL != nil)
+        )
         .toolbar { toolbarContent }
+        .sheet(isPresented: $isGalleryPresented, onDismiss: handleGalleryDismissed) {
+            ToolResultGalleryView(
+                urls: galleryURLs,
+                onOpenFile: { url in pendingGalleryEditorURL = url },
+                onDone: {
+                    // Update state on Done tap (before dismiss animation completes)
+                    // so the underlying view already shows the cabinet by the time
+                    // the sheet finishes animating out — prevents the stateContent
+                    // from flashing through during the sheet dismiss.
+                    singleFileURL = nil
+                    if initialSource == .library { isLibraryPickerPresented = true }
+                },
+                onSaveAll: {
+                    let finals = await viewModel.commitPDFToImages(galleryURLs)
+                    if !finals.isEmpty {
+                        finals.forEach { store.markAsNew($0) }
+                        let count = finals.count
+                        toaster.show(.success, title: "\(count) image\(count == 1 ? "" : "s") saved to your Library")
+                        galleryURLs = finals
+                    }
+                }
+            )
+            .toastHost(toaster)
+        }
         .fileImporter(isPresented: $isPickerPresented, allowedContentTypes: fileImporterTypes, onCompletion: handleFilePicked)
         .fileSourcePicker(isPresented: $isSourcePickerPresented,
                           title: sourcePickerTitle,
                           onLibrary: { isLibraryPickerPresented = true },
                           onBrowse: { isPickerPresented = true })
         .task {
-            // `initialSource` is set by ToolsTabView before navigating here
-            // (user already chose Library or Browse from the Tools tab sheet).
-            // Open the appropriate picker directly — no intermediate sheet.
-            guard !didAutoPresent, let source = initialSource, singleFileURL == nil else { return }
+            guard !didAutoPresent else { return }
             didAutoPresent = true
-            switch source {
-            case .library: isLibraryPickerPresented = true
-            case .browse:  isPickerPresented = true
+            guard direction != .imageToPDF else { return }
+            switch initialSource {
+            case .prePickedURLs(let urls):
+                singleFileURL = urls.first
+                guard singleFileURL != nil else { return }
+                // Suppress stateContent during auto-convert from pre-picked path.
+                isDirectConverting = true
+                await performConvert()
+                isDirectConverting = false
+                // Staged flows show their own result screen (officeToPDF/pdfToWord)
+                // or gallery sheet (pdfToImage) — do NOT dismiss here.
+            case .library:
+                guard singleFileURL == nil else { return }
+                isLibraryPickerPresented = true
+            case .browse:
+                isPickerPresented = true
+            case nil:
+                guard singleFileURL == nil else { return }
+                isSourcePickerPresented = true
             }
         }
         .onChange(of: photoItems) { _, items in
             Task { await loadImages(items) }
+        }
+        .onChange(of: imageToPDFSignedResult.wrappedValue) { _, url in
+            guard let url else { return }
+            imageToPDFCommittedURL = url
+            imageToPDFSignedResult.wrappedValue = nil
+            // Reset so Convert re-enables after sign (user can create a fresh
+            // unsigned PDF from the same photos if they want).
+            lastConvertedSnapshot = nil
         }
         .overlay { processingOverlay }
         .errorAlert($viewModel.errorMessage)
@@ -143,13 +242,24 @@ struct ConvertFlowView: View {
     // back and re-tapping the tool card.
     @ViewBuilder
     private var stateContent: some View {
-        switch direction {
-        case .officeToPDF, .pdfToWord:
-            singleFileState
-        case .pdfToImage:
-            pdfToImageState
-        case .imageToPDF:
-            imageToPDFState
+        if isDirectConverting {
+            // Keep background blank while processing overlay is active —
+            // prevents the "1 file selected" form from flashing into view
+            // during auto-convert from the browse path.
+            Color.dsBackgroundSecondary.ignoresSafeArea()
+        } else {
+            switch direction {
+            case .officeToPDF, .pdfToWord:
+                singleFileState
+            case .pdfToImage:
+                pdfToImageState
+            case .imageToPDF:
+                if let committedURL = imageToPDFCommittedURL {
+                    imageToPDFSuccessView(committedURL)
+                } else {
+                    imageToPDFState
+                }
+            }
         }
     }
 
@@ -170,7 +280,65 @@ struct ConvertFlowView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        if !isLibraryPickerPresented {
+        // Back from officeToPDF success screen → cabinet (library source).
+        if direction == .officeToPDF, conversionResult != nil, initialSource == .library {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    if let url = conversionResult {
+                        try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+                        conversionResult = nil
+                    }
+                    singleFileURL = nil
+                    isLibraryPickerPresented = true
+                } label: {
+                    Image(systemName: "chevron.left").fontWeight(.semibold).foregroundStyle(Color.dsBrandPrimary)
+                }
+            }
+        }
+        // Back from file-selected state → cabinet (pdfToImage from library).
+        if singleFileURL != nil && !isLibraryPickerPresented && initialSource == .library
+            && direction == .pdfToImage {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    singleFileURL = nil
+                    isLibraryPickerPresented = true
+                } label: {
+                    Image(systemName: "chevron.left").fontWeight(.semibold).foregroundStyle(Color.dsBrandPrimary)
+                }
+            }
+        }
+        // Back from imageToPDF success screen → photo list.
+        if direction == .imageToPDF, imageToPDFCommittedURL != nil {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    imageToPDFCommittedURL = nil
+                    images = []
+                } label: {
+                    Image(systemName: "chevron.left").fontWeight(.semibold).foregroundStyle(Color.dsBrandPrimary)
+                }
+            }
+        }
+        // Back from imageToPDF preview → photo list (discard staged temp file).
+        if direction == .imageToPDF, imageToPDFStagedURL != nil {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    if let url = imageToPDFStagedURL {
+                        try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+                        imageToPDFStagedURL = nil
+                    }
+                    lastConvertedSnapshot = nil
+                } label: {
+                    Image(systemName: "chevron.left").fontWeight(.semibold).foregroundStyle(Color.dsBrandPrimary)
+                }
+            }
+        }
+        // Convert button — only for directions that need manual confirmation
+        // (pdfToImage page-range form, imageToPDF photo list).
+        // officeToPDF and pdfToWord auto-convert on file pick, so they never
+        // show the Convert button.
+        if !isLibraryPickerPresented
+            && (direction == .pdfToImage || direction == .imageToPDF)
+            && imageToPDFStagedURL == nil {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Convert") { Task { await performConvert() } }
                     .fontWeight(.semibold)
@@ -181,9 +349,96 @@ struct ConvertFlowView: View {
 
     // MARK: - Office→PDF / PDF→Word
 
+    /// Success screen shown after officeToPDF converts — lets the user Sign,
+    /// Print, or dismiss without re-navigating to a separate tool.
+    @ViewBuilder
+    private func officeToPDFSuccessView(_ url: URL) -> some View {
+        VStack(spacing: 0) {
+            // Compact header
+            VStack(spacing: DSSpacing.sm) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 44))
+                    .foregroundStyle(Color.dsBrandPrimary)
+                VStack(spacing: 2) {
+                    Text("PDF created")
+                        .font(DSFont.headline)
+                        .foregroundStyle(Color.dsTextPrimary)
+                    Text(url.lastPathComponent)
+                        .font(DSFont.footnote)
+                        .foregroundStyle(Color.dsTextSecondary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, DSSpacing.lg)
+                }
+            }
+            .padding(.top, DSSpacing.lg)
+            .padding(.bottom, DSSpacing.md)
+
+            // PDF preview fills the middle
+            PDFFirstPagePreview(url: url)
+                .background(Color.dsBackgroundElevated)
+                .clipShape(RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous)
+                        .stroke(Color.dsBorderSubtle, lineWidth: 1)
+                )
+                .padding(.horizontal, DSSpacing.lg)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            // Action buttons
+            VStack(spacing: DSSpacing.xs) {
+                if let onSign {
+                    Button { onSign(url) } label: {
+                        Label("Sign PDF", systemImage: "signature")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .tint(Color.dsBrandPrimary)
+                }
+                if let onPrint {
+                    Button { onPrint(url) } label: {
+                        Label("Print", systemImage: "printer")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .tint(Color.dsBrandPrimary)
+                }
+                Button {
+                    Task {
+                        if let finalURL = await viewModel.commitToPDF(url) {
+                            store.markAsNew(finalURL)
+                            toaster.show(.success, title: "Your PDF was saved to your Library", filename: finalURL.lastPathComponent)
+                        }
+                        conversionResult = nil
+                        singleFileURL = nil
+                        if initialSource == .library {
+                            isLibraryPickerPresented = true
+                        } else {
+                            dismiss()
+                        }
+                    }
+                } label: {
+                    Text("Done")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .tint(Color.dsBrandPrimary)
+                .disabled(viewModel.isProcessing)
+            }
+            .padding(.horizontal, DSSpacing.lg)
+            .padding(.top, DSSpacing.md)
+            .padding(.bottom, DSSpacing.lg)
+        }
+    }
+
     private var singleFileState: some View {
         Group {
-            if let singleFileURL {
+            if direction == .officeToPDF, let resultURL = conversionResult {
+                officeToPDFSuccessView(resultURL)
+            } else if let singleFileURL {
                 List {
                     Section("1 file selected") {
                         DSFileRow(ref: DocumentRef(name: singleFileURL.lastPathComponent, url: singleFileURL, modifiedAt: singleFileURL.contentModificationDateOrNow, kind: DocumentKind(rawValue: singleFileURL.pathExtension.lowercased()) ?? (direction == .officeToPDF ? .docx : .pdf)))
@@ -245,14 +500,18 @@ struct ConvertFlowView: View {
 
     private var imageToPDFState: some View {
         Group {
-            if images.isEmpty {
-                VStack(spacing: DSSpacing.md) {
-                    EmptyStateView(icon: "photo.on.rectangle", title: "Add photos", message: "Choose the photos you want combined into one PDF, in order")
-                    PhotosPicker(selection: $photoItems, matching: .images) {
-                        Text("Choose photos")
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
+            if let stagedURL = imageToPDFStagedURL {
+                imageToPDFPreviewView(stagedURL)
+            } else if images.isEmpty {
+                EmptyStateView(
+                    icon: "photo.on.rectangle",
+                    title: "Add photos",
+                    message: "Choose the photos you want combined into one PDF, in order",
+                    action: ("Choose photos", { isPhotoPickerPresented = true })
+                )
+                .photosPicker(isPresented: $isPhotoPickerPresented,
+                              selection: $photoItems,
+                              matching: .images)
             } else {
                 List {
                     Section("\(images.count) photos · will merge in this order") {
@@ -277,6 +536,108 @@ struct ConvertFlowView: View {
                 }
                 .toolbar { ToolbarItem(placement: .topBarTrailing) { EditButton() } }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func imageToPDFPreviewView(_ url: URL) -> some View {
+        VStack(spacing: 0) {
+            VStack(spacing: DSSpacing.sm) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 44))
+                    .foregroundStyle(Color.dsBrandPrimary)
+                VStack(spacing: 2) {
+                    Text("PDF ready")
+                        .font(DSFont.headline)
+                        .foregroundStyle(Color.dsTextPrimary)
+                    Text("\(images.count) photo\(images.count == 1 ? "" : "s") combined")
+                        .font(DSFont.footnote)
+                        .foregroundStyle(Color.dsTextSecondary)
+                }
+            }
+            .padding(.top, DSSpacing.lg)
+            .padding(.bottom, DSSpacing.md)
+
+            PDFFirstPagePreview(url: url)
+                .background(Color.dsBackgroundElevated)
+                .clipShape(RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous)
+                        .stroke(Color.dsBorderSubtle, lineWidth: 1)
+                )
+                .padding(.horizontal, DSSpacing.lg)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            Button {
+                Task { await commitImagesToPDF() }
+            } label: {
+                Text("Continue")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .tint(Color.dsBrandPrimary)
+            .disabled(viewModel.isProcessing)
+            .padding(.horizontal, DSSpacing.lg)
+            .padding(.top, DSSpacing.md)
+            .padding(.bottom, DSSpacing.lg)
+        }
+    }
+
+    /// Success screen shown after Image→PDF is committed to Library.
+    /// Mirrors `officeToPDFSuccessView` — Sign / Print / Done buttons.
+    @ViewBuilder
+    private func imageToPDFSuccessView(_ url: URL) -> some View {
+        VStack(spacing: 0) {
+            VStack(spacing: DSSpacing.sm) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 44))
+                    .foregroundStyle(Color.dsBrandPrimary)
+                VStack(spacing: 2) {
+                    Text("PDF ready")
+                        .font(DSFont.headline)
+                        .foregroundStyle(Color.dsTextPrimary)
+                    Text("\(images.count) photo\(images.count == 1 ? "" : "s") combined")
+                        .font(DSFont.footnote)
+                        .foregroundStyle(Color.dsTextSecondary)
+                }
+            }
+            .padding(.top, DSSpacing.lg)
+            .padding(.bottom, DSSpacing.md)
+
+            PDFFirstPagePreview(url: url)
+                .background(Color.dsBackgroundElevated)
+                .clipShape(RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous)
+                        .stroke(Color.dsBorderSubtle, lineWidth: 1)
+                )
+                .padding(.horizontal, DSSpacing.lg)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            VStack(spacing: DSSpacing.xs) {
+                if let onSign {
+                    Button { onSign(url) } label: {
+                        Label("Sign PDF", systemImage: "signature")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .tint(Color.dsBrandPrimary)
+                }
+                if let onPrint {
+                    Button { onPrint(url) } label: {
+                        Label("Print", systemImage: "printer")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .tint(Color.dsBrandPrimary)
+                }
+            }
+            .padding(.horizontal, DSSpacing.lg)
+            .padding(.top, DSSpacing.md)
+            .padding(.bottom, DSSpacing.lg)
         }
     }
 
@@ -310,20 +671,79 @@ struct ConvertFlowView: View {
 
     private func handleFilePicked(_ result: Result<URL, Error>) {
         guard case .success(let url) = result else { return }
-        isLibraryPickerPresented = false
         switch direction {
-        case .officeToPDF, .pdfToWord:
+        case .officeToPDF:
+            // Cabinet stays visible (overlay on top) while converting to temp.
+            // On success: flip to success screen. On failure: cabinet stays for retry.
             singleFileURL = url
-            if direction == .pdfToWord {
-                needsOCRNotice = nil
-                Task { needsOCRNotice = await viewModel.checkNeedsOCR(url) }
+            Task {
+                if let tempURL = await viewModel.convertToPDFToTemp(url) {
+                    conversionResult = tempURL
+                }
+                isLibraryPickerPresented = false
+            }
+        case .pdfToWord:
+            if initialSource == .library {
+                // Library: cabinet stays visible behind overlay; convert + commit directly.
+                singleFileURL = url
+                Task {
+                    if let tempURL = await viewModel.convertPDFToWordToTemp(url),
+                       let finalURL = await viewModel.commitPDFToWord(tempURL) {
+                        store.markAsNew(finalURL)
+                        singleFileURL = nil
+                        // Keep isLibraryPickerPresented = true so the cabinet stays
+                        // visible beneath the editor sheet — no flash of stateContent
+                        // between cabinet and editor, and Done in the editor returns
+                        // straight back to the cabinet instead of Tools home.
+                        onOpenFile?(finalURL)
+                    } else {
+                        singleFileURL = nil
+                        isLibraryPickerPresented = false
+                    }
+                }
+            } else {
+                // Browse: auto-convert + commit, then open in editor.
+                isDirectConverting = true
+                singleFileURL = url
+                Task {
+                    if let tempURL = await viewModel.convertPDFToWordToTemp(url),
+                       let finalURL = await viewModel.commitPDFToWord(tempURL) {
+                        store.markAsNew(finalURL)
+                        singleFileURL = nil
+                        isDirectConverting = false
+                        onOpenFile?(finalURL)
+                    } else {
+                        singleFileURL = nil
+                        isDirectConverting = false
+                        dismiss()
+                    }
+                }
             }
         case .pdfToImage:
-            singleFileURL = url
-            pageCount = PDFPageCounter.pageCount(of: url)
-            toPage = pageCount
+            if initialSource == .library {
+                // Library: cabinet stays visible behind overlay; convert to temp.
+                // Gallery shows after conversion — no toast until Save All is tapped.
+                singleFileURL = url
+                pageCount = PDFPageCounter.pageCount(of: url)
+                toPage = pageCount
+                Task {
+                    let tempURLs = await viewModel.convertPDFToImagesToTemp(url, pageRange: nil)
+                    singleFileURL = nil
+                    isLibraryPickerPresented = false
+                    guard !tempURLs.isEmpty else { return }
+                    lastConvertedSnapshot = .pdfToImageRange(url, nil)
+                    galleryURLs = tempURLs
+                    isGalleryPresented = true
+                }
+            } else {
+                // Browse: show page-range form; user taps Convert to proceed.
+                isLibraryPickerPresented = false
+                singleFileURL = url
+                pageCount = PDFPageCounter.pageCount(of: url)
+                toPage = pageCount
+            }
         case .imageToPDF:
-            break
+            isLibraryPickerPresented = false
         }
     }
 
@@ -354,6 +774,16 @@ struct ConvertFlowView: View {
 
     // MARK: - Actions
 
+    private func handleGalleryDismissed() {
+        if let url = pendingGalleryEditorURL {
+            pendingGalleryEditorURL = nil
+            onOpenFile?(url)
+        }
+        // Library navigation is handled immediately in the gallery's onDone callback
+        // (before the sheet animation completes) to prevent stateContent from
+        // flashing through during dismissal.
+    }
+
     private var canConvert: Bool {
         switch direction {
         case .officeToPDF, .pdfToWord, .pdfToImage: singleFileURL != nil
@@ -366,40 +796,48 @@ struct ConvertFlowView: View {
         switch direction {
         case .officeToPDF:
             guard let singleFileURL else { return }
-            await viewModel.convertToPDF(singleFileURL)
-            if let url = viewModel.lastConvertedURL {
+            if let tempURL = await viewModel.convertToPDFToTemp(singleFileURL) {
                 lastConvertedSnapshot = snapshot
-                toaster.show(.success, title: "Your document was saved to your Library", filename: url.lastPathComponent)
-                onOpenFile?(url)
+                conversionResult = tempURL
             }
         case .pdfToWord:
             guard let singleFileURL else { return }
-            await viewModel.convertPDFToWord(singleFileURL)
-            if let url = viewModel.lastConvertedURL {
+            if let tempURL = await viewModel.convertPDFToWordToTemp(singleFileURL),
+               let finalURL = await viewModel.commitPDFToWord(tempURL) {
+                store.markAsNew(finalURL)
                 lastConvertedSnapshot = snapshot
-                toaster.show(.success, title: "Your document was saved to your Library", filename: url.lastPathComponent)
-                onOpenFile?(url)
+                self.singleFileURL = nil
+                onOpenFile?(finalURL)
             }
         case .pdfToImage:
             guard let singleFileURL else { return }
             let range: ClosedRange<Int>? = pageRangeAll ? nil : (min(fromPage, toPage) - 1)...(max(fromPage, toPage) - 1)
-            await viewModel.convertPDFToImages(singleFileURL, pageRange: range)
-            let outputs = viewModel.lastImageExportURLs
-            guard !outputs.isEmpty else { return }
+            let tempURLs = await viewModel.convertPDFToImagesToTemp(singleFileURL, pageRange: range)
+            guard !tempURLs.isEmpty else { return }
             lastConvertedSnapshot = snapshot
-            let count = outputs.count
-            toaster.show(.success, title: "\(count) image\(count == 1 ? "" : "s") saved to your Library")
-            // Always gallery for images — no editor destination even for
-            // a single image, and the thumbnail grid is the natural way
-            // to review a page-by-page export.
-            onShowGallery?(outputs)
+            // No toast here — user must tap Save All in the gallery to commit.
+            galleryURLs = tempURLs
+            isGalleryPresented = true
         case .imageToPDF:
-            await viewModel.convertImagesToPDF(images.map(\.image))
-            if let url = viewModel.lastConvertedURL {
+            if let tempURL = await viewModel.convertImagesToPDFToTemp(images.map(\.image)),
+               let finalURL = await viewModel.commitImagesPDF(tempURL) {
+                store.markAsNew(finalURL)
                 lastConvertedSnapshot = snapshot
-                toaster.show(.success, title: "Your document was saved to your Library", filename: url.lastPathComponent)
-                onOpenFile?(url)
+                imageToPDFCommittedURL = finalURL
+                toaster.show(.success, title: "PDF saved to your Library", filename: finalURL.lastPathComponent)
             }
+        }
+    }
+
+    private func commitImagesToPDF() async {
+        guard let tempURL = imageToPDFStagedURL else { return }
+        if let finalURL = await viewModel.commitImagesPDF(tempURL) {
+            store.markAsNew(finalURL)
+            imageToPDFStagedURL = nil
+            lastConvertedSnapshot = nil
+            // Show success screen (Sign / Print / Done) — mirroring the
+            // officeToPDF pattern so user can sign or print the fresh PDF.
+            imageToPDFCommittedURL = finalURL
         }
     }
 
@@ -414,7 +852,11 @@ struct ConvertFlowView: View {
 
     private var fileImporterTypes: [UTType] {
         switch direction {
-        case .officeToPDF: AddFileMenu.supportedTypes.filter { $0 != .pdf }
+        case .officeToPDF: [
+            UTType("org.openxmlformats.wordprocessingml.document"),
+            UTType("com.microsoft.word.doc"),
+            .rtf, .plainText,
+        ].compactMap { $0 }
         case .pdfToWord, .pdfToImage: [.pdf]
         case .imageToPDF: []
         }
@@ -422,7 +864,7 @@ struct ConvertFlowView: View {
 
     private var libraryFilter: (LibraryEntry) -> Bool {
         switch direction {
-        case .officeToPDF: return { $0.document.kind != .pdf }
+        case .officeToPDF: return { $0.document.kind == .docx || $0.document.kind == .doc || $0.document.kind == .rtf || $0.document.kind == .txt || $0.document.kind == .markdown }
         case .pdfToWord, .pdfToImage: return { $0.document.kind == .pdf }
         case .imageToPDF: return { _ in false }
         }
@@ -430,7 +872,7 @@ struct ConvertFlowView: View {
 
     private var libraryEmptyTitle: String {
         switch direction {
-        case .officeToPDF: return "No Office documents in Library"
+        case .officeToPDF: return "No Word documents in Library"
         case .pdfToWord, .pdfToImage: return "No PDFs in Library"
         case .imageToPDF: return "No files in Library"
         }
@@ -438,9 +880,33 @@ struct ConvertFlowView: View {
 
     private var libraryEmptyMessage: String {
         switch direction {
-        case .officeToPDF: return "Import Word, Excel, or PowerPoint files first."
+        case .officeToPDF: return "Import a Word document first."
         case .pdfToWord, .pdfToImage: return "Import PDF files first, then come back."
         case .imageToPDF: return "Import files first, then come back."
+        }
+    }
+}
+
+// MARK: - PDF first-page preview
+
+/// Non-interactive single-page PDFView used in the officeToPDF success screen.
+private struct PDFFirstPagePreview: UIViewRepresentable {
+    let url: URL
+
+    func makeUIView(context: Context) -> PDFView {
+        let view = PDFView()
+        view.displayMode = .singlePage
+        view.displayDirection = .horizontal
+        view.autoScales = true
+        view.isUserInteractionEnabled = false
+        view.backgroundColor = .clear
+        view.document = PDFDocument(url: url)
+        return view
+    }
+
+    func updateUIView(_ view: PDFView, context: Context) {
+        if view.document?.documentURL != url {
+            view.document = PDFDocument(url: url)
         }
     }
 }

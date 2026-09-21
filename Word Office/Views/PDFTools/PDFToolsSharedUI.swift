@@ -27,8 +27,13 @@ struct ProcessingOverlay: View {
             }
             .padding(DSSpacing.xl)
             .background(Color.dsBackgroundElevated, in: RoundedRectangle(cornerRadius: DSRadius.large, style: .continuous))
-            .padding(DSSpacing.xxl)
+            .padding(.horizontal, DSSpacing.xxl)
         }
+        // Expand to fill the full screen (including behind the nav bar) so
+        // the card is centered on the entire visible viewport, not just the
+        // layout frame below the navigation bar.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .ignoresSafeArea()
     }
 }
 

@@ -13,38 +13,41 @@ final class DocumentLibraryScanner: DocumentLibraryScanning {
     private let fileManager = FileManager.default
 
     func scan(folder: URL) async -> [LibraryScanEntry] {
-        let keys: [URLResourceKey] = [
-            .contentModificationDateKey,
-            .isRegularFileKey,
-            .isUbiquitousItemKey,
-            .ubiquitousItemDownloadingStatusKey
-        ]
-
-        guard let contents = try? fileManager.contentsOfDirectory(
-            at: folder,
-            includingPropertiesForKeys: keys,
-            options: [.skipsHiddenFiles]
-        ) else {
-            return []
-        }
-
-        return contents.compactMap { url -> LibraryScanEntry? in
-            guard
-                let values = try? url.resourceValues(forKeys: Set(keys)),
-                values.isRegularFile == true,
-                let kind = DocumentKind.fromUTI(url: url)
-            else {
-                return nil
+        // Run off the caller's executor — same reasoning as PDFKitMerger/Splitter.
+        // `contentsOfDirectory` + per-file `resourceValues` are blocking FS calls;
+        // Task.detached prevents priority inheritance so a .userInteractive caller
+        // doesn't accidentally elevate a background scan.
+        await Task.detached(priority: .utility) {
+            let keys: [URLResourceKey] = [
+                .contentModificationDateKey,
+                .isRegularFileKey,
+                .isUbiquitousItemKey,
+                .ubiquitousItemDownloadingStatusKey
+            ]
+            guard let contents = try? FileManager.default.contentsOfDirectory(
+                at: folder,
+                includingPropertiesForKeys: keys,
+                options: [.skipsHiddenFiles]
+            ) else {
+                return []
             }
-
-            let ref = DocumentRef(
-                name: url.lastPathComponent,
-                url: url,
-                modifiedAt: values.contentModificationDate ?? Date(),
-                kind: kind
-            )
-            return LibraryScanEntry(document: ref, downloadState: Self.downloadState(from: values))
-        }
+            return contents.compactMap { url -> LibraryScanEntry? in
+                guard
+                    let values = try? url.resourceValues(forKeys: Set(keys)),
+                    values.isRegularFile == true,
+                    let kind = DocumentKind.fromUTI(url: url)
+                else {
+                    return nil
+                }
+                let ref = DocumentRef(
+                    name: url.lastPathComponent,
+                    url: url,
+                    modifiedAt: values.contentModificationDate ?? Date(),
+                    kind: kind
+                )
+                return LibraryScanEntry(document: ref, downloadState: DocumentLibraryScanner.downloadState(from: values))
+            }
+        }.value
     }
 
     // MARK: - iCloud state mapping

@@ -61,7 +61,7 @@ final class X2tConverterService: NSObject {
         let formatCode = kind.x2tFormatCode
         // Escape single quotes in filename to avoid breaking the JS string literal.
         let safeName = source.lastPathComponent.replacingOccurrences(of: "'", with: "\\'")
-        let js = "window.x2tConvert('\(docURL)', \(formatCode), '\(safeName)')"
+        let js = "void window.x2tConvert('\(docURL)', \(formatCode), '\(safeName)')"
 
         // Kick off conversion and wait for the bridge callback.
         let pdfData: Data = try await withCheckedThrowingContinuation { continuation in
@@ -181,12 +181,20 @@ enum X2tError: Error, LocalizedError {
 
 // MARK: - DocumentExporting adapter
 
-/// Thin adapter that bridges the @MainActor X2tConverterService to the
+/// Thin adapter that bridges the @MainActor conversion services to the
 /// DocumentExporting protocol (which must be Sendable).
+///
+/// Routing:
+///  • DOCX / DOC → MammothPDFService (mammoth.js + WKWebView.createPDF)
+///    — reliable on iOS; x2t's PDF renderer is not functional in the WASM build.
+///  • Other formats → X2tConverterService (best-effort; may fail for PDF output).
 final class X2tDocumentExporter: DocumentExporting, @unchecked Sendable {
     func exportPDF(from source: URL, to destination: URL) async throws {
-        // Calling @MainActor method from non-isolated context — Swift
-        // automatically hops to the main actor for the WebView work.
-        try await X2tConverterService.shared.exportPDF(from: source, to: destination)
+        let ext = source.pathExtension.lowercased()
+        if ext == "docx" || ext == "doc" {
+            try await MammothPDFService.shared.convertToPDF(from: source, to: destination)
+        } else {
+            try await X2tConverterService.shared.exportPDF(from: source, to: destination)
+        }
     }
 }

@@ -47,16 +47,13 @@ final class AirPrintCoordinator: NSObject, DocumentPrinting {
         controller.printInfo = info
         controller.printingItem = url
 
-        controller.present(animated: true) { [weak self] _, _, error in
-            guard let self else { return }
-            Task { @MainActor in
-                if let error {
-                    self.resumeContinuation(with: .failure(DocumentPrintingError.printFailed(error.localizedDescription)))
-                } else {
-                    // Second param `completed == false` covers user cancellation — not an error.
-                    self.resumeContinuation(with: .success(()))
-                }
-            }
+        controller.present(animated: true) { [weak self] _, _, _ in
+            // UIPrintInteractionController shows its own error dialogs (e.g.
+            // "Protected PDF files can only be printed separately") before this
+            // callback fires. Surfacing the error again via our own alert would
+            // double-notify the user, so we always resume with success here and
+            // let the system handle all print-time user communication.
+            self?.resumeContinuation(with: .success(()))
         }
     }
 

@@ -56,9 +56,19 @@ struct LibraryView: View {
     @AppStorage("libraryViewMode") private var viewMode: LibraryViewMode = .list
     @AppStorage("library.openDocumentTipSeen") private var tipSeen: Bool = false
     @State private var tipPresented: Bool = false
+    /// Measured height of the rendered TipCallout (bubble + caret). Used in
+    /// `tipOverlay` to offset the tooltip so its bottom sits exactly at the
+    /// card's top edge regardless of Dynamic Type size. Default 95 = typical
+    /// 3-line subheadline bubble + 8pt caret.
+    @State private var tipCalloutHeight: CGFloat = 95
     /// Target card's real frame (`libraryTipSpace` coordinate space), fed by
     /// `TipAnchorFrameKey` — see `tipOverlay`.
     @State private var tipAnchorFrame: CGRect?
+    /// "Get Started" section header row's frame — used for y-positioning so the
+    /// tooltip bubble clears the header entirely (the header sits between the
+    /// type chips and the first card, so anchoring to the card top caused the
+    /// bubble to overlap the header).
+    @State private var tipSectionHeaderFrame: CGRect?
 
     /// Local sheet state for "Save to Files" — the `UIDocumentPickerViewController`
     /// wrapper needs only a URL (no container dependency), so it stays here
@@ -236,54 +246,27 @@ struct LibraryView: View {
                 toaster.show(.success, title: summary)
                 viewModel.lastImportBatchSummary = nil
             }
-            // Convert-to-ZIP confirmation (Session 19) — asks BEFORE the
-            // zip runs so a Cancel path saves the wait on a large PDF.
-            // "Replace with ZIP" is destructive (deletes source PDF after
-            // the archive lands) → `role: .destructive` per HIG. Same
-            // ordering rule as `PreviewConfirmSheet` and the Import
-            // conflict dialog: safer first, destructive middle, cancel
-            // automatic.
-            .confirmationDialog(
-                zipDialogTitle,
-                isPresented: zipDialogBinding,
-                titleVisibility: .visible,
-                presenting: pendingZipRequest
-            ) { request in
-                Button("Keep Both") {
-                    Task { await commitConvertToZip(entryID: request.entryID, name: request.filename, deleteSource: false) }
-                    pendingZipRequest = nil
+            // Convert-to-ZIP — custom overlay so we get a scrim behind
+            // the dialog. Native `.confirmationDialog` gives no scrim.
+            .overlay {
+                if let request = pendingZipRequest {
+                    ZipConfirmDialog(
+                        filename: request.filename,
+                        onKeepBoth: {
+                            let r = request; pendingZipRequest = nil
+                            Task { await commitConvertToZip(entryID: r.entryID, name: r.filename, deleteSource: false) }
+                        },
+                        onReplace: {
+                            let r = request; pendingZipRequest = nil
+                            Task { await commitConvertToZip(entryID: r.entryID, name: r.filename, deleteSource: true) }
+                        },
+                        onCancel: { pendingZipRequest = nil }
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .center)))
                 }
-                Button("Replace with ZIP", role: .destructive) {
-                    Task { await commitConvertToZip(entryID: request.entryID, name: request.filename, deleteSource: true) }
-                    pendingZipRequest = nil
-                }
-                Button("Cancel", role: .cancel) {
-                    pendingZipRequest = nil
-                }
-            } message: { request in
-                Text("Would you like to keep \u{201C}\(request.filename)\u{201D} alongside the new ZIP archive, or replace it with the archive?")
             }
+            .animation(UIAccessibility.isReduceMotionEnabled ? nil : .easeOut(duration: 0.22), value: pendingZipRequest != nil)
         }
-    }
-
-    /// Dynamic title for the ZIP dialog — same reason `importConflictTitle`
-    /// is hoisted out (`confirmationDialog(_:isPresented:presenting:)` takes
-    /// a `LocalizedStringKey` at the outer level, not a per-`presenting`
-    /// expression).
-    private var zipDialogTitle: String {
-        if let name = pendingZipRequest?.filename {
-            return "Convert \u{201C}\(name)\u{201D} to ZIP"
-        }
-        return "Convert to ZIP"
-    }
-
-    private var zipDialogBinding: Binding<Bool> {
-        Binding(
-            get: { pendingZipRequest != nil },
-            set: { newValue in
-                if !newValue { pendingZipRequest = nil }
-            }
-        )
     }
 
     /// Local `.confirmationDialog` payload for the ZIP flow — kept as a
@@ -352,38 +335,28 @@ struct LibraryView: View {
     private var groupedSections: [(status: DocumentStatus, entries: [LibraryEntry])] { viewModel.groupedByStatus() }
 
     private var libraryList: some View {
-        ZStack(alignment: .topLeading) {
-            libraryListContent
-            tipOverlay
-        }
-        .coordinateSpace(name: "libraryTipSpace")
+        libraryListContent
     }
 
-    /// Coachmark overlay — floats above the list (not inside its row layout)
-    /// and positions itself from `tipAnchorFrame`, the target card's real
-    /// frame reported via `onGeometryChange` (see the `ForEach` below).
-    /// Anchoring a 0×0 point at the card's top-center and bottom-aligning
-    /// `TipCallout` on it pins the
-    /// bubble's arrow tip exactly `tipGap` above the card, growing upward —
-    /// no guessed Spacer/padding offset, no dependency on the bubble's own
-    /// measured height.
-    @ViewBuilder
-    private var tipOverlay: some View {
-        if let anchor = tipAnchorFrame, tipPresented {
-            let tipGap: CGFloat = 76
-            let tipXOffset: CGFloat = 70
-            Color.clear
-                .frame(width: 0, height: 0)
-                // `.overlay` MUST come before `.position` — `.position` makes
-                // its view report "as large as the parent offers" for layout
-                // purposes, so an `.overlay` chained after it aligns against
-                // that inflated full-screen frame instead of the 0×0 point
-                // (reproduced: hardcoding a mid-screen anchor still rendered
-                // the bubble pinned to the bottom edge until this was
-                // reordered).
-                .overlay(alignment: .bottom) { TipCallout() }
-                .position(x: anchor.midX + tipXOffset, y: anchor.minY - tipGap)
-                .transition(.opacity)
+    @ViewBuilder private var tipOverlay: some View {
+        if tipPresented, let cardFrame = tipAnchorFrame {
+            // y-anchor: use the section header top when measured (guarantees
+            // the bubble clears the "Get Started" header that sits between the
+            // type chips and the first card); fall back to the card top if the
+            // header frame hasn't landed yet.
+            let yAnchor = tipSectionHeaderFrame?.minY ?? cardFrame.minY
+            TipCallout()
+                .background {
+                    GeometryReader { geo in
+                        Color.clear.preference(key: TipCalloutHeightKey.self,
+                                               value: geo.size.height)
+                    }
+                }
+                .onPreferenceChange(TipCalloutHeightKey.self) { tipCalloutHeight = $0 }
+                .offset(
+                    x: max(0, cardFrame.midX - 110),
+                    y: max(8, yAnchor - tipCalloutHeight - 8)
+                )
                 .allowsHitTesting(false)
         }
     }
@@ -397,14 +370,17 @@ struct LibraryView: View {
         List {
             Section {
                 listHeader
-                    // Zero top inset — pulls the title row flush to
-                    // the safe-area top (status bar) so there's no
-                    // dead space between "11:22" and "Your Cabinet".
                     // Zero horizontal — insetGrouped List's own 20pt
                     // gutter is now the outer margin (matches Tools'
                     // `lg = 20` padding standard); adding sm=12 on top
                     // was double-indenting the title vs Tools.
-                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: DSSpacing.sm, trailing: 0))
+                    // `top: DSSpacing.sm` restores the visual gap between
+                    // the sticky `titleRow` (safeAreaInset above the List)
+                    // and the search field — the original VStack spacing
+                    // of `md = 16pt` is now split: `titleRow.padding(.bottom,
+                    // .xs)` = 8pt baked into the sticky header height + this
+                    // 12pt row inset = 20pt total, matching the original feel.
+                    .listRowInsets(EdgeInsets(top: DSSpacing.sm, leading: 0, bottom: DSSpacing.sm, trailing: 0))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             }
@@ -444,6 +420,20 @@ struct LibraryView: View {
                         .listRowSeparator(.hidden)
                 }
             } else {
+                // Show a spinner while the initial scan runs so the list
+                // isn't blank-white during the 200–800 ms it takes to read
+                // the folder. `libraryList` is always shown when isLoading=true
+                // (condition above keeps the empty-state branch gated on
+                // !isLoading), so this only fires on initial load.
+                if viewModel.isLoading && store.entries.isEmpty {
+                    Section {
+                        ProgressView()
+                            .frame(maxWidth: .infinity, minHeight: 220)
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
+                }
+
                 if !dueEntries.isEmpty {
                     Section {
                         sectionRows(dueEntries)
@@ -465,6 +455,15 @@ struct LibraryView: View {
                             let isFirst = group.status == groupedSections.first?.status
 
                             statusTabHeader(status: group.status, count: group.entries.count)
+                                // Capture the "Get Started" header's y so tipOverlay
+                                // can anchor the bubble ABOVE it (not above the card,
+                                // which would put the bubble on top of this row).
+                                .onGeometryChange(for: CGRect.self) { geo in
+                                    geo.frame(in: .named("libraryTipSpace"))
+                                } action: { newValue in
+                                    guard dueEntries.isEmpty && group.status == .getStarted else { return }
+                                    tipSectionHeaderFrame = newValue
+                                }
                                 .listRowSeparator(.hidden)
                                 .listRowInsets(EdgeInsets(
                                     top: isFirst ? 0 : DSSpacing.xs,
@@ -480,7 +479,7 @@ struct LibraryView: View {
 
                             ForEach(Array(group.entries.prefix(4))) { entry in
                                 let attachTip = dueEntries.isEmpty &&
-                                    (group.status == .getStarted || group.status == .draft) &&
+                                    group.status == .getStarted &&
                                     entry.id == group.entries.first?.id
                                 Group {
                                     cardContent(for: entry)
@@ -569,6 +568,28 @@ struct LibraryView: View {
         .navigationDestination(for: DocumentStatus.self) { status in
             statusAllFilesDestination(status: status)
         }
+        // `titleRow` (large title + premium crown) lives outside the
+        // scrollable List so it stays pinned while content scrolls —
+        // fixes the "Your Cabinet" jarring scroll bug (Image #18).
+        // `.safeAreaInset` shrinks the List's layout safe area by the
+        // header's height, so the first real list row starts exactly
+        // below it with no overlap. `spacing: 0` — the spacing between
+        // the inset view and List content comes from the listRowInsets.top
+        // on the header section instead (more predictable than the
+        // system-provided gap here, which varies with content context).
+        .safeAreaInset(edge: .top, spacing: 0) {
+            titleRow
+                .padding(.horizontal, DSSpacing.lg)
+                .background(Color(UIColor.systemGroupedBackground))
+        }
+        // Coordinate space + overlay live here (not on NavigationStack) so
+        // geo.frame(in: .named("libraryTipSpace")) and the overlay share the
+        // same (0,0) origin — the top-left of libraryListContent, which
+        // already includes the safeAreaInset (titleRow) offset. Placing
+        // both at NavigationStack level caused a mismatch: the overlay's
+        // origin was above the titleRow but card frames were measured below it.
+        .coordinateSpace(name: "libraryTipSpace")
+        .overlay(alignment: .topLeading) { tipOverlay }
     }
 
     /// One section's items, rendered as native `List` rows in `.list` mode or as
@@ -953,13 +974,20 @@ struct LibraryView: View {
                     VStack(spacing: DSSpacing.xs) {
                         ForEach(group.entries.prefix(4)) { entry in
                             let attachTip = dueEntries.isEmpty &&
-                                (group.status == .getStarted || group.status == .draft) &&
+                                group.status == .getStarted &&
                                 entry.id == group.entries.first?.id
                             cardContent(for: entry)
+                                .onGeometryChange(for: CGRect.self) { geo in
+                                    geo.frame(in: .named("libraryTipSpace"))
+                                } action: { newValue in
+                                    guard attachTip else { return }
+                                    tipAnchorFrame = newValue
+                                }
                                 .onAppear {
                                     guard attachTip, !tipSeen, !tipPresented else { return }
                                     Task { @MainActor in
                                         try? await Task.sleep(for: .seconds(1))
+                                        guard tipAnchorFrame != nil else { return }
                                         withAnimation(.easeIn(duration: 0.2)) { tipPresented = true }
                                         try? await Task.sleep(for: .seconds(4))
                                         withAnimation(.easeOut(duration: 0.2)) { tipPresented = false }
@@ -1011,6 +1039,10 @@ struct LibraryView: View {
                 let sectionIndex = groupedSections.firstIndex(where: { $0.status == group.status }) ?? 0
                 let isFirst = sectionIndex == 0
                 let localPhase = railShimmerProgress - CGFloat(sectionIndex)
+                // Attach coachmark to the first tile of the first .getStarted or
+                // .draft section (mirrors list-mode logic in the ForEach below).
+                let firstTipStatus = groupedSections.first(where: { $0.status == .getStarted })?.status
+                let attachTip = dueEntries.isEmpty && group.status == firstTipStatus
 
                 VStack(alignment: .leading, spacing: 0) {
                     // DocumentGrid adds its own .padding(.trailing, DSSpacing.xs) internally,
@@ -1040,8 +1072,20 @@ struct LibraryView: View {
                                 )
                             }
                         },
-                        leadingPadding: 0
+                        leadingPadding: 0,
+                        onFirstCardFrame: attachTip ? { frame in tipAnchorFrame = frame } : nil
                     )
+                    .onAppear {
+                        guard attachTip, !tipSeen, !tipPresented else { return }
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .seconds(1))
+                            guard tipAnchorFrame != nil else { return }
+                            withAnimation(.easeIn(duration: 0.2)) { tipPresented = true }
+                            try? await Task.sleep(for: .seconds(4))
+                            withAnimation(.easeOut(duration: 0.2)) { tipPresented = false }
+                            tipSeen = true
+                        }
+                    }
 
                     Color.clear.frame(height: DSSpacing.xxs)
                 }
@@ -1202,18 +1246,10 @@ struct LibraryView: View {
         // sampling region. `md` gives the shadow room to fall off before
         // the next element starts, without touching the shared shadow
         // recipe other screens rely on.
+        //
+        // `titleRow` is no longer here — it lives in the `.safeAreaInset`
+        // above the List so it stays pinned while content scrolls.
         VStack(alignment: .leading, spacing: DSSpacing.md) {
-            // Title + hero + chip strip stay mounted at every state.
-            // Previous attempts to collapse them on search focus forced
-            // the enclosing insetGrouped List to reflow row heights, and
-            // no timing curve masked that reflow — it always read as
-            // choppy pause. Keeping the header mounted is the
-            // one animation-free path: only `searchAndActionsRow` itself
-            // animates its own icon → Cancel swap, and the results below
-            // just re-populate as the query changes. The chip strip
-            // staying visible is a bonus — the user can narrow by type
-            // and search at the same time without breaking flow.
-            titleRow
             searchAndActionsRow
             // `LibraryHeroCard` ("Documents tracked") and `sampleLibraryBanner`
             // stay paused (2026-09-13). The Draft→Reviewed→Done timeline is now
@@ -1390,12 +1426,12 @@ struct LibraryView: View {
                   : "line.3.horizontal.decrease.circle")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(Color.dsBrandPrimary)
-                .contentTransition(.symbolEffect(.replace))
+                .contentTransition(.symbolEffect(.replace.magic(fallback: .replace.downUp)))
                 .frame(width: DSSize.minimumTouchTarget, height: DSSize.minimumTouchTarget)
                 .roundIconButtonSurface(isActive: activeFilterCount > 0)
+                .animation(reduceMotion ? nil : .smooth(duration: 0.28), value: isAnyFilterActive)
         }
         .buttonStyle(.plain)
-        .animation(reduceMotion ? nil : .smooth(duration: 0.28), value: activeFilterCount)
         .accessibilityLabel(activeFilterCount == 0
             ? "Filter documents"
             : "Filter documents, \(activeFilterCount) filter\(activeFilterCount == 1 ? "" : "s") active")
@@ -1556,7 +1592,15 @@ struct LibraryView: View {
     /// zipping starts. Zip can take seconds on a large PDF, so asking
     /// upfront saves the wait for a Cancel path.
     private func performConvertToZip(entryID: String, name: String) {
-        pendingZipRequest = PendingZipRequest(entryID: entryID, filename: name)
+        // Delay matches the kebab-menu dismiss animation (~350ms) so the
+        // fullScreenCover is fully gone before the confirmation dialog fires.
+        // Without the delay the dialog presents while the cover is still on
+        // screen and renders as a centered floating card instead of an action
+        // sheet, because it can't find the correct presentation host.
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(400))
+            pendingZipRequest = PendingZipRequest(entryID: entryID, filename: name)
+        }
     }
 
     /// Fires when the user picks an outcome from the ZIP confirmation
@@ -2061,15 +2105,21 @@ private struct LibrarySearchAndActionsBar<Trailing: View>: View {
     }
 }
 
+private struct TipCalloutHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
 private struct TipCallout: View {
     var body: some View {
         VStack(spacing: 0) {
-            Text("Hold to change status")
+            Text("Your file is here — edit it to update its working status")
                 .font(DSFont.subheadline.weight(.semibold))
                 .foregroundStyle(.primary)
+                .multilineTextAlignment(.center)
                 .padding(.horizontal, DSSpacing.md)
                 .padding(.vertical, DSSpacing.sm)
-                .fixedSize()
+                .frame(maxWidth: 220)
                 .background {
                     RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous)
                         .fill(Color.dsBackgroundElevated)
@@ -2081,5 +2131,84 @@ private struct TipCallout: View {
                 .foregroundStyle(Color.dsBackgroundElevated)
                 .offset(y: -1)
         }
+    }
+}
+
+// MARK: - ZIP Confirm Dialog
+
+/// Centered confirmation dialog with a scrim — replaces the native
+/// `.confirmationDialog` so we can add a semi-transparent overlay behind
+/// the card (the native API provides none).
+private struct ZipConfirmDialog: View {
+    let filename: String
+    let onKeepBoth: () -> Void
+    let onReplace: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.28)
+                .ignoresSafeArea()
+                .onTapGesture { onCancel() }
+
+            VStack(spacing: 0) {
+                // Header
+                VStack(spacing: DSSpacing.xs) {
+                    Text("Convert \u{201C}\(filename)\u{201D} to ZIP")
+                        .font(DSFont.headline)
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(Color.dsTextPrimary)
+                    Text("Keep \u{201C}\(filename)\u{201D} alongside the new ZIP, or replace it with the archive?")
+                        .font(DSFont.subheadline)
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(Color.dsTextSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, DSSpacing.lg)
+                .padding(.top, DSSpacing.lg)
+                .padding(.bottom, DSSpacing.md)
+
+                Divider()
+
+                DialogButton(label: "Keep Both", color: Color.dsBrandPrimary, weight: .medium, action: onKeepBoth)
+
+                Divider()
+
+                DialogButton(label: "Replace with ZIP", color: Color.dsStatusError, weight: .medium, action: onReplace)
+
+                Divider()
+
+                DialogButton(label: "Cancel", color: Color.dsTextSecondary, weight: .regular, action: onCancel)
+            }
+            .background(Color.dsBackgroundElevated)
+            .clipShape(RoundedRectangle(cornerRadius: DSRadius.large, style: .continuous))
+            .shadow(color: .black.opacity(0.12), radius: 24, y: 8)
+            .padding(.horizontal, DSSpacing.xl)
+        }
+    }
+}
+
+private struct DialogButton: View {
+    let label: String
+    let color: Color
+    let weight: Font.Weight
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(label)
+                .font(DSFont.body.weight(weight))
+                .foregroundStyle(color)
+                .frame(maxWidth: .infinity, minHeight: 50)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(DialogButtonStyle())
+    }
+}
+
+private struct DialogButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(configuration.isPressed ? Color.dsSurfacePressed : Color.clear)
     }
 }

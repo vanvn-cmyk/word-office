@@ -28,6 +28,7 @@ struct ScanFlowView: View {
     var onShowGallery: (([URL]) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @Environment(DSToastPresenter.self) private var toaster
+    @Environment(LibraryStore.self) private var libraryStore
 
     /// Wizard stages. No `.success` stage — save completion fires a toast
     /// (see `performSave`) and the user stays at `.exportFormat` so they can
@@ -583,6 +584,7 @@ struct ScanFlowView: View {
                 urls.append(destination)
             }
             guard !urls.isEmpty else { return }
+            urls.forEach { libraryStore.markAsNew($0) }
             let filename = urls.count == 1 ? urls[0].lastPathComponent : nil
             let title = urls.count == 1
                 ? "Your document was saved to your Library"

@@ -127,14 +127,15 @@ final class OCRViewModel {
         try await Task.detached(priority: .utility) {
             try DOCXCodec.write(AttributedString(text), to: destination)
         }.value
-        NotificationCenter.default.post(name: .documentsDidChange, object: nil)
+        // Word export needs OCR quality review before use.
+        NotificationCenter.default.postDocumentsDidChange([destination: .draft])
     }
 
     /// Secondary/optional output — keeps the original scanned image, adds an
     /// invisible searchable text layer at the position Vision recognized it.
     func exportSearchablePDF(to destination: URL) async throws {
         try await searchablePDFRenderer.render(pages: pages, results: results, to: destination)
-        NotificationCenter.default.post(name: .documentsDidChange, object: nil)
+        NotificationCenter.default.postDocumentsDidChange([destination: .done])
     }
 
     /// Clears every field that carries results/state from a previous scan

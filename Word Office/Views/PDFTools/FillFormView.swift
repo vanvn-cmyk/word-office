@@ -55,6 +55,23 @@ struct FillFormView: View {
             }
         }
         .prominentInlineTitle(isLibraryPickerPresented ? "Cabinet" : "Fill Form")
+        .navigationBarBackButtonHidden(
+            isLibraryPickerPresented ||
+            (!didAutoPresent && initialSource == .library) ||
+            (viewModel.stage == .fill && initialSource == .library)
+        )
+        .toolbar {
+            if viewModel.stage == .fill && initialSource == .library {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button {
+                        viewModel.reset()
+                        isLibraryPickerPresented = true
+                    } label: {
+                        Image(systemName: "chevron.left").fontWeight(.semibold).foregroundStyle(Color.dsBrandPrimary)
+                    }
+                }
+            }
+        }
         // `fillFormVM` is a single instance shared across every push into
         // this destination (`ToolsTabView` creates it once, not per-push) —
         // without this, backing out mid-flow without saving left `stage`/
@@ -79,21 +96,27 @@ struct FillFormView: View {
                           onLibrary: { isLibraryPickerPresented = true },
                           onBrowse: { isPickerPresented = true })
         .task {
-            guard !didAutoPresent, let source = initialSource, viewModel.stage == .pickPDF else { return }
+            guard !didAutoPresent, let source = initialSource else { return }
             didAutoPresent = true
             switch source {
-            case .library: isLibraryPickerPresented = true
-            case .browse:  isPickerPresented = true
+            case .prePickedURLs(let urls):
+                if let url = urls.first { await viewModel.selectPDF(url) }
+            case .library:
+                guard viewModel.stage == .pickPDF else { return }
+                isLibraryPickerPresented = true
+            case .browse:
+                isPickerPresented = true
             }
         }
         .sheet(item: $previewPayload, onDismiss: {
             if shouldDismissAfterPreviewCloses {
                 shouldDismissAfterPreviewCloses = false
-                // Reset AFTER dismiss — the sheet has now left the screen,
-                // so the underlying view flipping back to `.pickPDF` isn't
-                // visible (F11).
                 viewModel.reset()
-                dismiss()
+                if initialSource == .library {
+                    isLibraryPickerPresented = true
+                } else {
+                    dismiss()
+                }
             }
         }) { payload in
             PreviewConfirmSheet(
@@ -125,8 +148,13 @@ struct FillFormView: View {
                 emptyMessage: "Import PDF files first — they'll appear here."
             ) { urls in
                 guard let url = urls.first else { return }
-                isLibraryPickerPresented = false
-                handleFilePicked(.success(url))
+                // Load PDF before hiding the picker — keeps cabinet visible
+                // while selectPDF runs async so stage flips to .fill directly
+                // with no empty-state flash in between.
+                Task {
+                    await viewModel.selectPDF(url)
+                    isLibraryPickerPresented = false
+                }
             } onCancel: {
                 // Set flag BEFORE clearing isLibraryPickerPresented so pickStage
                 // keeps showing InlineCabinetPicker during the pop animation
@@ -150,7 +178,6 @@ struct FillFormView: View {
 
     private func handleFilePicked(_ result: Result<URL, Error>) {
         if case .success(let url) = result {
-            isLibraryPickerPresented = false
             Task { await viewModel.selectPDF(url) }
         }
     }
@@ -205,7 +232,7 @@ struct FillFormView: View {
     }
 
     private var actionBar: some View {
-        HStack(spacing: DSSpacing.sm) {
+        HStack(spacing: DSSpacing.md) {
             Button {
                 viewModel.undoLast()
             } label: {
@@ -228,9 +255,9 @@ struct FillFormView: View {
             .tint(Color.dsBrandPrimary)
             .disabled(!viewModel.canSave)
         }
-        .padding(.horizontal, DSSpacing.md)
-        .padding(.vertical, DSSpacing.sm)
-        .background(Color.dsBackgroundSecondary)
+        .padding(.horizontal, DSSpacing.lg)
+        .padding(.vertical, DSSpacing.md)
+        .background(.thinMaterial)
     }
 
     /// User tapped "Save changes" in editing — stage a preview into
@@ -265,12 +292,13 @@ struct FillFormView: View {
         let toastFilename: String
         switch mode {
         case .newFile:
-            toastTitle = "Your filled document was saved to Home"
+            toastTitle = "Your filled document was saved to your Library"
             toastFilename = final.lastPathComponent
         case .replaceOriginal:
             toastTitle = "The original file has been replaced"
             toastFilename = viewModel.sourceURL?.lastPathComponent ?? final.lastPathComponent
         }
+        if mode == .newFile { store.markAsNew(final) }
         toaster.show(.success, title: toastTitle, filename: toastFilename)
         // Dismiss the preview sheet FIRST, then reset — the earlier
         // order (reset() → previewPayload=nil) flipped stage back to
@@ -285,12 +313,11 @@ struct FillFormView: View {
             // after the sheet has actually left the screen.
         } else {
             viewModel.reset()
-            // User swipe-dismissed the preview sheet while commitPreview was
-            // running. onDismiss already fired with flag=false (no pop). The
-            // sheet is gone, so setting previewPayload=nil is a no-op and
-            // onDismiss won't fire again — pop directly instead of leaving
-            // shouldDismissAfterPreviewCloses=true to trip on the next Cancel.
-            dismiss()
+            if initialSource == .library {
+                isLibraryPickerPresented = true
+            } else {
+                dismiss()
+            }
         }
     }
 }
@@ -524,6 +551,10 @@ struct FillFormPDFView: UIViewRepresentable {
 
 // MARK: - Text editor sheet
 
+// NavigationStack removed — inside a sheet it can interfere with
+// the TextField's first-responder chain on some iOS builds, causing
+// keyboard input to appear focused but not update the `text` binding.
+// A plain VStack with a manual header row avoids the conflict.
 struct FillFormTextEditor: View {
     let onCommit: (String) -> Void
     let onCancel: () -> Void
@@ -532,45 +563,50 @@ struct FillFormTextEditor: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: DSSpacing.md) {
-                Text("Text to add")
-                    .font(DSFont.footnote)
-                    .foregroundStyle(Color.dsTextSecondary)
-                    .padding(.horizontal, DSSpacing.md)
-
-                TextField("Type here", text: $text, axis: .vertical)
-                    .font(DSFont.body)
-                    .focused($focused)
-                    .padding(DSSpacing.sm)
-                    .background(Color.dsBackgroundElevated, in: RoundedRectangle(cornerRadius: DSRadius.control))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: DSRadius.control)
-                            .stroke(Color.dsBorderDefault, lineWidth: 1)
-                    )
-                    .padding(.horizontal, DSSpacing.md)
-                    .lineLimit(1...4)
-                    .submitLabel(.done)
-                    .onSubmit(commit)
-
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Button("Cancel", action: onCancel)
+                    .foregroundStyle(Color.dsBrandPrimary)
                 Spacer()
+                Text("Add text")
+                    .font(DSFont.headline.weight(.semibold))
+                    .foregroundStyle(Color.dsTextPrimary)
+                Spacer()
+                Button("Add", action: commit)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(
+                        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            ? Color.dsTextTertiary
+                            : Color.dsBrandPrimary
+                    )
+                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-            .padding(.top, DSSpacing.md)
-            .navigationTitle("Add text")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", action: onCancel)
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Add", action: commit)
-                        .fontWeight(.semibold)
-                        .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-            }
-            .onAppear { focused = true }
+            .padding(.horizontal, DSSpacing.md)
+            .padding(.vertical, DSSpacing.sm)
+
+            Divider()
+
+            TextField("Type here", text: $text, axis: .vertical)
+                .font(DSFont.body)
+                .focused($focused)
+                .padding(DSSpacing.sm)
+                .background(Color.dsBackgroundElevated, in: RoundedRectangle(cornerRadius: DSRadius.control))
+                .overlay(
+                    RoundedRectangle(cornerRadius: DSRadius.control)
+                        .stroke(Color.dsBorderDefault, lineWidth: 1)
+                )
+                .padding(.horizontal, DSSpacing.md)
+                .padding(.top, DSSpacing.md)
+                .padding(.bottom, DSSpacing.sm)
+                .lineLimit(1...4)
+                .submitLabel(.done)
+                .onSubmit(commit)
+
         }
-        .presentationDetents([.height(220), .medium])
+        .presentationDetents([.height(185)])
+        .presentationDragIndicator(.visible)
+        .presentationBackground(Color.dsBackgroundSecondary)
+        .onAppear { focused = true }
     }
 
     private func commit() {

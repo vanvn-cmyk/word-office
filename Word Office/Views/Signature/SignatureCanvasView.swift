@@ -9,6 +9,10 @@ import UIKit
 
 struct SignatureCanvasView: UIViewRepresentable {
     @Binding var drawing: PKDrawing
+    /// The live PKCanvasView — used by the parent to call undoManager?.undo()/redo().
+    @Binding var liveCanvas: PKCanvasView?
+    @Binding var canUndo: Bool
+    @Binding var canRedo: Bool
 
     func makeUIView(context: Context) -> PKCanvasView {
         let view = PKCanvasView()
@@ -30,6 +34,7 @@ struct SignatureCanvasView: UIViewRepresentable {
         view.backgroundColor = .clear
         view.isOpaque = false
         view.delegate = context.coordinator
+        DispatchQueue.main.async { self.liveCanvas = view }
         return view
     }
 
@@ -43,18 +48,26 @@ struct SignatureCanvasView: UIViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(drawing: $drawing)
+        Coordinator(drawing: $drawing, canUndo: $canUndo, canRedo: $canRedo)
     }
 
     final class Coordinator: NSObject, PKCanvasViewDelegate {
         private let drawing: Binding<PKDrawing>
+        private let canUndo: Binding<Bool>
+        private let canRedo: Binding<Bool>
 
-        init(drawing: Binding<PKDrawing>) {
+        init(drawing: Binding<PKDrawing>, canUndo: Binding<Bool>, canRedo: Binding<Bool>) {
             self.drawing = drawing
+            self.canUndo = canUndo
+            self.canRedo = canRedo
         }
 
         func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
             drawing.wrappedValue = canvasView.drawing
+            DispatchQueue.main.async {
+                self.canUndo.wrappedValue = canvasView.undoManager?.canUndo ?? false
+                self.canRedo.wrappedValue = canvasView.undoManager?.canRedo ?? false
+            }
         }
     }
 }

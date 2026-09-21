@@ -51,6 +51,14 @@ final class PDFToolsViewModel {
         self.recognitionLanguages = recognitionLanguages
     }
 
+    /// Guarantees `documentsURL` exists before any write. `createDirectory`
+    /// with `withIntermediateDirectories: true` is idempotent — no-op when
+    /// the directory is already there, so calling this in every commit path
+    /// costs one stat(2) and is safe to repeat.
+    private func ensureDocumentsDir() throws {
+        try FileManager.default.createDirectory(at: documentsURL, withIntermediateDirectories: true)
+    }
+
     /// Merges `urls` in the given order into a new file in the app's Documents
     /// directory — same location the library scanner already watches, so the
     /// result shows up in the document list without a separate import step.
@@ -64,11 +72,12 @@ final class PDFToolsViewModel {
         lastMergedURL = nil
         defer { isProcessing = false }
         do {
+            try ensureDocumentsDir()
             let destination = FileManager.default.nonConflictingURL(for: "Merged.pdf", in: documentsURL)
             try await merger.merge(urls, into: destination)
             lastMergedURL = destination
             errorMessage = nil
-            NotificationCenter.default.post(name: .documentsDidChange, object: nil)
+            NotificationCenter.default.postDocumentsDidChange([destination: .draft])
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -84,7 +93,9 @@ final class PDFToolsViewModel {
         do {
             lastSplitURLs = try await splitter.split(url, ranges: ranges, into: documentsURL)
             errorMessage = nil
-            NotificationCenter.default.post(name: .documentsDidChange, object: nil)
+            NotificationCenter.default.postDocumentsDidChange(
+                Dictionary(uniqueKeysWithValues: lastSplitURLs.map { ($0, DocumentStatus.draft) })
+            )
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -121,12 +132,13 @@ final class PDFToolsViewModel {
         lastConvertedURL = nil
         defer { isProcessing = false }
         do {
+            try ensureDocumentsDir()
             let stem = url.deletingPathExtension().lastPathComponent
             let destination = FileManager.default.nonConflictingURL(for: "\(stem).pdf", in: documentsURL)
             try await exporter.exportPDF(from: url, to: destination)
             lastConvertedURL = destination
             errorMessage = nil
-            NotificationCenter.default.post(name: .documentsDidChange, object: nil)
+            NotificationCenter.default.postDocumentsDidChange([destination: .done])
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -185,7 +197,8 @@ final class PDFToolsViewModel {
 
             lastConvertedURL = destination
             errorMessage = nil
-            NotificationCenter.default.post(name: .documentsDidChange, object: nil)
+            // PDF→Word output may need OCR quality review — start as draft.
+            NotificationCenter.default.postDocumentsDidChange([destination: .draft])
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -200,7 +213,9 @@ final class PDFToolsViewModel {
         do {
             lastImageExportURLs = try await imageExporter.exportImages(from: url, pageRange: pageRange, into: documentsURL)
             errorMessage = nil
-            NotificationCenter.default.post(name: .documentsDidChange, object: nil)
+            NotificationCenter.default.postDocumentsDidChange(
+                Dictionary(uniqueKeysWithValues: lastImageExportURLs.map { ($0, DocumentStatus.done) })
+            )
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -213,13 +228,280 @@ final class PDFToolsViewModel {
         lastConvertedURL = nil
         defer { isProcessing = false }
         do {
+            try ensureDocumentsDir()
             let destination = FileManager.default.nonConflictingURL(for: "Images.pdf", in: documentsURL)
             try await pdfFromImages.exportPDF(from: images, to: destination)
             lastConvertedURL = destination
             errorMessage = nil
-            NotificationCenter.default.post(name: .documentsDidChange, object: nil)
+            NotificationCenter.default.postDocumentsDidChange([destination: .done])
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Staged variant of `convertImagesToPDF` — converts to a temp file so
+    /// the caller can preview before committing to the Library. Does NOT
+    /// post a `documentsDidChange` notification. Call `commitImagesPDF(_:)`
+    /// to move the result into the Library when the user confirms.
+    func convertImagesToPDFToTemp(_ images: [UIImage]) async -> URL? {
+        guard !isProcessing else { return nil }
+        isProcessing = true
+        defer { isProcessing = false }
+        do {
+            let tempDir = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString)
+            try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+            let destination = tempDir.appendingPathComponent("Images-preview.pdf")
+            try await pdfFromImages.exportPDF(from: images, to: destination)
+            errorMessage = nil
+            return destination
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// Moves a staged temp PDF into the Library and notifies `LibraryStore`.
+    /// Returns the final Library URL on success, `nil` on failure.
+    @discardableResult
+    func commitImagesPDF(_ tempURL: URL) async -> URL? {
+        do {
+            try ensureDocumentsDir()
+            let destination = FileManager.default.nonConflictingURL(for: "Images.pdf", in: documentsURL)
+            try FileManager.default.moveItem(at: tempURL, to: destination)
+            lastConvertedURL = destination
+            errorMessage = nil
+            NotificationCenter.default.postDocumentsDidChange([destination: .done])
+            return destination
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    // MARK: - Staged Convert variants
+
+    /// Office → PDF to a temp file — does NOT save to Library or post a
+    /// notification. Call `commitToPDF(_:)` when the user confirms.
+    func convertToPDFToTemp(_ url: URL) async -> URL? {
+        guard !isProcessing else { return nil }
+        isProcessing = true
+        defer { isProcessing = false }
+        do {
+            let stem = url.deletingPathExtension().lastPathComponent
+            let tempDir = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString)
+            try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+            let destination = tempDir.appendingPathComponent("\(stem).pdf")
+            try await exporter.exportPDF(from: url, to: destination)
+            errorMessage = nil
+            return destination
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// Moves staged temp PDF into the Library. Returns the Library URL.
+    @discardableResult
+    func commitToPDF(_ tempURL: URL) async -> URL? {
+        do {
+            try ensureDocumentsDir()
+            let stem = tempURL.deletingPathExtension().lastPathComponent
+            let destination = FileManager.default.nonConflictingURL(for: "\(stem).pdf", in: documentsURL)
+            try FileManager.default.moveItem(at: tempURL, to: destination)
+            lastConvertedURL = destination
+            errorMessage = nil
+            NotificationCenter.default.postDocumentsDidChange([destination: .done])
+            return destination
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// PDF → Word to a temp file — does NOT save to Library.
+    /// Call `commitPDFToWord(_:)` when the user confirms.
+    func convertPDFToWordToTemp(_ url: URL) async -> URL? {
+        guard !isProcessing else { return nil }
+        isProcessing = true
+        defer { isProcessing = false }
+        do {
+            let stem = url.deletingPathExtension().lastPathComponent
+            let tempDir = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString)
+            try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+            let destination = tempDir.appendingPathComponent("\(stem).docx")
+            let needsOCR = (try? await textExtractor.needsOCR(url)) ?? false
+            if !needsOCR {
+                let attributed = try await Task.detached(priority: .utility) { () throws -> NSAttributedString in
+                    guard let document = PDFDocument(url: url) else {
+                        throw PDFTextExtractingError.unreadableDocument
+                    }
+                    let combined = NSMutableAttributedString()
+                    for i in 0..<document.pageCount {
+                        guard let page = document.page(at: i),
+                              let pageAttr = page.attributedString else { continue }
+                        if combined.length > 0 {
+                            combined.append(NSAttributedString(string: "\n\n"))
+                        }
+                        combined.append(pageAttr)
+                    }
+                    return combined
+                }.value
+                try await Task.detached(priority: .utility) {
+                    try DOCXCodec.write(attributed, to: destination)
+                }.value
+            } else {
+                let text = try await textExtractor.extractText(from: url, languages: recognitionLanguages)
+                try await Task.detached(priority: .utility) {
+                    try DOCXCodec.write(AttributedString(text), to: destination)
+                }.value
+            }
+            errorMessage = nil
+            return destination
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// Moves staged temp DOCX into the Library. Returns the Library URL.
+    @discardableResult
+    func commitPDFToWord(_ tempURL: URL) async -> URL? {
+        do {
+            try ensureDocumentsDir()
+            let stem = tempURL.deletingPathExtension().lastPathComponent
+            let destination = FileManager.default.nonConflictingURL(for: "\(stem).docx", in: documentsURL)
+            try FileManager.default.moveItem(at: tempURL, to: destination)
+            lastConvertedURL = destination
+            errorMessage = nil
+            NotificationCenter.default.postDocumentsDidChange([destination: .draft])
+            return destination
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// PDF → Images to a temp directory — does NOT save to Library.
+    /// Call `commitPDFToImages(_:)` when the user confirms via Save All.
+    func convertPDFToImagesToTemp(_ url: URL, pageRange: ClosedRange<Int>?) async -> [URL] {
+        guard !isProcessing else { return [] }
+        isProcessing = true
+        defer { isProcessing = false }
+        do {
+            let tempDir = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString)
+            try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+            let outputs = try await imageExporter.exportImages(from: url, pageRange: pageRange, into: tempDir)
+            errorMessage = nil
+            return outputs
+        } catch {
+            errorMessage = error.localizedDescription
+            return []
+        }
+    }
+
+    /// Moves staged temp images into the Library. Returns Library URLs.
+    @discardableResult
+    func commitPDFToImages(_ tempURLs: [URL]) async -> [URL] {
+        var finals: [URL] = []
+        try? ensureDocumentsDir()
+        for tempURL in tempURLs {
+            let dest = FileManager.default.nonConflictingURL(for: tempURL.lastPathComponent, in: documentsURL)
+            do {
+                try FileManager.default.moveItem(at: tempURL, to: dest)
+                finals.append(dest)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+        if !finals.isEmpty {
+            lastImageExportURLs = finals
+            NotificationCenter.default.postDocumentsDidChange(
+                Dictionary(uniqueKeysWithValues: finals.map { ($0, DocumentStatus.done) })
+            )
+        }
+        return finals
+    }
+
+    /// Splits `url` into temp files — does NOT save to the Library or post
+    /// a `documentsDidChange` notification. Call `commitSplit(_:)` to finalize.
+    func splitToTemp(_ url: URL, ranges: [ClosedRange<Int>]) async -> [URL] {
+        guard !isProcessing else { return [] }
+        isProcessing = true
+        defer { isProcessing = false }
+        do {
+            let tempDir = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString)
+            try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+            let outputs = try await splitter.split(url, ranges: ranges, into: tempDir)
+            errorMessage = nil
+            return outputs
+        } catch {
+            errorMessage = error.localizedDescription
+            return []
+        }
+    }
+
+    /// Moves staged temp split PDFs into the Library and notifies `LibraryStore`.
+    @discardableResult
+    func commitSplit(_ tempURLs: [URL]) async -> [URL] {
+        var finals: [URL] = []
+        try? ensureDocumentsDir()
+        for tempURL in tempURLs {
+            let dest = FileManager.default.nonConflictingURL(for: tempURL.lastPathComponent, in: documentsURL)
+            do {
+                try FileManager.default.moveItem(at: tempURL, to: dest)
+                finals.append(dest)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+        if !finals.isEmpty {
+            lastSplitURLs = finals
+            NotificationCenter.default.postDocumentsDidChange(
+                Dictionary(uniqueKeysWithValues: finals.map { ($0, DocumentStatus.draft) })
+            )
+        }
+        return finals
+    }
+
+    /// Merges `urls` into a temp file — does NOT save to the Library or post
+    /// a `documentsDidChange` notification. Call `commitMerge(_:)` to finalize.
+    func mergeToTemp(_ urls: [URL]) async -> URL? {
+        guard !isProcessing else { return nil }
+        isProcessing = true
+        defer { isProcessing = false }
+        do {
+            let tempDir = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString)
+            try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+            let destination = tempDir.appendingPathComponent("Merged-preview.pdf")
+            try await merger.merge(urls, into: destination)
+            errorMessage = nil
+            return destination
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// Moves a staged temp merge PDF into the Library and notifies `LibraryStore`.
+    @discardableResult
+    func commitMerge(_ tempURL: URL) async -> URL? {
+        do {
+            try ensureDocumentsDir()
+            let destination = FileManager.default.nonConflictingURL(for: "Merged.pdf", in: documentsURL)
+            try FileManager.default.moveItem(at: tempURL, to: destination)
+            lastMergedURL = destination
+            errorMessage = nil
+            NotificationCenter.default.postDocumentsDidChange([destination: .draft])
+            return destination
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
         }
     }
 }

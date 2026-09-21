@@ -20,6 +20,88 @@ function uint8ToBase64(u8) {
     return btoa(s);
 }
 
+// Lazily fetch iOS system fonts via OfficeSchemeHandler's sysfonts/ route.
+// Fonts are passed as media with "fonts/" prefix so x2t.wasm finds them at
+// /working/fonts/ (its m_sFontDir). Promise-based to prevent duplicate loads.
+let fontMediaPromise = null;
+
+function loadFontMedia() {
+    if (fontMediaPromise) return fontMediaPromise;
+    fontMediaPromise = (async () => {
+        // PostScript names for the fonts x2t needs most for Office→PDF rendering.
+        // OfficeSchemeHandler verifies each PS name maps to an actual device font
+        // and returns 404 for unknowns — we skip those silently.
+        const psNames = [
+            'ArialMT', 'Arial-BoldMT', 'Arial-ItalicMT', 'Arial-BoldItalicMT',
+            'TimesNewRomanPSMT', 'TimesNewRomanPS-BoldMT', 'TimesNewRomanPS-ItalicMT',
+            'CourierNewPSMT', 'CourierNewPS-BoldMT',
+            'HelveticaNeue', 'HelveticaNeue-Bold', 'HelveticaNeue-Italic',
+            'Helvetica', 'Helvetica-Bold',
+        ];
+        const media = {};
+        await Promise.all(psNames.map(async (name) => {
+            try {
+                const resp = await fetch('office://host/sysfonts/' + name);
+                if (!resp.ok) return;
+                const buf = await resp.arrayBuffer();
+                if (buf.byteLength > 0) {
+                    // Key prefixed "fonts/" → written to /working/fonts/<name>.ttf
+                    media['fonts/' + name + '.ttf'] = new Uint8Array(buf);
+                }
+            } catch (_) {}
+        }));
+        return media;
+    })();
+    return fontMediaPromise;
+}
+
+// Called by Swift: docUrl = office://host/doc/<uuid>.ext served by OfficeSchemeHandler
+window.x2tConvert = async function(docUrl, formatFrom, fileName) {
+    try {
+        const resp = await fetch(docUrl);
+        if (!resp.ok) throw new Error('Fetch ' + resp.status + ': ' + docUrl);
+        const buffer = await resp.arrayBuffer();
+
+        // Use safe filenames (no spaces, no special chars) in the Emscripten FS.
+        // x2t can fail silently on paths with spaces.
+        const ext = fileName.replace(/.*\./, '').toLowerCase() || 'docx';
+        const safeFrom = 'input.' + ext;
+        const safeTo = 'output.pdf';
+
+        const fontMedia = await loadFontMedia();
+
+        const result = await converter.convert({
+            data: buffer,
+            fileFrom: safeFrom,
+            fileTo: safeTo,
+            formatFrom: formatFrom,
+            formatTo: 513,   // AVS_FILE_CROSSPLATFORM_PDF
+            media: fontMedia
+        });
+
+        if (result && result.output && result.output.length > 0) {
+            window.webkit.messageHandlers.editorBridge.postMessage({
+                action: 'convertResult',
+                success: true,
+                base64pdf: uint8ToBase64(result.output)
+            });
+        } else {
+            const errMsg = result?.x2tError || 'x2t returned empty output (unsupported format or corrupt file)';
+            window.webkit.messageHandlers.editorBridge.postMessage({
+                action: 'convertResult',
+                success: false,
+                error: errMsg
+            });
+        }
+    } catch (e) {
+        window.webkit.messageHandlers.editorBridge.postMessage({
+            action: 'convertResult',
+            success: false,
+            error: e.message || 'Conversion error'
+        });
+    }
+};
+
 async function init() {
     try {
         await converter.init();
@@ -31,46 +113,6 @@ async function init() {
         });
     }
 }
-
-// Called by Swift: docUrl = office://host/doc/<uuid>.ext served by OfficeSchemeHandler
-window.x2tConvert = async function(docUrl, formatFrom, fileName) {
-    try {
-        const resp = await fetch(docUrl);
-        if (!resp.ok) throw new Error('Fetch ' + resp.status + ': ' + docUrl);
-        const buffer = await resp.arrayBuffer();
-
-        // Replace extension with .pdf for output filename
-        const outName = fileName.replace(/\.[^.]+$/, '.pdf');
-
-        const result = await converter.convert({
-            data: buffer,
-            fileFrom: fileName,
-            fileTo: outName,
-            formatFrom: formatFrom,
-            formatTo: 513   // AVS_FILE_CROSSPLATFORM_PDF
-        });
-
-        if (result && result.output && result.output.length > 0) {
-            window.webkit.messageHandlers.editorBridge.postMessage({
-                action: 'convertResult',
-                success: true,
-                base64pdf: uint8ToBase64(result.output)
-            });
-        } else {
-            window.webkit.messageHandlers.editorBridge.postMessage({
-                action: 'convertResult',
-                success: false,
-                error: 'x2t returned empty output (unsupported format or corrupt file)'
-            });
-        }
-    } catch (e) {
-        window.webkit.messageHandlers.editorBridge.postMessage({
-            action: 'convertResult',
-            success: false,
-            error: e.message || 'Conversion error'
-        });
-    }
-};
 
 init();
 </script>

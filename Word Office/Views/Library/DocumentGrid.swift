@@ -15,6 +15,9 @@ struct DocumentGrid: View {
     var onDeleteFile: (LibraryEntry) -> Void
     var onChangeStatus: (LibraryEntry, DocumentStatus) -> Void = { _, _ in }
     var leadingPadding: CGFloat = DSSpacing.xxl
+    /// Called with the first tile's frame (in the `libraryTipSpace` coordinate
+    /// space) for coachmark anchoring — nil means this grid skips tip tracking.
+    var onFirstCardFrame: ((CGRect) -> Void)? = nil
 
     private let columns = [GridItem(.flexible(), spacing: DSSpacing.sm), GridItem(.flexible(), spacing: DSSpacing.sm)]
 
@@ -29,6 +32,7 @@ struct DocumentGrid: View {
     var body: some View {
         LazyVGrid(columns: columns, spacing: DSSpacing.md) {
             ForEach(entries) { entry in
+                let isFirst = entry.id == entries.first?.id
                 DocumentTile(
                     entry: entry,
                     onTap: { onTap(entry) },
@@ -47,6 +51,11 @@ struct DocumentGrid: View {
                         }
                     }
                 )
+                .onGeometryChange(for: CGRect.self) { geo in
+                    geo.frame(in: .named("libraryTipSpace"))
+                } action: { frame in
+                    if isFirst { onFirstCardFrame?(frame) }
+                }
             }
         }
         .padding(.leading, leadingPadding)
