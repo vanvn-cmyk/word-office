@@ -354,7 +354,7 @@ struct LibraryView: View {
                 }
                 .onPreferenceChange(TipCalloutHeightKey.self) { tipCalloutHeight = $0 }
                 .offset(
-                    x: max(0, cardFrame.midX - 110),
+                    x: max(0, cardFrame.midX - 80),
                     y: max(8, yAnchor - tipCalloutHeight - 8)
                 )
                 .allowsHitTesting(false)

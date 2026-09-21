@@ -2,6 +2,10 @@ import SwiftUI
 
 extension Notification.Name {
     static let editorSaveRequested = Notification.Name("editorSaveRequested")
+    /// Posted by the Done button in OfficeEditorView after the save delay.
+    /// EditorSheet listens and calls onDone + dismiss — only this path sets .done.
+    /// The ✕ button path (closeEditor) does NOT call onDone.
+    static let editorDoneRequested = Notification.Name("editorDoneRequested")
 }
 
 /// Full-screen cover wrapper for `EditorPlaceholderView`.
@@ -72,6 +76,10 @@ struct EditorSheet: View {
         }
         .interactiveDismissDisabled(isDirty)
         .onPreferenceChange(EditorDirtyPreferenceKey.self) { isDirty = $0 }
+        .onReceive(NotificationCenter.default.publisher(for: .editorDoneRequested)) { _ in
+            onDone?()
+            dismiss()
+        }
         .confirmationDialog(
             "Discard Changes?",
             isPresented: $showDiscardAlert,
@@ -88,7 +96,6 @@ struct EditorSheet: View {
     }
 
     private func closeEditor() {
-        onDone?()
         dismiss()
     }
 }

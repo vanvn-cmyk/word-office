@@ -164,25 +164,31 @@ final class OfficeEditorViewController: UIViewController {
         let js = """
         (function(r,c){
           try {
+            try { window._innerWin && window._innerWin.focus(); } catch(_) {}
             var ed = window._innerWin && window._innerWin.Asc && window._innerWin.Asc.editor;
             if (!ed) return;
             var done = false;
-            // Word/PPT APIs first — asc_addTable and put_Table both accept (rows, cols).
-            // asc_fmtTableApply is Excel-only (formats selection as table); calling it in
-            // Word silently succeeds without inserting anything, blocking the real APIs.
-            // put_Table is Word-only — use it first. asc_addTable is Excel-only and may
-            // silently succeed in Word without inserting anything, blocking the real API.
+            // Word: asc_insertTable(cols, rows)
+            // PPT:  asc_AddTable(rows, cols)  or asc_addTable(rows, cols)
+            // Excel: asc_insertTable(cols, rows) or asc_fmtTableApply (format selection as table)
+            // put_Table is a property SETTER (mode detection), not an insert — never use it.
             var pairs = [
-              ['put_Table',         function(){ ed.put_Table(r, c); }],
+              ['asc_insertTable',   function(){ ed.asc_insertTable(c, r); }],
+              ['asc_AddTable',      function(){ ed.asc_AddTable(r, c); }],
               ['asc_addTable',      function(){ ed.asc_addTable(r, c); }],
               ['CreateTable',       function(){ ed.CreateTable(r, c); }],
               ['asc_fmtTableApply', function(){ ed.asc_fmtTableApply(null, null, true); }],
-              ['asc_insertTable',   function(){ ed.asc_insertTable(); }],
             ];
             for (var i = 0; i < pairs.length; i++) {
               if (!done && typeof ed[pairs[i][0]] === 'function') {
                 try { pairs[i][1](); done = true; console.log('[iOS] insertTable via', pairs[i][0]); } catch(e) { console.warn('[iOS] insertTable', pairs[i][0], e); }
               }
+            }
+            if (!done) {
+              try {
+                window._innerWin && window._innerWin.AscDesktopEditor &&
+                  window._innerWin.AscDesktopEditor.executeFocusedCommand('insertTable');
+              } catch(_) {}
             }
           } catch(e) {}
         })(\(r), \(c));
@@ -205,13 +211,13 @@ final class OfficeEditorViewController: UIViewController {
         let charJS = jsStringLiteral(char)
         let js = """
         (function(c) {
+          try { window._innerWin && window._innerWin.focus(); } catch(_) {}
           var ed = window._innerWin && window._innerWin.Asc && window._innerWin.Asc.editor;
           if (ed) {
             if (typeof ed.asc_typeText === 'function') { try { ed.asc_typeText(c); return; } catch(_) {} }
             if (typeof ed.asc_TypeText === 'function') { try { ed.asc_TypeText(c); return; } catch(_) {} }
           }
           try {
-            window._innerWin && window._innerWin.focus();
             var iDoc = window._innerWin && window._innerWin.document;
             if (iDoc) {
               var sdk = iDoc.getElementById('editor_sdk') || iDoc.body;

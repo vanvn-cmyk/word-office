@@ -224,6 +224,7 @@ struct EditorTopToolbar: View {
 
                     case .insert:
                         iconBtn("photo",       label: "Insert image",  cmd: "insert-image")
+                        chipBtn("Table",       label: "Insert table",  cmd: "insert-table")
                         chipBtn("Chart",       label: "Insert chart",  cmd: "insert-chart")
                         chipBtn("Shape",       label: "Insert shape",  cmd: "insert-shape")
                         vDivider()

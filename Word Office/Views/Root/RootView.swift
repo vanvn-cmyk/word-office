@@ -32,6 +32,7 @@ struct RootView: View {
     @Environment(LibraryStore.self) private var libraryStore
     @Environment(AppUsageTracker.self) private var usageTracker
     @Environment(FeedbackTriggerService.self) private var feedbackTrigger
+    @Environment(DSToastPresenter.self) private var toaster
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var libraryVM: LibraryViewModel?
     @State private var permissionVM: FolderPermissionViewModel?
@@ -309,6 +310,7 @@ struct RootView: View {
                     guard let entry = libraryVM.store.entries.first(where: { $0.document.url == ref.url })
                     else { return }
                     Task { await libraryVM.setStatus(.done, for: entry.id) }
+                    toaster.show(.success, title: "Saved", filename: entry.document.name)
                     handleFirstAction()
                 })
             }

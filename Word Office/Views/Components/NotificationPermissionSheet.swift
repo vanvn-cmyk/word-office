@@ -11,88 +11,84 @@ struct NotificationPermissionSheet: View {
     var onSkip:  () -> Void
 
     var body: some View {
-        GeometryReader { geo in
-            ScrollView {
-                VStack(spacing: 0) {
-                    // Icon — gradient-filled circle with bell
-                    ZStack {
-                        Circle()
-                            .fill(
-                                LinearGradient(
-                                    colors: [Color.dsBrandPrimary.opacity(0.18), Color.dsBrandPrimary.opacity(0.08)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
+        ScrollView {
+            VStack(spacing: 0) {
+                // Icon — gradient-filled circle with bell
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.dsBrandPrimary.opacity(0.18), Color.dsBrandPrimary.opacity(0.08)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
                             )
-                            .frame(width: 72, height: 72)
-
-                        Image(systemName: "bell.badge.fill")
-                            .font(.system(size: 30, weight: .semibold))
-                            .foregroundStyle(Color.dsBrandPrimary)
-                            .symbolRenderingMode(.hierarchical)
-                    }
-                    .padding(.top, 28)
-
-                    Text("Stay on top of your work")
-                        .font(.title2.weight(.bold))
-                        .foregroundStyle(Color.dsTextPrimary)
-                        .multilineTextAlignment(.center)
-                        .padding(.top, 16)
-                        .padding(.horizontal, 24)
-
-                    Text("Get a nudge when files need attention — so nothing slips through the cracks")
-                        .font(DSFont.body)
-                        .foregroundStyle(Color.dsTextSecondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.top, 8)
-                        .padding(.horizontal, 32)
-
-                    // Feature rows
-                    VStack(alignment: .leading, spacing: 14) {
-                        featureRow(
-                            icon: "doc.text.fill",
-                            text: "Remind you when drafts have been waiting too long"
                         )
-                        featureRow(
-                            icon: "checkmark.seal.fill",
-                            text: "Alert you when a file is ready to sign or review"
-                        )
-                        featureRow(
-                            icon: "clock.fill",
-                            text: "Fire your manual reminders exactly on time"
-                        )
-                    }
-                    .padding(.top, 22)
-                    .padding(.horizontal, 28)
+                        .frame(width: 72, height: 72)
 
-                    // Spacer expands on large screens (content vertically centered),
-                    // compresses to minLength on small screens where content must scroll.
-                    Spacer(minLength: 24)
+                    Image(systemName: "bell.badge.fill")
+                        .font(.system(size: 30, weight: .semibold))
+                        .foregroundStyle(Color.dsBrandPrimary)
+                        .symbolRenderingMode(.hierarchical)
+                }
+                .padding(.top, 28)
 
-                    // CTAs live inside the scroll content so they sit flush below
-                    // the feature rows on any screen size — no gap on large, no
-                    // cut-off on small.
-                    Button(action: onAllow) {
-                        Text("Allow Notifications")
-                            .font(.body.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 52)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Color.dsBrandPrimary)
+                Text("Stay on top of your work")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(Color.dsTextPrimary)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 16)
                     .padding(.horizontal, 24)
 
-                    Button("Not Now", action: onSkip)
-                        .font(DSFont.body)
-                        .foregroundStyle(Color.dsTextSecondary)
-                        .padding(.top, 14)
-                        .padding(.bottom, 28)
+                Text("Get a nudge when files need attention — so nothing slips through the cracks")
+                    .font(DSFont.body)
+                    .foregroundStyle(Color.dsTextSecondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 8)
+                    .padding(.horizontal, 32)
+
+                // Feature rows
+                VStack(alignment: .leading, spacing: 14) {
+                    featureRow(
+                        icon: "doc.text.fill",
+                        text: "Remind you when drafts have been waiting too long"
+                    )
+                    featureRow(
+                        icon: "checkmark.seal.fill",
+                        text: "Alert you when a file is ready to sign or review"
+                    )
+                    featureRow(
+                        icon: "clock.fill",
+                        text: "Fire your manual reminders exactly on time"
+                    )
                 }
-                .frame(maxWidth: .infinity, minHeight: geo.size.height)
+                .padding(.top, 22)
+                .padding(.horizontal, 28)
+
+                // Fixed gap — keeps buttons close to content on all screen sizes
+                Color.clear.frame(height: 32)
+
+                Button(action: onAllow) {
+                    Text("Allow Notifications")
+                        .font(.body.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Color.dsBrandPrimary)
+                .padding(.horizontal, 24)
+
+                Button("Not Now", action: onSkip)
+                    .font(DSFont.body)
+                    .foregroundStyle(Color.dsTextSecondary)
+                    .padding(.top, 14)
+                    .padding(.bottom, 28)
             }
-            .scrollBounceBehavior(.basedOnSize)
+            .frame(maxWidth: .infinity)
         }
+        .scrollBounceBehavior(.basedOnSize)
         .background(Color(UIColor.systemBackground))
+        .presentationDetents([.height(490), .large])
+        .presentationDragIndicator(.visible)
     }
 
     private func featureRow(icon: String, text: String) -> some View {

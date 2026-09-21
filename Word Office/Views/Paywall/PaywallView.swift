@@ -98,7 +98,6 @@ struct PaywallView: View {
 
             VStack(spacing: 0) {
                 heroContent
-                Spacer(minLength: 0)
                 bottomCard
             }
         }
@@ -176,73 +175,65 @@ struct PaywallView: View {
     /// visual moment instead of the earlier hero-strip + white-body
     /// split (which the user flagged as "xấu" through three iterations).
     private var heroContent: some View {
-        VStack(spacing: DSSpacing.md) {
-            Image("PaywallHeroIllustration")
-                .resizable()
-                .scaledToFit()
-                .frame(maxHeight: 195)
-                .padding(.horizontal, DSSpacing.xs)
+        // GeometryReader reads the ACTUAL allocated height (screen minus card)
+        // so we can give the illustration an explicit computed height instead
+        // of relying on VStack's flexible distribution (which proved unreliable
+        // with frame(maxHeight:) and resulted in benefits being clipped).
+        //
+        // Formula: imageH = available − 300pt fixed overhead
+        //   300 ≈ title(67) + benefits(184) + spacings(32) + padding(4) + 13pt buffer
+        // Capped at 195pt on tall devices; collapses toward 0 on small ones.
+        GeometryReader { geo in
+            let imageH = max(0, min(195, geo.size.height - 300))
+            VStack(spacing: DSSpacing.md) {
+                Image("PaywallHeroIllustration")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(height: imageH)
+                    .padding(.horizontal, DSSpacing.xs)
 
-            VStack(spacing: DSSpacing.xxs) {
-                Text("Your Office, Upgraded")
-                    .font(.largeTitle.bold())
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.center)
-                    // Subtle lift off the gradient — white-on-mid-blue has
-                    // enough contrast to pass a11y but reads a little flat
-                    // without it; kept soft (low opacity, small radius) so
-                    // it's felt, not seen as a distinct drop shadow.
-                    .shadow(color: .black.opacity(0.15), radius: 6, y: 2)
+                VStack(spacing: DSSpacing.xxs) {
+                    Text("Your Office, Upgraded")
+                        .font(.largeTitle.bold())
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.center)
+                        .shadow(color: .black.opacity(0.15), radius: 6, y: 2)
 
-                Text("Professional tools, made for you")
-                    .font(DSFont.body)
-                    .foregroundStyle(.white.opacity(0.85))
-                    .multilineTextAlignment(.center)
+                    Text("Professional tools, made for you")
+                        .font(DSFont.body)
+                        .foregroundStyle(.white.opacity(0.85))
+                        .multilineTextAlignment(.center)
+                }
+                .padding(.horizontal, DSSpacing.lg)
+
+                VStack(alignment: .leading, spacing: DSSpacing.xs) {
+                    HeroBenefitRow(
+                        icon: "square.and.pencil",
+                        title: "Edit Office Files",
+                        subtitle: "Open, edit, and convert your documents"
+                    )
+                    HeroBenefitRow(
+                        icon: "doc.text.viewfinder",
+                        title: "Unlimited Scans",
+                        subtitle: "Turn any document into a clean PDF"
+                    )
+                    HeroBenefitRow(
+                        icon: "checkmark.seal.fill",
+                        title: "Never Lose Track",
+                        subtitle: "Keep every file organized in one place"
+                    )
+                    HeroBenefitRow(
+                        icon: "square.grid.2x2.fill",
+                        title: "All Tools in One Place",
+                        subtitle: "Edit, scan, sign, and convert — no extra apps"
+                    )
+                }
+                .padding(.horizontal, DSSpacing.lg)
             }
-            .padding(.horizontal, DSSpacing.lg)
-
-            // 4 benefits as a full-width single-column list — picked
-            // (option "A" of 6 mockup directions) over the 2×2 icon
-            // grid, which packed every title into roughly half the
-            // width and forced 2-line wraps on all four, reading dense
-            // and "blocky". Full width means no title ever wraps.
-            // Left-aligned, not centered — a centered icon+title+subtitle
-            // block loses the scan line every real paywall list relies
-            // on (Things, Fantastical, Todoist all left-align this
-            // pattern). A Free-vs-Pro compare table was another option
-            // raised, but that asserts specific feature-gating claims
-            // (what's actually locked in Free) — skipped rather than
-            // guessed; happy to build it once there's a confirmed
-            // gating list. Subtitles kept in this time (removed, then
-            // restored per the user's explicit request) — the
-            // illustration is what absorbs the resulting space pressure,
-            // per `body`'s comment.
-            VStack(alignment: .leading, spacing: DSSpacing.xs) {
-                HeroBenefitRow(
-                    icon: "square.and.pencil",
-                    title: "Edit Office Files",
-                    subtitle: "Open, edit, and convert your documents"
-                )
-                HeroBenefitRow(
-                    icon: "doc.text.viewfinder",
-                    title: "Unlimited Scans",
-                    subtitle: "Turn any document into a clean PDF"
-                )
-                HeroBenefitRow(
-                    icon: "checkmark.seal.fill",
-                    title: "Never Lose Track",
-                    subtitle: "Keep every file organized in one place"
-                )
-                HeroBenefitRow(
-                    icon: "square.grid.2x2.fill",
-                    title: "All Tools in One Place",
-                    subtitle: "Edit, scan, sign, and convert — no extra apps"
-                )
-            }
-            .padding(.horizontal, DSSpacing.lg)
+            .padding(.top, DSSpacing.xxs)
+            .frame(maxWidth: .infinity)
         }
-        .padding(.top, DSSpacing.xxs)
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Bottom decision card (plans + CTA + trust + footer)
@@ -437,8 +428,7 @@ private struct HeroBenefitRow: View {
                 Text(subtitle)
                     .font(DSFont.footnote)
                     .foregroundStyle(.white.opacity(0.75))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.9)
+                    .lineLimit(2)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

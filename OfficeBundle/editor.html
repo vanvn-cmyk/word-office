@@ -1568,6 +1568,23 @@
                 if (!_done && typeof _ed.asc_AddChart === 'function') {
                   try { _ed.asc_AddChart({ type: chartNum }); _done = true; } catch(e) {}
                 }
+                if (!_done && typeof _ed.asc_insertDiagram === 'function') {
+                  try { _ed.asc_insertDiagram({ type: chartNum }); _done = true; } catch(e) {}
+                }
+                if (!_done && typeof _ed.InsertChart === 'function') {
+                  try { _ed.InsertChart({ type: chartNum }); _done = true; } catch(e) {}
+                }
+                if (!_done && typeof _ed.CreateChart === 'function') {
+                  try { _ed.CreateChart(chartNum); _done = true; } catch(e) {}
+                }
+                if (!_done) {
+                  // Last resort: desktop focused command (no crash risk)
+                  try {
+                    _innerWin.AscDesktopEditor && _innerWin.AscDesktopEditor.executeFocusedCommand &&
+                      _innerWin.AscDesktopEditor.executeFocusedCommand('InsertChart');
+                    _done = true;
+                  } catch(_) {}
+                }
               }
 
               // ── Spreadsheet ONLY: asc_addChartDrawing is a spreadsheet-only WASM export.
@@ -3991,14 +4008,18 @@
 
           // Track Changes toggle
           if (cmd === 'track-changes') {
+            try { _innerWin && _innerWin.focus(); } catch(_) {}
             var _tced = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
             if (_tced) {
               var _tracking = false;
-              if      (typeof _tced.asc_GetTrackRevisions === 'function') _tracking = _tced.asc_GetTrackRevisions();
-              else if (typeof _tced.asc_getTrackRevisions === 'function') _tracking = _tced.asc_getTrackRevisions();
+              if      (typeof _tced.asc_GetTrackRevisions    === 'function') _tracking = _tced.asc_GetTrackRevisions();
+              else if (typeof _tced.asc_getTrackRevisions    === 'function') _tracking = _tced.asc_getTrackRevisions();
+              else if (typeof _tced.asc_isTrackRevisions     === 'function') _tracking = _tced.asc_isTrackRevisions();
               var _newTrack = !_tracking;
-              if      (typeof _tced.asc_SetTrackRevisions === 'function') { _tced.asc_SetTrackRevisions(_newTrack); return; }
-              else if (typeof _tced.asc_setTrackRevisions === 'function') { _tced.asc_setTrackRevisions(_newTrack); return; }
+              if      (typeof _tced.asc_SetTrackRevisions    === 'function') { _tced.asc_SetTrackRevisions(_newTrack);    return; }
+              else if (typeof _tced.asc_setTrackRevisions    === 'function') { _tced.asc_setTrackRevisions(_newTrack);    return; }
+              else if (typeof _tced.asc_SetTrackChanges      === 'function') { _tced.asc_SetTrackChanges(_newTrack);      return; }
+              else if (typeof _tced.asc_setTrackChanges      === 'function') { _tced.asc_setTrackChanges(_newTrack);      return; }
             }
             if (_clickOOBtn(['track changes','track revisions','track change','revision'])) return;
             _focusedCmd('TrackChanges');
@@ -4007,12 +4028,14 @@
 
           // Accept current tracked change
           if (cmd === 'review-accept') {
+            try { _innerWin && _innerWin.focus(); } catch(_) {}
             var _aced = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
             if (_aced) {
-              if      (typeof _aced.asc_AcceptRevisionChanges === 'function') { _aced.asc_AcceptRevisionChanges(); return; }
-              else if (typeof _aced.asc_acceptRevisionChanges === 'function') { _aced.asc_acceptRevisionChanges(); return; }
-              else if (typeof _aced.asc_AcceptChange          === 'function') { _aced.asc_AcceptChange();          return; }
-              else if (typeof _aced.asc_acceptChange          === 'function') { _aced.asc_acceptChange();          return; }
+              if      (typeof _aced.asc_AcceptRevisionChanges  === 'function') { _aced.asc_AcceptRevisionChanges();  return; }
+              else if (typeof _aced.asc_acceptRevisionChanges  === 'function') { _aced.asc_acceptRevisionChanges();  return; }
+              else if (typeof _aced.asc_AcceptChange           === 'function') { _aced.asc_AcceptChange();           return; }
+              else if (typeof _aced.asc_acceptChange           === 'function') { _aced.asc_acceptChange();           return; }
+              else if (typeof _aced.asc_AcceptCurrentRevision  === 'function') { _aced.asc_AcceptCurrentRevision();  return; }
             }
             if (_clickOOBtn(['accept change','accept revision','accept current'])) return;
             _focusedCmd('AcceptChange');
@@ -4021,12 +4044,14 @@
 
           // Reject current tracked change
           if (cmd === 'review-reject') {
+            try { _innerWin && _innerWin.focus(); } catch(_) {}
             var _rjed = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
             if (_rjed) {
-              if      (typeof _rjed.asc_RejectRevisionChanges === 'function') { _rjed.asc_RejectRevisionChanges(); return; }
-              else if (typeof _rjed.asc_rejectRevisionChanges === 'function') { _rjed.asc_rejectRevisionChanges(); return; }
-              else if (typeof _rjed.asc_RejectChange          === 'function') { _rjed.asc_RejectChange();          return; }
-              else if (typeof _rjed.asc_rejectChange          === 'function') { _rjed.asc_rejectChange();          return; }
+              if      (typeof _rjed.asc_RejectRevisionChanges  === 'function') { _rjed.asc_RejectRevisionChanges();  return; }
+              else if (typeof _rjed.asc_rejectRevisionChanges  === 'function') { _rjed.asc_rejectRevisionChanges();  return; }
+              else if (typeof _rjed.asc_RejectChange           === 'function') { _rjed.asc_RejectChange();           return; }
+              else if (typeof _rjed.asc_rejectChange           === 'function') { _rjed.asc_rejectChange();           return; }
+              else if (typeof _rjed.asc_RejectCurrentRevision  === 'function') { _rjed.asc_RejectCurrentRevision();  return; }
             }
             if (_clickOOBtn(['reject change','reject revision','reject current'])) return;
             _focusedCmd('RejectChange');
@@ -4035,6 +4060,7 @@
 
           // Accept ALL tracked changes
           if (cmd === 'review-accept-all') {
+            try { _innerWin && _innerWin.focus(); } catch(_) {}
             var _aaed = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
             if (_aaed) {
               if      (typeof _aaed.asc_AcceptAllRevisionChanges === 'function') { _aaed.asc_AcceptAllRevisionChanges(); return; }
@@ -4049,6 +4075,7 @@
 
           // Reject ALL tracked changes
           if (cmd === 'review-reject-all') {
+            try { _innerWin && _innerWin.focus(); } catch(_) {}
             var _raed = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
             if (_raed) {
               if      (typeof _raed.asc_RejectAllRevisionChanges === 'function') { _raed.asc_RejectAllRevisionChanges(); return; }
@@ -4063,6 +4090,7 @@
 
           // Word count — register callback so result posts to Swift via bridge
           if (cmd === 'word-count') {
+            try { _innerWin && _innerWin.focus(); } catch(_) {}
             var _wced = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
             if (_wced) {
               // Register result callback before calling — OO fires this with the statistic object
@@ -4165,14 +4193,15 @@
             var _xedT = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
             var _doneT = false;
             if (_xedT) {
-              // Word/PPT first: asc_addTable / put_Table / CreateTable accept (rows, cols).
-              // asc_fmtTableApply is Excel-only: silently succeeds in Word without inserting.
+              // Word: asc_insertTable(cols, rows)  PPT: asc_AddTable / asc_addTable(rows, cols)
+              // Excel: asc_insertTable(cols, rows) or asc_fmtTableApply (format selection)
+              // put_Table is a property SETTER (Word mode detection), NOT an insert — omitted.
               var _tMethods = [
-                ['put_Table',         function(ed) { ed.put_Table(3, 3); }],
+                ['asc_insertTable',   function(ed) { ed.asc_insertTable(3, 3); }],
+                ['asc_AddTable',      function(ed) { ed.asc_AddTable(3, 3); }],
                 ['asc_addTable',      function(ed) { ed.asc_addTable(3, 3); }],
                 ['CreateTable',       function(ed) { ed.CreateTable(3, 3); }],
                 ['asc_fmtTableApply', function(ed) { ed.asc_fmtTableApply(null, null, true); }],
-                ['asc_insertTable',   function(ed) { ed.asc_insertTable(); }],
               ];
               _tMethods.forEach(function(pair) {
                 if (!_doneT && typeof _xedT[pair[0]] === 'function') {

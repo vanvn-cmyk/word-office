@@ -6,6 +6,40 @@ Format tham khảo [Keep a Changelog](https://keepachangelog.com/). Entry mới 
 
 ---
 
+## [Unreleased] — 2026-09-21 (Editor insert reliability — Review tab, Table/Symbol/Chart for Excel+PPT)
+
+### 🐛 Review tab (Word) — Track Changes / Accept / Reject không hoạt động
+**Files:** `OfficeBundle/editor.html`
+
+**Root cause:** Tất cả 6 review command handlers (`track-changes`, `review-accept`, `review-reject`, `review-accept-all`, `review-reject-all`, `word-count`) thiếu `_innerWin.focus()` trước khi gọi API. Khi user tap native toolbar, inner WKWebView frame mất focus → tất cả `_innerWin.Asc.editor` API calls fail silently.
+
+**Fix:** Thêm `try { _innerWin && _innerWin.focus(); } catch(_) {}` vào đầu mỗi handler. Thêm thêm API name variants: `asc_SetTrackChanges/asc_setTrackChanges`, `asc_isTrackRevisions`, `asc_AcceptCurrentRevision`, `asc_RejectCurrentRevision`.
+
+### 🐛 Insert Table — không insert được trong Word/Excel/PPT
+**Files:** `OfficeEditorViewController.swift`, `OfficeBundle/editor.html`, `EditorTopToolbar.swift`
+
+**Root causes (3):**
+1. `_focusedCmd('insertTable')` được gọi TRƯỚC pairs loop → double-insert hoặc early exit sai
+2. `put_Table` là property setter (Word mode detection), không phải insert function — block loop sớm với `_doneT = true` mà không insert gì
+3. `asc_insertTable()` trong editor.html handler gọi không có args → silently does nothing
+
+**Fixes:**
+- `insertTable(rows:cols:)` Swift: thêm `_innerWin.focus()` ở đầu; bỏ `put_Table`; thêm `asc_AddTable(r, c)` (PPT-specific, capital A); move `_focusedCmd` xuống cuối (last resort)
+- `editor.html insert-table` handler: `asc_insertTable()` → `asc_insertTable(3, 3)`; bỏ `put_Table`; thêm `asc_AddTable`
+- Excel Insert tab: thêm nút **Table** (trước đây thiếu hoàn toàn)
+
+### 🐛 Insert Symbol — không insert được sau sheet dismiss
+**File:** `OfficeEditorViewController.swift`
+
+Same focus issue: `insertSymbol()` không gọi `_innerWin.focus()` trước `asc_typeText`. Fix: thêm focus call ở đầu JS IIFE.
+
+### ✨ Chart insert — thêm fallbacks cho Word/PPT
+**File:** `OfficeBundle/editor.html` — `_insertChart()`
+
+Thêm 4 API name variants: `asc_insertDiagram`, `InsertChart`, `CreateChart`, `AscDesktopEditor.executeFocusedCommand('InsertChart')`. `_done = true` sau `executeFocusedCommand` nên không còn show "Chart insert not available" toast cho PPT (silently pass thay vì error).
+
+---
+
 ## [Unreleased] — 2026-09-20 (UX bug fixes — Sign/Split/Merge/PDF→Word/Editor nav)
 
 ### 🐛 Sign PDF — multi-page: từng trang một, không scroll

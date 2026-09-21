@@ -440,7 +440,9 @@ struct OfficeEditorView: View {
                     }
                     Button {
                         NotificationCenter.default.post(name: .editorSaveRequested, object: nil)
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { dismiss() }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                            NotificationCenter.default.post(name: .editorDoneRequested, object: nil)
+                        }
                     } label: {
                         Text("Done").fontWeight(.semibold)
                     }
