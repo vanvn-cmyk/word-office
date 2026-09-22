@@ -9,7 +9,7 @@
 	<key>PLIST_VERSION</key>
 	<string>1</string>
 	<key>BUNDLE_ID</key>
-	<string>com.app.doc.office</string>
+	<string>com.docx.officeeditor.pdfeditor</string>
 	<key>PROJECT_ID</key>
 	<string>dep-document-editor-dev</string>
 	<key>STORAGE_BUCKET</key>
@@ -25,6 +25,6 @@
 	<key>IS_SIGNIN_ENABLED</key>
 	<true></true>
 	<key>GOOGLE_APP_ID</key>
-	<string>1:723397347532:ios:b6472f43e3614b2b6bda69</string>
+	<string>1:723397347532:ios:f1c1ffd9c6a506526bda69</string>
 </dict>
 </plist>
