@@ -56,11 +56,11 @@ struct LibraryView: View {
     @AppStorage("libraryViewMode") private var viewMode: LibraryViewMode = .list
     @AppStorage("library.openDocumentTipSeen") private var tipSeen: Bool = false
     @State private var tipPresented: Bool = false
-    /// Measured height of the rendered TipCallout (bubble + caret). Used in
-    /// `tipOverlay` to offset the tooltip so its bottom sits exactly at the
-    /// card's top edge regardless of Dynamic Type size. Default 95 = typical
-    /// 3-line subheadline bubble + 8pt caret.
+    /// Measured size of the rendered TipCallout. Height used to place the
+    /// bubble above the section header; width used to center it over the card.
+    /// Defaults cover a typical 2-line subheadline bubble (95×240pt).
     @State private var tipCalloutHeight: CGFloat = 95
+    @State private var tipCalloutWidth: CGFloat = 240
     /// Target card's real frame (`libraryTipSpace` coordinate space), fed by
     /// `TipAnchorFrameKey` — see `tipOverlay`.
     @State private var tipAnchorFrame: CGRect?
@@ -348,13 +348,16 @@ struct LibraryView: View {
             TipCallout()
                 .background {
                     GeometryReader { geo in
-                        Color.clear.preference(key: TipCalloutHeightKey.self,
-                                               value: geo.size.height)
+                        Color.clear.preference(key: TipCalloutSizeKey.self,
+                                               value: geo.size)
                     }
                 }
-                .onPreferenceChange(TipCalloutHeightKey.self) { tipCalloutHeight = $0 }
+                .onPreferenceChange(TipCalloutSizeKey.self) {
+                    tipCalloutHeight = $0.height
+                    tipCalloutWidth  = $0.width
+                }
                 .offset(
-                    x: max(0, cardFrame.midX - 80),
+                    x: max(0, cardFrame.midX - tipCalloutWidth / 2),
                     y: max(8, yAnchor - tipCalloutHeight - 8)
                 )
                 .allowsHitTesting(false)
@@ -1049,6 +1052,12 @@ struct LibraryView: View {
                     // so the header needs the same extra offset to keep "View all" flush.
                     statusTabHeader(status: group.status, count: group.entries.count)
                         .padding(.trailing, DSSpacing.xs)
+                        .onGeometryChange(for: CGRect.self) { geo in
+                            geo.frame(in: .named("libraryTipSpace"))
+                        } action: { newValue in
+                            guard dueEntries.isEmpty && group.status == .getStarted else { return }
+                            tipSectionHeaderFrame = newValue
+                        }
 
                     DocumentGrid(
                         entries: Array(group.entries.prefix(4)),
@@ -2105,9 +2114,9 @@ private struct LibrarySearchAndActionsBar<Trailing: View>: View {
     }
 }
 
-private struct TipCalloutHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+private struct TipCalloutSizeKey: PreferenceKey {
+    static let defaultValue: CGSize = .zero
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) { value = nextValue() }
 }
 
 private struct TipCallout: View {
@@ -2119,7 +2128,7 @@ private struct TipCallout: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, DSSpacing.md)
                 .padding(.vertical, DSSpacing.sm)
-                .frame(maxWidth: 220)
+                .frame(maxWidth: 260)
                 .background {
                     RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous)
                         .fill(Color.dsBackgroundElevated)

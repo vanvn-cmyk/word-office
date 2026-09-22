@@ -124,7 +124,7 @@ struct MascotAssistantView: View {
                     }
                     Task {
                         try? await Task.sleep(for: .seconds(3.5))
-                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.5)) {
+                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
                             isExiting = true
                         }
                     }
@@ -221,18 +221,18 @@ struct MascotAssistantView: View {
     // MARK: Message Cycle
 
     private func runMessageCycle() async {
-        // First-ever launch: show greeting for 5s, then persist the flag
+        // First-ever launch: show greeting for 3s, then persist the flag
         if !hasSeenIntro {
-            try? await Task.sleep(for: .seconds(5))
+            try? await Task.sleep(for: .seconds(3))
             guard !Task.isCancelled, pendingCount > 0 else { return }
             hasSeenIntro = true
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.35)) { phase = .cycling }
         }
 
-        // Display the single unified status message for 40s, then auto-hide
-        try? await Task.sleep(for: .seconds(40))
+        // Display the single unified status message for 45s, then auto-hide
+        try? await Task.sleep(for: .seconds(45))
         guard !Task.isCancelled, phase == .cycling else { return }
-        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.5)) { isExiting = true }
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { isExiting = true }
     }
 }
 

@@ -8,6 +8,21 @@ struct NativeFilterItem: Identifiable {
     let checked: Bool  // current checked state in the OO panel
 }
 
+/// A button descriptor extracted from a simple ONLYOFFICE `.asc-window` dialog.
+struct OODialogButton {
+    let label: String
+    let isPrimary: Bool
+}
+
+/// Payload for an intercepted OO dialog that may contain a text input field.
+struct OODialogPayload {
+    let id: String
+    let title: String
+    let message: String
+    let buttons: [OODialogButton]
+    let defaultValue: String?   // non-nil → show a text field (e.g. Column Width)
+}
+
 /// Messages JS sends to Swift via `window.webkit.messageHandlers.editorBridge.postMessage(...)`.
 enum OfficeBridgeMessage {
     /// sdk-core module loaded; window.receiveFileFromIOS is now defined.
@@ -32,10 +47,20 @@ enum OfficeBridgeMessage {
     case showNativeFilter(items: [NativeFilterItem])
     /// Slide navigation changed; provides 1-based current slide and total count.
     case slideChange(current: Int, total: Int)
+    /// Word page changed; provides 1-based current page and total page count.
+    case wordPageChange(current: Int, total: Int)
     /// Thumbnail image captured from OO's rendering canvas for a slide.
     case slideThumbnail(slideNum: Int, data: Data)
     /// Word document statistics returned by asc_getDocumentStatistic.
     case wordCount(words: Int, chars: Int, charsNoSpace: Int, paragraphs: Int)
+    /// JS intercepted a simple OO dialog; show as native UIAlertController (with optional text field).
+    case nativeDialog(OODialogPayload)
+    /// Excel sheet list changed or active sheet changed; provides all sheet names and the active index.
+    case sheetList(names: [String], activeIndex: Int)
+    /// Excel selection changed; provides the font name of the selected cell.
+    case excelFontChange(fontName: String)
+    /// Word selection changed; provides the font name at the cursor/selection.
+    case wordFontChange(fontName: String)
     /// Unknown/unparseable message.
     case unknown(body: Any)
 }
@@ -120,6 +145,11 @@ final class OfficeBridge: NSObject, WKScriptMessageHandler {
             let total   = dict["total"]   as? Int ?? 1
             return .slideChange(current: current, total: total)
 
+        case "wordPageChange":
+            let current = dict["current"] as? Int ?? 1
+            let total   = dict["total"]   as? Int ?? 1
+            return .wordPageChange(current: current, total: total)
+
         case "slideThumbnail":
             let num = dict["slideNum"] as? Int ?? 1
             guard let b64 = dict["data"] as? String,
@@ -133,6 +163,33 @@ final class OfficeBridge: NSObject, WKScriptMessageHandler {
             let charsNoSpace = dict["charsNoSpace"] as? Int ?? 0
             let paragraphs   = dict["paragraphs"]   as? Int ?? 0
             return .wordCount(words: words, chars: chars, charsNoSpace: charsNoSpace, paragraphs: paragraphs)
+
+        case "nativeDialog":
+            let id           = dict["id"]           as? String ?? ""
+            let title        = dict["title"]        as? String ?? ""
+            let message      = dict["message"]      as? String ?? ""
+            let defaultValue = dict["defaultValue"] as? String
+            let rawBtns      = dict["buttons"]      as? [[String: Any]] ?? []
+            let buttons      = rawBtns.map { d in
+                OODialogButton(label: d["label"] as? String ?? "OK",
+                               isPrimary: d["primary"] as? Bool ?? false)
+            }
+            let payload = OODialogPayload(id: id, title: title, message: message,
+                                          buttons: buttons, defaultValue: defaultValue)
+            return .nativeDialog(payload)
+
+        case "sheetList":
+            let names       = dict["names"]       as? [String] ?? []
+            let activeIndex = dict["activeIndex"] as? Int      ?? 0
+            return .sheetList(names: names, activeIndex: activeIndex)
+
+        case "excelFont":
+            let fontName = dict["font"] as? String ?? "Font"
+            return .excelFontChange(fontName: fontName)
+
+        case "wordFont":
+            let fontName = dict["font"] as? String ?? "Font"
+            return .wordFontChange(fontName: fontName)
 
         case "debug":
             if let msg = dict["msg"] as? String {

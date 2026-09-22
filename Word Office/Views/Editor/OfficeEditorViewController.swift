@@ -49,6 +49,14 @@ final class OfficeEditorViewController: UIViewController {
     var onSlideChange: ((Int, Int) -> Void)?
     /// Called when JS captures a slide thumbnail from OO's render canvas.
     var onSlideThumbnail: ((Int, Data) -> Void)?
+    /// Called when the current page changes in a Word document. Provides 1-based current page and total count.
+    var onWordPageChange: ((Int, Int) -> Void)?
+    /// Called when the Excel sheet list or active sheet changes. Provides sheet names and 0-based active index.
+    var onSheetListChange: (([String], Int) -> Void)?
+    /// Called when the Excel cell selection changes; provides the font name of the selected cell.
+    var onExcelFontChange: ((String) -> Void)?
+    /// Called when the Word cursor/selection changes; provides the font name at that position.
+    var onWordFontChange: ((String) -> Void)?
 
     // MARK: - Lifecycle
 
@@ -92,6 +100,24 @@ final class OfficeEditorViewController: UIViewController {
         webView.evaluateJavaScript("window.execEditorCommand('\(cmd)')")
     }
 
+    /// Ends editing on the WKWebView so the iOS keyboard fully dismisses before
+    /// a native sheet (TextField, TextEditor) claims first responder.
+    /// More reliable than UIApplication.resignFirstResponder because it explicitly
+    /// targets the webView's subview hierarchy, including WKContentView.
+    func dismissKeyboard() {
+        webView.endEditing(true)
+    }
+
+    /// Refocuses the OO canvas via JS after native UI interactions.
+    /// Does NOT call becomeFirstResponder — that disrupts WKWebView's keyboard/touch pipeline.
+    func refocusWebView() {
+        guard scriptReady else { return }
+        webView.evaluateJavaScript(
+            "(function(){try{var w=document.querySelector('iframe')?.contentWindow;" +
+            "var c=w&&w.document.querySelector('canvas');if(c)c.focus();else if(w)w.focus();}catch(_){}})()"
+        )
+    }
+
     /// Prints the current document using iOS UIPrintInteractionController.
     /// Uses WKWebView's viewPrintFormatter() which captures the canvas-rendered OO content.
     func printDocument() {
@@ -105,20 +131,15 @@ final class OfficeEditorViewController: UIViewController {
         pc.present(animated: true, completionHandler: nil)
     }
 
-    /// Inserts an image by converting to a data URL and using insertImageByDataURL,
-    /// which creates an inner-frame blob URL before calling asc_insertImageFromUrl.
-    /// Must NOT use insertImageByURL with a data: URL — that path calls AddImageUrl([dataURL])
-    /// which triggers OO's internal HTTP loader, showing "Loading Image" and hanging
-    /// because OO's WASM HTTP client cannot fetch data: scheme URLs.
+    /// Inserts an image by storing it in OfficeSchemeHandler and passing the
+    /// resulting office:// URL to insertImageByURL, which uses OO's official
+    /// AddImageUrl([url]) API. OO's WASM fetches the image via the scheme handler —
+    /// no base64 encoding, no blob: scheme issues.
     func insertImage(data: Data, mimeType: String = "image/jpeg") {
         guard scriptReady else { return }
-        let b64 = data.base64EncodedString()
-        // Store to window property first to avoid parsing a 700KB string literal inline.
-        webView.evaluateJavaScript("window.__pendingImg = 'data:\(mimeType);base64,\(b64)';") { [weak self] _, _ in
-            self?.webView.evaluateJavaScript(
-                "window.insertImageByDataURL(window.__pendingImg); window.__pendingImg = null;"
-            )
-        }
+        let officeURL = schemeHandler.storeImage(data: data, mimeType: mimeType)
+        let urlJS = jsStringLiteral(officeURL)
+        webView.evaluateJavaScript("window.insertImageByURL(\(urlJS));")
     }
 
     /// Sends the user's filter selection back to the hidden OO filter panel.
@@ -154,46 +175,12 @@ final class OfficeEditorViewController: UIViewController {
         webView.evaluateJavaScript("window._insertChart(\(typeJS));")
     }
 
-    /// Inserts a table using a direct ONLYOFFICE API sequence.
-    /// Bypasses `window.execEditorCommand('insert-table')` which falls back to
-    /// `_clickOOBtn` — clicking OO's hidden toolbar button opens OO's native
-    /// insert-table dialog, which crashes WKWebView on iOS (same mechanism as chart wizard).
+    /// Inserts a table via window._insertTable defined in editor.html.
+    /// That helper uses the captured _innerWin closure (a `let` binding — NOT window._innerWin)
+    /// and follows the same focus-restore pattern as _insertHyperlink / _addComment.
     func insertTable(rows: Int, cols: Int) {
         guard scriptReady else { return }
-        let r = rows, c = cols
-        let js = """
-        (function(r,c){
-          try {
-            try { window._innerWin && window._innerWin.focus(); } catch(_) {}
-            var ed = window._innerWin && window._innerWin.Asc && window._innerWin.Asc.editor;
-            if (!ed) return;
-            var done = false;
-            // Word: asc_insertTable(cols, rows)
-            // PPT:  asc_AddTable(rows, cols)  or asc_addTable(rows, cols)
-            // Excel: asc_insertTable(cols, rows) or asc_fmtTableApply (format selection as table)
-            // put_Table is a property SETTER (mode detection), not an insert — never use it.
-            var pairs = [
-              ['asc_insertTable',   function(){ ed.asc_insertTable(c, r); }],
-              ['asc_AddTable',      function(){ ed.asc_AddTable(r, c); }],
-              ['asc_addTable',      function(){ ed.asc_addTable(r, c); }],
-              ['CreateTable',       function(){ ed.CreateTable(r, c); }],
-              ['asc_fmtTableApply', function(){ ed.asc_fmtTableApply(null, null, true); }],
-            ];
-            for (var i = 0; i < pairs.length; i++) {
-              if (!done && typeof ed[pairs[i][0]] === 'function') {
-                try { pairs[i][1](); done = true; console.log('[iOS] insertTable via', pairs[i][0]); } catch(e) { console.warn('[iOS] insertTable', pairs[i][0], e); }
-              }
-            }
-            if (!done) {
-              try {
-                window._innerWin && window._innerWin.AscDesktopEditor &&
-                  window._innerWin.AscDesktopEditor.executeFocusedCommand('insertTable');
-              } catch(_) {}
-            }
-          } catch(e) {}
-        })(\(r), \(c));
-        """
-        webView.evaluateJavaScript(js)
+        webView.evaluateJavaScript("window._insertTable(\(cols), \(rows));")
     }
 
     /// Inserts a text box on the current PPT slide via window._insertTextBox.
@@ -205,7 +192,6 @@ final class OfficeEditorViewController: UIViewController {
     }
 
     /// Inserts a Unicode symbol/special character at the current cursor position.
-    /// Tries ONLYOFFICE's internal typeText APIs, falls back to execCommand insertText.
     func insertSymbol(_ char: String) {
         guard scriptReady else { return }
         let charJS = jsStringLiteral(char)
@@ -214,6 +200,14 @@ final class OfficeEditorViewController: UIViewController {
           try { window._innerWin && window._innerWin.focus(); } catch(_) {}
           var ed = window._innerWin && window._innerWin.Asc && window._innerWin.Asc.editor;
           if (ed) {
+            // asc_insertSymbol(fontName, charCode) confirmed in sdk-all-min.js
+            if (typeof ed.asc_insertSymbol === 'function') {
+              try {
+                var code = c.codePointAt ? c.codePointAt(0) : c.charCodeAt(0);
+                ed.asc_insertSymbol('Arial', code);
+                return;
+              } catch(_) {}
+            }
             if (typeof ed.asc_typeText === 'function') { try { ed.asc_typeText(c); return; } catch(_) {} }
             if (typeof ed.asc_TypeText === 'function') { try { ed.asc_TypeText(c); return; } catch(_) {} }
           }
@@ -227,7 +221,10 @@ final class OfficeEditorViewController: UIViewController {
           } catch(_) {}
         })(\(charJS));
         """
-        webView.evaluateJavaScript(js)
+        // 150 ms lets the sheet's dismiss animation finish and WKWebView fully reclaim first responder
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            self?.webView.evaluateJavaScript(js)
+        }
     }
 
     /// Inserts a shape via window._insertShape. The type is an OO shape preset name (rect, ellipse, etc.).
@@ -1062,29 +1059,68 @@ extension OfficeEditorViewController: WKNavigationDelegate {
 // MARK: - WKUIDelegate
 
 extension OfficeEditorViewController: WKUIDelegate {
-    // ONLYOFFICE's inner editor HTML fires window.alert() after a 30-second
-    // timeout when its scripts fail to load (CDN unreachable on first launch).
-    // Intercept it here so the user sees our error UI instead of a raw JS alert.
+
+    // JS alert() — fatal load errors kill the editor; all other OO messages
+    // show as a native UIAlertController so the editor stays alive.
     func webView(
         _ webView: WKWebView,
         runJavaScriptAlertPanelWithMessage message: String,
         initiatedByFrame frame: WKFrameInfo,
         completionHandler: @escaping () -> Void
     ) {
-        let isEditorLoadTimeout = message.contains("connection is too slow")
+        let isLoadError = message.contains("connection is too slow")
             || message.contains("components could not be loaded")
             || message.contains("reload the page")
+            || message.contains("required parameter")
+            || message.contains("parameter for the config")
 
-        if isEditorLoadTimeout {
+        if isLoadError {
             onError?(
                 "The editor engine could not load. " +
                 "Connect to the internet and reopen the file — the editor downloads ~86 MB of " +
                 "components on first use, and again if they were cleared from device storage."
             )
+            completionHandler()
         } else {
-            onError?("Editor error: \(message)")
+            let ac = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+            ac.addAction(UIAlertAction(title: "OK", style: .default) { _ in completionHandler() })
+            present(ac, animated: true)
         }
-        completionHandler()
+    }
+
+    // JS confirm() — OO uses this for destructive actions (delete slide, overwrite, etc.).
+    // Without this, confirm() silently returns false and operations never execute.
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptConfirmPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping (Bool) -> Void
+    ) {
+        let ac = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+        ac.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in completionHandler(false) })
+        ac.addAction(UIAlertAction(title: "OK", style: .default) { _ in completionHandler(true) })
+        present(ac, animated: true)
+    }
+
+    // JS prompt() — OO uses this for rename, find/replace, and hyperlink input.
+    // Without this, prompt() silently returns nil and the operation is abandoned.
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptTextInputPanelWithPrompt prompt: String,
+        defaultText: String?,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping (String?) -> Void
+    ) {
+        let ac = UIAlertController(title: nil, message: prompt, preferredStyle: .alert)
+        ac.addTextField { tf in
+            tf.text = defaultText
+            tf.clearButtonMode = .whileEditing
+        }
+        ac.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in completionHandler(nil) })
+        ac.addAction(UIAlertAction(title: "OK", style: .default) { [weak ac] _ in
+            completionHandler(ac?.textFields?.first?.text ?? "")
+        })
+        present(ac, animated: true)
     }
 }
 
@@ -1150,6 +1186,18 @@ extension OfficeEditorViewController: OfficeBridgeDelegate {
         case .slideChange(let current, let total):
             onSlideChange?(current, total)
 
+        case .wordPageChange(let current, let total):
+            onWordPageChange?(current, total)
+
+        case .sheetList(let names, let activeIndex):
+            onSheetListChange?(names, activeIndex)
+
+        case .excelFontChange(let fontName):
+            onExcelFontChange?(fontName)
+
+        case .wordFontChange(let fontName):
+            onWordFontChange?(fontName)
+
         case .slideThumbnail(let slideNum, let data):
             onSlideThumbnail?(slideNum, data)
 
@@ -1158,8 +1206,43 @@ extension OfficeEditorViewController: OfficeBridgeDelegate {
                 self?.showWordCountAlert(words: words, chars: chars, charsNoSpace: charsNoSpace, paragraphs: paragraphs)
             }
 
+        case .nativeDialog(let payload):
+            DispatchQueue.main.async { [weak self] in
+                self?.showNativeOODialog(payload)
+            }
+
         case .saved, .unknown:
             break
         }
+    }
+
+    private func showNativeOODialog(_ payload: OODialogPayload) {
+        let ac = UIAlertController(
+            title: payload.title.isEmpty ? nil : payload.title,
+            message: payload.message.isEmpty ? nil : payload.message,
+            preferredStyle: .alert
+        )
+        // Text field for dialogs like Column Width / Row Height
+        if let def = payload.defaultValue {
+            ac.addTextField { tf in
+                tf.text = def
+                tf.keyboardType = .decimalPad
+                tf.clearButtonMode = .whileEditing
+            }
+        }
+        let displayButtons = payload.buttons.isEmpty
+            ? [OODialogButton(label: "OK", isPrimary: true)]
+            : payload.buttons
+        for (idx, btn) in displayButtons.enumerated() {
+            let style: UIAlertAction.Style = (displayButtons.count > 1 && !btn.isPrimary) ? .cancel : .default
+            ac.addAction(UIAlertAction(title: btn.label, style: style) { [weak self, weak ac] _ in
+                let textVal = ac?.textFields?.first?.text
+                let escapedText = textVal.map { $0.replacingOccurrences(of: "'", with: "\\'") }
+                let textArg = escapedText.map { "'\($0)'" } ?? "null"
+                let js = "window._ooDialogRespond('\(payload.id)', \(idx), \(textArg))"
+                self?.webView?.evaluateJavaScript(js)
+            })
+        }
+        present(ac, animated: true)
     }
 }

@@ -87,7 +87,7 @@ struct NotificationPermissionSheet: View {
         }
         .scrollBounceBehavior(.basedOnSize)
         .background(Color(UIColor.systemBackground))
-        .presentationDetents([.height(490), .large])
+        .presentationDetents([.height(520)])
         .presentationDragIndicator(.visible)
     }
 

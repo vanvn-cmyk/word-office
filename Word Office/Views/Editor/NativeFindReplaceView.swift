@@ -3,6 +3,7 @@ import SwiftUI
 /// Native Find & Replace sheet — replaces ONLYOFFICE's web dialog on mobile.
 struct NativeFindReplaceView: View {
 
+    let onDismissWebKeyboard: (() -> Void)?
     let onCommit: (_ find: String, _ replace: String, _ replaceAll: Bool) -> Void
     let onCancel: () -> Void
 
@@ -57,7 +58,16 @@ struct NativeFindReplaceView: View {
         .presentationDetents([.height(360)])
         .presentationDragIndicator(.hidden)
         .presentationCornerRadius(20)
-        .onAppear { findFocused = true }
+        // Two-stage focus: wait for sheet animation to settle, then dismiss webView
+        // keyboard, then claim first responder. Calling dismissKeyboard before the
+        // sheet appears (in handleCommand) doesn't work — WKWebView reclaims keyboard
+        // during the sheet animation, so the TextField gets cursor but no keyboard.
+        .task {
+            try? await Task.sleep(for: .milliseconds(380))
+            onDismissWebKeyboard?()
+            try? await Task.sleep(for: .milliseconds(420))
+            findFocused = true
+        }
     }
 
     private func fieldSection<Content: View>(

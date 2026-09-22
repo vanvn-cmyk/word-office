@@ -48,7 +48,7 @@ struct NativeTableView: View {
             actionBar
         }
         .background(Color.dsBackgroundElevated)
-        .presentationDetents([.height(330)])
+        .presentationDetents([.height(400)])
         .presentationDragIndicator(.hidden)
     }
 
@@ -59,8 +59,12 @@ struct NativeTableView: View {
             let spacing: CGFloat = 4
             let cols = Self.maxCols
             let rows = Self.maxRows
-            let cellW = (geo.size.width - spacing * CGFloat(cols - 1)) / CGFloat(cols)
-            let cellH = cellW
+            // Fit ALL rows inside the frame so no row is clipped.
+            // Cell is square; size is driven by the height dimension.
+            let cellH = (geo.size.height - spacing * CGFloat(rows - 1)) / CGFloat(rows)
+            let cellSide = min(cellH, (geo.size.width - spacing * CGFloat(cols - 1)) / CGFloat(cols))
+            let gridW = (cellSide + spacing) * CGFloat(cols) - spacing
+            let gridH = (cellSide + spacing) * CGFloat(rows) - spacing
 
             ZStack(alignment: .topLeading) {
                 VStack(spacing: spacing) {
@@ -77,36 +81,38 @@ struct NativeTableView: View {
                                                 lineWidth: isSelected ? 1.5 : 1
                                             )
                                     )
-                                    .frame(width: cellW, height: cellH)
+                                    .frame(width: cellSide, height: cellSide)
                             }
                         }
                     }
                 }
 
-                // Invisible drag/tap overlay sized to the full grid
+                // contentShape makes Color.clear hit-testable so the gesture fires.
                 Color.clear
-                    .frame(width: geo.size.width,
-                           height: (cellH + spacing) * CGFloat(rows) - spacing)
+                    .contentShape(Rectangle())
+                    .frame(width: gridW, height: gridH)
                     .gesture(
                         DragGesture(minimumDistance: 0, coordinateSpace: .local)
                             .onChanged { value in
                                 let col = max(1, min(cols,
-                                    Int(value.location.x / (cellW + spacing)) + 1))
+                                    Int(value.location.x / (cellSide + spacing)) + 1))
                                 let row = max(1, min(rows,
-                                    Int(value.location.y / (cellH + spacing)) + 1))
+                                    Int(value.location.y / (cellSide + spacing)) + 1))
                                 selectedCol = col
                                 selectedRow = row
                             }
                     )
                     .onTapGesture(coordinateSpace: .local) { location in
-                        let col = max(1, min(cols, Int(location.x / (cellW + spacing)) + 1))
-                        let row = max(1, min(rows, Int(location.y / (cellH + spacing)) + 1))
+                        let col = max(1, min(cols, Int(location.x / (cellSide + spacing)) + 1))
+                        let row = max(1, min(rows, Int(location.y / (cellSide + spacing)) + 1))
                         selectedCol = col
                         selectedRow = row
                     }
             }
+            .frame(width: gridW, height: gridH)
+            .frame(maxWidth: .infinity, alignment: .center)
         }
-        .frame(height: 140)
+        .frame(height: 200)
     }
 
     // MARK: - Chrome

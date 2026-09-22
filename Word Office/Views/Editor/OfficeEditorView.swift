@@ -26,6 +26,11 @@ struct OfficeEditorView: View {
     @State private var editorVC: OfficeEditorViewController?
     @State private var slideProgress: (current: Int, total: Int) = (1, 1)
     @State private var slideThumbnails: [Int: UIImage] = [:]
+    @State private var wordPageProgress: (current: Int, total: Int) = (1, 1)
+    @State private var sheetNames: [String] = []
+    @State private var activeSheetIndex: Int = 0
+    @State private var currentExcelFont: String = "Font"
+    @State private var currentWordFont:  String = "Font"
 
     // Native photo insertion
     @State private var showImagePicker = false
@@ -70,6 +75,9 @@ struct OfficeEditorView: View {
                     EditorTopToolbar(
                         kind: fileKind,
                         slideInfo: fileKind == .ppt ? slideProgress : nil,
+                        wordPageInfo: fileKind == .word ? wordPageProgress : nil,
+                        excelFontName: currentExcelFont,
+                        wordFontName: currentWordFont,
                         onCommand: handleCommand
                     )
 
@@ -89,12 +97,17 @@ struct OfficeEditorView: View {
                             if let img = UIImage(data: data) {
                                 slideThumbnails[num] = img
                             }
-                        }
+                        },
+                        onWordPageChange: { c, t in wordPageProgress = (c, t) },
+                        onSheetListChange: { names, idx in
+                            sheetNames = names
+                            activeSheetIndex = idx
+                        },
+                        onExcelFontChange: { name in currentExcelFont = name },
+                        onWordFontChange:  { name in currentWordFont  = name }
                     )
 
-                    if fileKind == .ppt {
-                        slideStrip
-                    }
+                    bottomStrip
 
                 }
                 // Native photo picker — triggered by "insert-image" command
@@ -160,8 +173,12 @@ struct OfficeEditorView: View {
                 // onDismiss after WKWebView regains focus.
                 .sheet(isPresented: $showTableSheet, onDismiss: {
                     if let t = pendingTable {
-                        editorVC?.insertTable(rows: t.rows, cols: t.cols)
-                        pendingTable = nil
+                        let captured = t; pendingTable = nil
+                        // 0.35s: give sheet dismiss animation + WKWebView focus restoration
+                        // time to complete before calling insertTable (which needs an active cursor).
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            editorVC?.insertTable(rows: captured.rows, cols: captured.cols)
+                        }
                     }
                 }) {
                     NativeTableView(
@@ -210,6 +227,7 @@ struct OfficeEditorView: View {
                     }
                 }) {
                     NativeFindReplaceView(
+                        onDismissWebKeyboard: { editorVC?.dismissKeyboard() },
                         onCommit: { find, replace, replaceAll in
                             pendingFindReplace = (find, replace, replaceAll)
                             showFindReplaceSheet = false
@@ -221,6 +239,7 @@ struct OfficeEditorView: View {
                 .sheet(isPresented: $showFontPickerSheet, onDismiss: {
                     if let font = pendingFont {
                         editorVC?.setFontFamily(font)
+                        if fileKind == .excel { currentExcelFont = font }
                         pendingFont = nil
                     }
                 }) {
@@ -263,6 +282,27 @@ struct OfficeEditorView: View {
     // MARK: - Command routing
 
     private func handleCommand(_ cmd: String) {
+        // Dismiss any active WKWebView keyboard before showing a sheet.
+        // OO's editor holds the keyboard as first responder; if we don't resign it
+        // before the sheet appears iOS creates conflicting layout constraints between
+        // the keyboard placeholder and the sheet's input view (UIConstraintBasedLayout
+        // "accessoryView.bottom" vs "inputView.top" warning).
+        switch cmd {
+        case "insert-image", "insert-link", "insert-comment",
+             "insert-table", "insert-chart", "insert-shape",
+             "insert-symbol", "word-font-picker", "excel-font-picker":
+            // webView.endEditing(true) is more reliable than UIApplication.resignFirstResponder
+            // for WKWebView: it explicitly ends editing on WKContentView regardless of what
+            // the current first responder is, preventing the sheet's TextFields from competing
+            // with WKWebView for keyboard ownership.
+            // word-find-replace is excluded: NativeFindReplaceView's onDismissWebKeyboard
+            // closure fires AFTER sheet animation so WKWebView can't reclaim during slide-in.
+            editorVC?.dismissKeyboard()
+            UIApplication.shared.sendAction(
+                #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil
+            )
+        default: break
+        }
         switch cmd {
         case "insert-image":        showImagePicker       = true
         case "insert-link":         showLinkSheet          = true
@@ -276,7 +316,7 @@ struct OfficeEditorView: View {
         // Direct APIs (asc_insertTextBox, asc_setShapePreset) crash on iOS.
         case "ppt-insert-textbox":  editorVC?.insertTextBox()
         case "word-find-replace":   showFindReplaceSheet   = true
-        case "word-font-picker":    showFontPickerSheet    = true
+        case "word-font-picker", "excel-font-picker": showFontPickerSheet = true
         case "print":               editorVC?.printDocument()
         default:                    editorVC?.execEditorCommand(cmd)
         }
@@ -335,6 +375,17 @@ struct OfficeEditorView: View {
         }
         if !isOnline {
             errorMessage = "An internet connection is required to download the editor engine (~86 MB). After downloading once, editing works fully offline."
+        }
+    }
+
+    // MARK: - Bottom strip (slide strip for PPT, sheet strip for Excel)
+
+    @ViewBuilder
+    private var bottomStrip: some View {
+        if fileKind == .ppt {
+            slideStrip
+        } else if fileKind == .excel {
+            sheetStrip
         }
     }
 
@@ -411,6 +462,87 @@ struct OfficeEditorView: View {
         }
     }
 
+    // MARK: - Excel sheet strip
+
+    /// Horizontal sheet tab strip below the Excel canvas.
+    /// Shows all sheet names; active tab is highlighted. Tap to navigate, long-press for rename/delete.
+    /// A "+" button at the leading end adds a new sheet.
+    private var sheetStrip: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 0) {
+                    // Add sheet button
+                    Button {
+                        handleCommand("sheet-add")
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 40, height: 40)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Add sheet")
+
+                    Divider().frame(height: 20)
+
+                    ForEach(Array(sheetNames.enumerated()), id: \.offset) { index, name in
+                        let isActive = index == activeSheetIndex
+                        Text(name)
+                            .font(.system(size: 13, weight: isActive ? .semibold : .regular))
+                            .foregroundStyle(isActive ? Color.accentColor : .primary)
+                            .lineLimit(1)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(
+                                Group {
+                                    if isActive {
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .fill(Color.accentColor.opacity(0.12))
+                                    }
+                                }
+                                .padding(.horizontal, 4)
+                            )
+                            .overlay(alignment: .bottom) {
+                                if isActive {
+                                    Rectangle()
+                                        .fill(Color.accentColor)
+                                        .frame(height: 2)
+                                        .padding(.horizontal, 8)
+                                }
+                            }
+                            // Single-tap → switch sheet; long-press context menu → Rename/Delete
+                            .onTapGesture(count: 1) {
+                                handleCommand("sheet-goto:\(index)")
+                            }
+                            .contextMenu {
+                                Button("Rename") {
+                                    handleCommand("sheet-rename")
+                                }
+                                Divider()
+                                Button("Delete", role: .destructive) {
+                                    handleCommand("sheet-delete")
+                                }
+                            }
+                            .accessibilityLabel(name)
+                            .accessibilityHint(isActive ? "Active sheet. Double-tap to rename." : "Tap to switch. Double-tap to rename.")
+                            .id(index)
+                    }
+
+                    Spacer().frame(width: 8)
+                }
+                .padding(.leading, 4)
+            }
+            .frame(height: 44)
+            .background(.bar)
+            .overlay(alignment: .top) { Divider() }
+            .onChange(of: activeSheetIndex) { _, idx in
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    proxy.scrollTo(idx, anchor: .center)
+                }
+            }
+        }
+    }
+
     // MARK: - Nav pill (Word + Excel)
 
     @ToolbarContentBuilder
@@ -418,8 +550,6 @@ struct OfficeEditorView: View {
         if fileKind == .word || fileKind == .excel || fileKind == .ppt {
             ToolbarItem(placement: .navigationBarTrailing) {
                 HStack(spacing: 4) {
-                    pillIconBtn("arrow.uturn.backward", cmd: "undo", label: "Undo")
-                    pillIconBtn("arrow.uturn.forward",  cmd: "redo", label: "Redo")
                     if fileKind == .ppt {
                         // PPT has no tab-bar trailing zoom, so keep it here.
                         // PPT's auto-fit APIs (asc_setZoomType, zoomFitToPage) are known to
@@ -436,7 +566,7 @@ struct OfficeEditorView: View {
                     } else {
                         // Word/Excel: zoom already lives in the tab-bar trailing area.
                         pillIconBtn("printer",    cmd: "print",          label: "Print")
-                        pillIconBtn("text.bubble", cmd: "insert-comment", label: "Comment")
+                        Spacer().frame(width: 6)
                     }
                     Button {
                         NotificationCenter.default.post(name: .editorSaveRequested, object: nil)
@@ -526,6 +656,10 @@ private struct _OfficeWebView: UIViewControllerRepresentable {
     let onFilterRequest: ([NativeFilterItem]) -> Void
     let onSlideChange: (Int, Int) -> Void
     let onSlideThumbnail: (Int, Data) -> Void
+    let onWordPageChange: (Int, Int) -> Void
+    let onSheetListChange: ([String], Int) -> Void
+    let onExcelFontChange: (String) -> Void
+    let onWordFontChange:  (String) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -538,6 +672,10 @@ private struct _OfficeWebView: UIViewControllerRepresentable {
         vc.onFilterRequest = { items in Task { @MainActor in onFilterRequest(items) } }
         vc.onSlideChange = { c, t in Task { @MainActor in onSlideChange(c, t) } }
         vc.onSlideThumbnail = { num, data in Task { @MainActor in onSlideThumbnail(num, data) } }
+        vc.onWordPageChange = { c, t in Task { @MainActor in onWordPageChange(c, t) } }
+        vc.onSheetListChange = { names, idx in Task { @MainActor in onSheetListChange(names, idx) } }
+        vc.onExcelFontChange = { name in Task { @MainActor in onExcelFontChange(name) } }
+        vc.onWordFontChange  = { name in Task { @MainActor in onWordFontChange(name)  } }
         vc.openFile(at: ref.url)
         Task { @MainActor in onVCReady(vc) }
         return vc

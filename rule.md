@@ -181,6 +181,23 @@ khi editor (EditorSheet, fullScreenCover) dismiss theo luồng Done bình thư�
 *Lý do: đã vi phạm nhiều lần (imageToPDF, pdfToWord) khiến user mất navigation context. Đây là
 UX regression nghiêm trọng — thêm vào rule 2026-09-20.*
 
+## 11. Sửa bug keyboard/focus — phải trace full impact trước
+
+Trước khi sửa bất kỳ bug liên quan đến keyboard, focus, first responder, WKWebView input:
+
+1. **Trace full chain**: WKWebView layer → JS layer (editor.html) → OO SDK layer. Thay đổi ở
+   bất kỳ layer nào có thể ảnh hưởng silently đến layer khác.
+2. **List features at risk**: keyboard fix thường ảnh hưởng: (a) OO typing trong Word/Excel/PPT,
+   (b) native sheets (Find&Replace, FontPicker, TableSheet, LinkSheet...), (c) clipboard bridge,
+   (d) touch gesture bridge.
+3. **Không sửa inline JS trong ViewController** khi cần access `_innerWin` — `_innerWin` là `let`
+   binding trong editor.html, KHÔNG phải `window._innerWin`. Luôn expose `window.*` helper function
+   trong editor.html, rồi gọi từ ViewController.
+4. **Sau khi sửa**: test ít nhất Word typing + Excel filter + PPT slide tap + Find&Replace typing
+   để xác nhận không có regression.
+
+*Lý do: nhiều lần sửa 1 bug rồi break bug khác (S22 session), user explicitly ask "add rule đi".*
+
 ---
 
 *File này là rule bắt buộc cho project Word Office — đọc trước khi bắt đầu bất kỳ phiên làm

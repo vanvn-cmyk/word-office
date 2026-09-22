@@ -49,6 +49,12 @@ struct EditorTopToolbar: View {
     let kind: FileKind
     /// Current/total slide number for PPT — nil for all other kinds.
     var slideInfo: (current: Int, total: Int)? = nil
+    /// Current/total page number for Word — nil for all other kinds.
+    var wordPageInfo: (current: Int, total: Int)? = nil
+    /// Current font name for Excel — shown in the Font picker button.
+    var excelFontName: String = "Font"
+    /// Current font name for Word — shown in the Font picker chip.
+    var wordFontName: String = "Font"
     let onCommand: (String) -> Void
 
     @State private var excelTab: ExcelTab = .home
@@ -210,6 +216,14 @@ struct EditorTopToolbar: View {
 
                     switch excelTab {
                     case .home:
+                        chipBtn(
+                            String(excelFontName.prefix(11)) + (excelFontName.count > 11 ? "…" : ""),
+                            label: "Font face", cmd: "excel-font-picker"
+                        )
+                        vDivider()
+                        iconBtn("arrow.uturn.backward", label: "Undo", cmd: "undo")
+                        iconBtn("arrow.uturn.forward",  label: "Redo", cmd: "redo")
+                        vDivider()
                         fmtBtn(.bold,          cmd: "bold")
                         fmtBtn(.italic,        cmd: "italic")
                         fmtBtn(.underline,     cmd: "underline")
@@ -225,7 +239,6 @@ struct EditorTopToolbar: View {
                     case .insert:
                         iconBtn("photo",       label: "Insert image",  cmd: "insert-image")
                         chipBtn("Table",       label: "Insert table",  cmd: "insert-table")
-                        chipBtn("Chart",       label: "Insert chart",  cmd: "insert-chart")
                         chipBtn("Shape",       label: "Insert shape",  cmd: "insert-shape")
                         vDivider()
                         iconBtn("link",        label: "Hyperlink",     cmd: "insert-link")
@@ -234,19 +247,67 @@ struct EditorTopToolbar: View {
                         chipBtn("Symbol",      label: "Insert symbol", cmd: "insert-symbol")
 
                     case .formula:
-                        // AutoSum — the most common formula action
-                        textBtn("Σ",    label: "AutoSum",  cmd: "auto-sum")
+                        // AutoSum
+                        textBtn("Σ",      label: "AutoSum",           cmd: "auto-sum")
                         vDivider()
-                        // Common functions — each starts formula-entry mode with =FUNC(
-                        chipBtn("SUM",    label: "Insert SUM",     cmd: "formula-insert:SUM")
-                        chipBtn("AVG",    label: "Insert AVERAGE", cmd: "formula-insert:AVERAGE")
-                        chipBtn("CNT",    label: "Insert COUNT",   cmd: "formula-insert:COUNT")
-                        chipBtn("MAX",    label: "Insert MAX",     cmd: "formula-insert:MAX")
-                        chipBtn("MIN",    label: "Insert MIN",     cmd: "formula-insert:MIN")
+                        // Aggregate
+                        chipBtn("SUM",    label: "SUM",               cmd: "formula-insert:SUM")
+                        chipBtn("AVG",    label: "AVERAGE",           cmd: "formula-insert:AVERAGE")
+                        chipBtn("CNT",    label: "COUNT",             cmd: "formula-insert:COUNT")
+                        chipBtn("CNTA",   label: "COUNTA",            cmd: "formula-insert:COUNTA")
+                        chipBtn("MAX",    label: "MAX",               cmd: "formula-insert:MAX")
+                        chipBtn("MIN",    label: "MIN",               cmd: "formula-insert:MIN")
+                        chipBtn("MEDIAN", label: "MEDIAN",            cmd: "formula-insert:MEDIAN")
+                        chipBtn("STDEV",  label: "STDEV",             cmd: "formula-insert:STDEV")
                         vDivider()
-                        chipBtn("IF",     label: "Insert IF",      cmd: "formula-insert:IF")
-                        chipBtn("VLKP",   label: "Insert VLOOKUP", cmd: "formula-insert:VLOOKUP")
-                        chipBtn("CONCAT", label: "Concatenate",    cmd: "formula-insert:CONCATENATE")
+                        // Conditional aggregate
+                        chipBtn("SUMIF",  label: "SUMIF",             cmd: "formula-insert:SUMIF")
+                        chipBtn("CNTIF",  label: "COUNTIF",           cmd: "formula-insert:COUNTIF")
+                        chipBtn("AVRIF",  label: "AVERAGEIF",         cmd: "formula-insert:AVERAGEIF")
+                        vDivider()
+                        // Logical
+                        chipBtn("IF",     label: "IF",                cmd: "formula-insert:IF")
+                        chipBtn("IFERR",  label: "IFERROR",           cmd: "formula-insert:IFERROR")
+                        chipBtn("AND",    label: "AND",               cmd: "formula-insert:AND")
+                        chipBtn("OR",     label: "OR",                cmd: "formula-insert:OR")
+                        chipBtn("NOT",    label: "NOT",               cmd: "formula-insert:NOT")
+                        vDivider()
+                        // Lookup
+                        chipBtn("VLKP",   label: "VLOOKUP",           cmd: "formula-insert:VLOOKUP")
+                        chipBtn("HLKP",   label: "HLOOKUP",           cmd: "formula-insert:HLOOKUP")
+                        chipBtn("INDEX",  label: "INDEX",             cmd: "formula-insert:INDEX")
+                        chipBtn("MATCH",  label: "MATCH",             cmd: "formula-insert:MATCH")
+                        vDivider()
+                        // Math
+                        chipBtn("ROUND",  label: "ROUND",             cmd: "formula-insert:ROUND")
+                        chipBtn("ABS",    label: "ABS",               cmd: "formula-insert:ABS")
+                        chipBtn("SQRT",   label: "SQRT",              cmd: "formula-insert:SQRT")
+                        chipBtn("INT",    label: "INT",               cmd: "formula-insert:INT")
+                        chipBtn("MOD",    label: "MOD",               cmd: "formula-insert:MOD")
+                        chipBtn("POWER",  label: "POWER",             cmd: "formula-insert:POWER")
+                        vDivider()
+                        // Text
+                        chipBtn("CONCAT", label: "CONCATENATE",       cmd: "formula-insert:CONCATENATE")
+                        chipBtn("LEFT",   label: "LEFT",              cmd: "formula-insert:LEFT")
+                        chipBtn("RIGHT",  label: "RIGHT",             cmd: "formula-insert:RIGHT")
+                        chipBtn("MID",    label: "MID",               cmd: "formula-insert:MID")
+                        chipBtn("LEN",    label: "LEN",               cmd: "formula-insert:LEN")
+                        chipBtn("TRIM",   label: "TRIM",              cmd: "formula-insert:TRIM")
+                        chipBtn("UPPER",  label: "UPPER",             cmd: "formula-insert:UPPER")
+                        chipBtn("LOWER",  label: "LOWER",             cmd: "formula-insert:LOWER")
+                        chipBtn("FIND",   label: "FIND",              cmd: "formula-insert:FIND")
+                        chipBtn("SUBST",  label: "SUBSTITUTE",        cmd: "formula-insert:SUBSTITUTE")
+                        chipBtn("TEXT",   label: "TEXT",              cmd: "formula-insert:TEXT")
+                        vDivider()
+                        // Date & time
+                        chipBtn("TODAY",  label: "TODAY",             cmd: "formula-insert:TODAY")
+                        chipBtn("NOW",    label: "NOW",               cmd: "formula-insert:NOW")
+                        chipBtn("DATE",   label: "DATE",              cmd: "formula-insert:DATE")
+                        chipBtn("YEAR",   label: "YEAR",              cmd: "formula-insert:YEAR")
+                        chipBtn("MONTH",  label: "MONTH",             cmd: "formula-insert:MONTH")
+                        chipBtn("DAY",    label: "DAY",               cmd: "formula-insert:DAY")
+                        chipBtn("DAYS",   label: "DAYS",              cmd: "formula-insert:DAYS")
+                        Spacer().frame(width: 32)
 
                     case .data:
                         iconBtn("line.3.horizontal.decrease.circle",
@@ -322,22 +383,53 @@ struct EditorTopToolbar: View {
 
     private var wordContentRow: some View {
         HStack(spacing: 0) {
+            // Page counter pinned on the left — always visible regardless of scroll position
+            if let info = wordPageInfo {
+                Button { onCommand("word-page-prev") } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 13, weight: .semibold))
+                        .frame(width: 30, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .foregroundStyle(info.current > 1 ? .primary : Color.secondary.opacity(0.3))
+                .disabled(info.current <= 1)
+                .accessibilityLabel("Previous page")
+                Text("\(info.current)/\(info.total)")
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(Color.secondary.opacity(0.1), in: Capsule())
+                Button { onCommand("word-page-next") } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .frame(width: 30, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .foregroundStyle(info.current < info.total ? .primary : Color.secondary.opacity(0.3))
+                .disabled(info.current >= info.total && info.total > 1)
+                .accessibilityLabel("Next page")
+                vDivider()
+            }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
                     switch wordTab {
                     case .home:
-                        // Undo / Redo — pinned first so thumb can reach while keyboard is open
-                        iconBtn("arrow.uturn.backward", label: "Undo", cmd: "undo")
-                        iconBtn("arrow.uturn.forward",  label: "Redo", cmd: "redo")
+                        // Font name chip first — mirrors Excel Home tab pattern
+                        chipBtn(
+                            String(wordFontName.prefix(11)) + (wordFontName.count > 11 ? "…" : ""),
+                            label: "Font face", cmd: "word-font-picker"
+                        )
                         vDivider()
-                        // Format
+                        // Format — B next to font chip as requested
                         fmtBtn(.bold,          cmd: "bold")
                         fmtBtn(.italic,        cmd: "italic")
                         fmtBtn(.underline,     cmd: "underline")
                         fmtBtn(.strikethrough, cmd: "strikeout")
                         vDivider()
-                        // Font picker + Size
-                        iconBtn("textformat", label: "Font", cmd: "word-font-picker")
+                        iconBtn("arrow.uturn.backward", label: "Undo", cmd: "undo")
+                        iconBtn("arrow.uturn.forward",  label: "Redo", cmd: "redo")
+                        vDivider()
                         textBtn("A+", label: "Increase font size", cmd: "font-size-inc")
                         textBtn("A−", label: "Decrease font size", cmd: "font-size-dec")
                         vDivider()
@@ -349,7 +441,7 @@ struct EditorTopToolbar: View {
                         iconBtn("eraser",       label: "Clear formatting", cmd: "clear-format")
                         chipBtn("Aa",           label: "Text case",        cmd: "text-case")
                         vDivider()
-                        // Alignment
+                        // Alignment + styles adjacent (no divider between them)
                         iconBtn("text.alignleft",    label: "Left",    cmd: "align-left")
                         iconBtn("text.aligncenter",  label: "Center",  cmd: "align-center")
                         iconBtn("text.alignright",   label: "Right",   cmd: "align-right")
@@ -358,12 +450,6 @@ struct EditorTopToolbar: View {
                         // Lists
                         iconBtn("list.bullet", label: "Bullet list",   cmd: "list-bullet")
                         iconBtn("list.number", label: "Numbered list", cmd: "list-numbered")
-                        vDivider()
-                        // Styles
-                        chipBtn("Normal", label: "Normal style", cmd: "style:Normal")
-                        chipBtn("H1",     label: "Heading 1",    cmd: "style:Heading 1")
-                        chipBtn("H2",     label: "Heading 2",    cmd: "style:Heading 2")
-                        chipBtn("H3",     label: "Heading 3",    cmd: "style:Heading 3")
                     case .paragraph:
                         iconBtn("increase.indent", label: "Indent",  cmd: "indent-increase")
                         iconBtn("decrease.indent", label: "Outdent", cmd: "indent-decrease")
@@ -387,7 +473,6 @@ struct EditorTopToolbar: View {
                     case .insert:
                         iconBtn("photo",         label: "Insert image",  cmd: "insert-image")
                         chipBtn("Table",         label: "Insert table",  cmd: "insert-table")
-                        chipBtn("Chart",         label: "Insert chart",  cmd: "insert-chart")
                         chipBtn("Shape",         label: "Insert shape",  cmd: "insert-shape")
                         vDivider()
                         // Table row / column operations (active when cursor is inside a table)
@@ -398,7 +483,6 @@ struct EditorTopToolbar: View {
                         vDivider()
                         iconBtn("link",          label: "Hyperlink",     cmd: "insert-link")
                         iconBtn("text.bubble",   label: "Comment",       cmd: "insert-comment")
-                        iconBtn("bookmark",      label: "Bookmark",      cmd: "insert-bookmark")
                         vDivider()
                         chipBtn("Symbol",        label: "Insert symbol", cmd: "insert-symbol")
                         vDivider()
@@ -408,8 +492,7 @@ struct EditorTopToolbar: View {
                         chipBtn("Footnote",      label: "Footnote",      cmd: "insert-footnote")
                     case .review:
                         // Find & Replace
-                        iconBtn("magnifyingglass", label: "Find",           cmd: "find")
-                        iconBtn("arrow.left.arrow.right", label: "Find & Replace", cmd: "word-find-replace")
+                        iconBtn("magnifyingglass", label: "Find & Replace", cmd: "word-find-replace")
                         vDivider()
                         // Track Changes — active chip shows current state
                         activeChipBtn("Track",    label: "Track Changes",     cmd: "track-changes",    isActive: $wordTrackChangesActive)
@@ -475,7 +558,6 @@ struct EditorTopToolbar: View {
                         iconBtn("photo",         label: "Insert image",  cmd: "insert-image")
                         chipBtn("Table",         label: "Insert table",  cmd: "insert-table")
                         chipBtn("Shape",         label: "Insert shape",  cmd: "insert-shape")
-                        chipBtn("Chart",         label: "Insert chart",  cmd: "insert-chart")
                         vDivider()
                         iconBtn("link",          label: "Hyperlink",     cmd: "insert-link")
                         iconBtn("text.bubble",   label: "Comment",       cmd: "insert-comment")
