@@ -878,13 +878,7 @@ private struct ToolCardSurface: ViewModifier {
                 RoundedRectangle(cornerRadius: corner, style: .continuous)
                     .strokeBorder(Color.dsBorderSubtle.opacity(0.6), lineWidth: 0.5)
             )
-            // Tight ambient shadow — sharpens the bottom edge, hints at
-            // the card sitting on the page.
-            .shadow(color: shadowColor.opacity(colorScheme == .dark ? 0.5 : 0.05), radius: 2, x: 0, y: 1)
-            // Soft spread shadow — the "lifted" sensation. Kept subtle
-            // (0.06 opacity light / 0.4 dark) so the grid doesn't feel
-            // heavy when 4 cards stack.
-            .shadow(color: shadowColor.opacity(colorScheme == .dark ? 0.4 : 0.06), radius: 14, x: 0, y: 6)
+            .shadow(color: shadowColor.opacity(colorScheme == .dark ? 0.4 : 0.09), radius: 6, x: 0, y: 4)
             .contentShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
     }
 

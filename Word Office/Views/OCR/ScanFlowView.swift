@@ -121,6 +121,7 @@ struct ScanFlowView: View {
     var body: some View {
         stateContent
             .prominentInlineTitle(navigationTitle)
+            .navigationBarBackButtonHidden(stage != .addPages)
             .toolbar { toolbarContent }
             .fullScreenCover(isPresented: $isCameraPresented) { cameraSheet }
             .fileImporter(isPresented: $isPDFPickerPresented, allowedContentTypes: [.pdf], onCompletion: handlePDFPicked)
@@ -196,53 +197,22 @@ struct ScanFlowView: View {
     }
 
     private var cameraSheet: some View {
-        // Camera surface + floating "Photos" pill overlay (top-right,
-        // clear of `VNDocumentCameraViewController`'s own Cancel top-
-        // left and shutter/filter chrome bottom-center). One-tap
-        // switch from camera into the system photo picker — saves the
-        // user the cancel-out-then-tap-Photos two-step the landing
-        // state previously required.
-        //
-        // Tap sequence: dismiss camera first, wait one dismiss frame
-        // (~350ms — same pattern the kebab Share/Rename flows use so
-        // the system picker slides up onto a settled screen), then
-        // present the Photos picker. Presenting both modals at once
-        // races the fullScreenCover's dismiss animation and iOS
-        // rejects the picker with "Attempt to present … while
-        // presenting" in the log.
-        ZStack(alignment: .topTrailing) {
-            DocumentCameraScanner(
-                onFinish: { images in
-                    pages.append(contentsOf: images.map { ScannedPage(image: $0, source: .camera) })
-                    isCameraPresented = false
-                },
-                onCancel: { isCameraPresented = false }
-            )
-            .ignoresSafeArea()
-
-            Button {
+        DocumentCameraScanner(
+            onFinish: { images in
+                pages.append(contentsOf: images.map { ScannedPage(image: $0, source: .camera) })
                 isCameraPresented = false
+                // Auto-OCR and navigate directly to Export as after scanning —
+                // skips the manual "Recognize" tap and the review step for the
+                // common single-session camera flow. Short delay lets the
+                // fullScreenCover dismiss animation settle first.
                 Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(350))
-                    isPhotosPickerPresented = true
+                    try? await Task.sleep(for: .milliseconds(400))
+                    await performAutoRecognize()
                 }
-            } label: {
-                Label("Photos", systemImage: "photo.on.rectangle")
-                    .font(.system(size: 14, weight: .semibold))
-                    .padding(.horizontal, DSSpacing.sm)
-                    .padding(.vertical, DSSpacing.xs)
-                    .foregroundStyle(.white)
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .overlay(Capsule().strokeBorder(.white.opacity(0.25), lineWidth: 0.5))
-            }
-            .accessibilityLabel("Choose from Photos")
-            // Positioned in the top-right corner where VN's own chrome
-            // (Cancel top-left, Auto toggle further right, shutter
-            // bottom) leaves the most breathing room. `padding(.top)`
-            // clears the status bar / notch.
-            .padding(.trailing, DSSpacing.md)
-            .padding(.top, DSSpacing.md + 8)
-        }
+            },
+            onCancel: { isCameraPresented = false }
+        )
+        .ignoresSafeArea()
     }
 
     private var navigationTitle: String {
@@ -272,6 +242,9 @@ struct ScanFlowView: View {
                 }
             }
         case .review:
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Back") { stage = .addPages }
+            }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Next") { stage = .exportFormat }.fontWeight(.semibold)
             }
@@ -558,6 +531,17 @@ struct ScanFlowView: View {
         if !viewModel.results.isEmpty {
             selectedPageIndex = 0
             stage = .review
+        }
+    }
+
+    /// After an auto-scan (camera → onFinish), skip the pages grid and review
+    /// steps entirely — go straight to Export as. The user can still tap Back
+    /// on Export as → Review → Add pages if they want to inspect OCR results.
+    private func performAutoRecognize() async {
+        await viewModel.recognize(pages.map(\.image))
+        if !viewModel.results.isEmpty {
+            selectedPageIndex = 0
+            stage = .exportFormat
         }
     }
 

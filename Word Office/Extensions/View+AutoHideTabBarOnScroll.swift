@@ -1,71 +1,62 @@
-// Session 12 (2026-09-04) — Safari/Notes-style behaviour: hide the
-// custom bottom tab bar while the user is actively scrolling, bring
-// it back when scrolling stops. Reduces UI-chrome overlap with
-// content mid-scroll and gives back the full screen for reading.
+// Direction-aware tab bar auto-hide: scroll DOWN → hide, scroll UP → show.
+// This mirrors the pattern used in Safari, YouTube, and iOS Mail.
 //
-// Detection uses `.onScrollGeometryChange` (iOS 18+, target 26.2) +
-// a 350ms debounce timer to define "stopped scrolling". Simpler
-// `.onScrollPhaseChange` was tried first but proved unreliable on
-// mixed input paths (trackpad two-finger scroll, momentum scroll
-// tails on List) — geometry change catches every offset delta,
-// which is what we actually care about.
+// Detection: `.onScrollGeometryChange` (iOS 18+, deployment target 26.2)
+// tracks raw content-offset deltas. A ±4pt threshold ignores layout-jitter
+// (safe-area recompute, momentum tail micro-ticks) without masking real
+// intentional drags. When the user reaches the very top (offset ≤ 0) the
+// bar is always restored — prevents the bar from staying hidden on a
+// pull-to-refresh bounce or rubber-band.
 //
-// Publishes the "hidden" state via `TabBarHiddenPreferenceKey`;
-// `RootView` observes and collapses both the tab pill and its
-// 130pt safe-area inset with a matched animation.
+// Visual hide only — safeAreaInset (constant 150pt in RootView) is never
+// collapsed, so content position is stable regardless of bar visibility.
 
 import SwiftUI
 
 extension View {
-    /// Attach to a ScrollView / List / Form — tracks its content
-    /// offset; when the offset moves, ask `RootView` to hide the
-    /// custom tab bar. After 350ms of no offset change, ask it to
-    /// show again.
+    /// Attach to a ScrollView / List / Form — hides the custom tab bar
+    /// on downward scroll, restores it on upward scroll or when the
+    /// user reaches the top of the content.
     func autoHidesTabBarOnScroll() -> some View {
         modifier(AutoHideTabBarOnScrollModifier())
     }
 }
 
 private struct AutoHideTabBarOnScrollModifier: ViewModifier {
-    @State private var isScrolling = false
-    /// Cancellable debounce timer — starts fresh every time the
-    /// content offset changes. If no change arrives for 350ms, we
-    /// mark scrolling as stopped and republish the preference.
-    @State private var idleTask: Task<Void, Never>?
+    @State private var isHidden = false
+    /// Last offset we made a hide/show decision at. Updated only when
+    /// the delta clears the threshold so small jitter doesn't shift the
+    /// reference point.
+    @State private var lastDecisionOffset: CGFloat = 0
 
-    private let idleDelay: Duration = .milliseconds(350)
+    /// Minimum offset change before we commit a new hide/show decision.
+    /// 4pt is enough to ignore inertia micro-ticks but not real swipes.
+    private let threshold: CGFloat = 4
 
     func body(content: Content) -> some View {
         content
             .onScrollGeometryChange(for: CGFloat.self) { geometry in
                 geometry.contentOffset.y
-            } action: { oldValue, newValue in
-                // Tiny threshold to ignore layout-caused jitter (e.g.
-                // safe-area recompute) without missing real user drags.
-                guard abs(newValue - oldValue) > 0.5 else { return }
-                if !isScrolling {
-                    isScrolling = true
+            } action: { _, newOffset in
+                let delta = newOffset - lastDecisionOffset
+
+                // Always restore when at or above the top of the list.
+                if newOffset <= 0 {
+                    lastDecisionOffset = 0
+                    if isHidden { isHidden = false }
+                    return
                 }
-                // Restart the idle countdown on every offset tick.
-                idleTask?.cancel()
-                idleTask = Task { @MainActor in
-                    try? await Task.sleep(for: idleDelay)
-                    guard !Task.isCancelled else { return }
-                    isScrolling = false
+
+                if delta > threshold {
+                    // Scrolling down — hide.
+                    lastDecisionOffset = newOffset
+                    if !isHidden { isHidden = true }
+                } else if delta < -threshold {
+                    // Scrolling up — show.
+                    lastDecisionOffset = newOffset
+                    if isHidden { isHidden = false }
                 }
             }
-            // Visual hide only — MUST NOT collapse the safeAreaInset,
-            // otherwise the scroll content reflows mid-scroll (content
-            // jumps up as the reserved space disappears, then back
-            // down when the pill returns). `.hidesTabBarVisually`
-            // keeps the inset reserved.
-            .hidesTabBarVisually(isScrolling)
-            .onDisappear {
-                // Clean up the timer if the view goes away mid-scroll —
-                // otherwise a pending isScrolling=false could fire after
-                // the view unmounts (harmless but wasteful).
-                idleTask?.cancel()
-                idleTask = nil
-            }
+            .hidesTabBarVisually(isHidden)
     }
 }

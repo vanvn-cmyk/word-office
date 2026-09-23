@@ -16,6 +16,9 @@ struct MascotAssistantView: View {
     @State private var cycleID: Int = 0
     /// Persisted: intro greeting shown only on the very first appearance.
     @AppStorage("mascot.hasSeenIntro") private var hasSeenIntro: Bool = false
+    /// Persisted: user explicitly dismissed the mascot via the X button.
+    /// Reset when new pending files arrive so the mascot can re-surface.
+    @AppStorage("mascot.dismissed") private var isDismissed: Bool = false
 
     // MARK: Derived
     private var draftCount: Int    { store.draftCount }
@@ -71,7 +74,7 @@ struct MascotAssistantView: View {
     // MARK: Body
 
     var body: some View {
-        if pendingCount > 0 || phase == .allDone {
+        if !isDismissed && (pendingCount > 0 || phase == .allDone) {
             // ZStack layers the display content (non-interactive) under the
             // dismiss X (interactive). `.allowsHitTesting(false)` on the inner
             // VStack lets taps on the bubble/avatar fall through to library
@@ -90,8 +93,8 @@ struct MascotAssistantView: View {
 
                 // Small dismiss button at the bubble's top-right corner.
                 Button {
-                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.3)) {
-                        isExiting = true
+                    withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.8)) {
+                        isDismissed = true
                     }
                 } label: {
                     Image(systemName: "xmark")
@@ -99,10 +102,12 @@ struct MascotAssistantView: View {
                         .foregroundStyle(Color.dsTextSecondary)
                         .frame(width: 20, height: 20)
                         .background(Color.secondary.opacity(0.14), in: Circle())
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .padding(.top, 4)
-                .padding(.trailing, 4)
+                .padding(.top, -8)
+                .padding(.trailing, -8)
             }
             .opacity(isExiting ? 0 : 1)
             .scaleEffect(isExiting ? 0.75 : 1, anchor: .bottomTrailing)
@@ -128,11 +133,11 @@ struct MascotAssistantView: View {
                             isExiting = true
                         }
                     }
-                } else if newCount > oldCount, isExiting {
-                    // New files added after auto-hide → re-show
+                } else if newCount > oldCount, isDismissed {
+                    // New files added after user dismissed → re-surface
                     phase = hasSeenIntro ? .cycling : .intro
                     withAnimation(reduceMotion ? nil : .spring(response: 0.45, dampingFraction: 0.7)) {
-                        isExiting = false
+                        isDismissed = false
                     }
                     cycleID += 1
                 }
@@ -228,11 +233,8 @@ struct MascotAssistantView: View {
             hasSeenIntro = true
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.35)) { phase = .cycling }
         }
-
-        // Display the single unified status message for 45s, then auto-hide
-        try? await Task.sleep(for: .seconds(45))
-        guard !Task.isCancelled, phase == .cycling else { return }
-        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { isExiting = true }
+        // No auto-hide timer — mascot stays visible until user taps X or all
+        // pending docs are cleared. The X button is the explicit dismiss affordance.
     }
 }
 

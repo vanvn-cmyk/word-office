@@ -9,6 +9,7 @@ import SwiftUI
 /// views via `.fileSourcePicker(...)` as a "Choose a file" fallback.
 struct FileSourcePickerSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var hSizeClass
 
     let onLibrary: () -> Void
     let onBrowse: () -> Void
@@ -17,6 +18,12 @@ struct FileSourcePickerSheet: View {
     /// Optional secondary context line shown below the title.
     /// When non-nil the sheet grows to 215 pt to accommodate it.
     var message: LocalizedStringKey? = nil
+
+    /// On iPad (regular width), `.height(N)` detent renders as a narrow ~540pt
+    /// form sheet floating in the center — not a full-width bottom sheet.
+    /// `.medium` detent is full-width on iPad and looks correct; Spacer below
+    /// the rows absorbs the extra height so content stays anchored at the top.
+    private var isPad: Bool { hSizeClass == .regular }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -63,9 +70,15 @@ struct FileSourcePickerSheet: View {
             .background(Color.dsBackgroundElevated,
                         in: RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous))
             .padding(.horizontal, DSSpacing.md)
+
+            // iPad uses .medium detent (full-width); Spacer fills the extra
+            // height so the rows stay anchored at the top of the sheet.
+            if isPad { Spacer(minLength: 0) }
         }
-        .presentationDetents([.height(message != nil ? 215 : 185)])
-        .presentationDragIndicator(.hidden)
+        // iPad: .medium = full-width bottom sheet.
+        // iPhone: custom height = compact bottom sheet matching content.
+        .presentationDetents(isPad ? [.medium] : [.height(message != nil ? 215 : 185)])
+        .presentationDragIndicator(isPad ? .visible : .hidden)
         .presentationBackground(Color.dsBackgroundSecondary)
     }
 

@@ -16,10 +16,10 @@
 		8EC4BBD32E2369DBC7C946D2 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 233F2F3C1CB91AF291D12A84 /* Foundation.framework */; };
 		A2B3C4D5E6F70012B3C4D5E6 /* OfficeBundle in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60011A2B3C4D5 /* OfficeBundle */; };
 		AAD969DD2A46443B889653B5 /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = 6838E3C8DA0641399751F7B9 /* FirebaseAnalytics */; };
+		CC11AA22BB33CC44DD55EE66 /* Lottie in Frameworks */ = {isa = PBXBuildFile; productRef = DD11AA22BB33CC44DD55EE77 /* Lottie */; };
 		FC438DB730412DCD00FC4CB1 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = FC438DB630412DCD00FC4CB1 /* FirebaseCore */; };
 		FDCCE114DA3B4EB7BC35376E /* FirebaseRemoteConfig in Frameworks */ = {isa = PBXBuildFile; productRef = 5E2DF95C1B344D149516A4BE /* FirebaseRemoteConfig */; };
 		FF72F5C74D3F4D7C6103DFCA /* LibraryViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC48563032893CC0EB65D522 /* LibraryViewModelTests.swift */; };
-		CC11AA22BB33CC44DD55EE66 /* Lottie in Frameworks */ = {isa = PBXBuildFile; productRef = DD11AA22BB33CC44DD55EE77 /* Lottie */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -419,7 +419,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Distribution";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = "";
 				"DEVELOPMENT_TEAM[sdk=iphoneos*]" = 4ZU4B5BZ4K;
@@ -471,7 +471,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Distribution";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = "";
 				"DEVELOPMENT_TEAM[sdk=iphoneos*]" = 4ZU4B5BZ4K;
@@ -624,15 +624,15 @@
 			package = 84E38DB530412DCD007F4CB1 /* XCRemoteSwiftPackageReference "GRDB" */;
 			productName = GRDB;
 		};
-		FC438DB630412DCD00FC4CB1 /* FirebaseCore */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = FC438DB530412DCD00FC4CB1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
-			productName = FirebaseCore;
-		};
 		DD11AA22BB33CC44DD55EE77 /* Lottie */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 84909D5F3063988A006A9D3F /* XCRemoteSwiftPackageReference "lottie-spm" */;
 			productName = Lottie;
+		};
+		FC438DB630412DCD00FC4CB1 /* FirebaseCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FC438DB530412DCD00FC4CB1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCore;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

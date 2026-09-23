@@ -67,6 +67,8 @@ enum OfficeBridgeMessage {
     case focusKeyboard
     /// JS requests that the native UITextField keyboard proxy resign first responder (keyboard hide).
     case blurKeyboard
+    /// PPT zoomFitToPage() completed; the slide canvas is stable — safe to hide the loading overlay.
+    case pptZoomDone
     /// Unknown/unparseable message.
     case unknown(body: Any)
 }
@@ -206,6 +208,9 @@ final class OfficeBridge: NSObject, WKScriptMessageHandler {
 
         case "blurKeyboard":
             return .blurKeyboard
+
+        case "pptZoomDone":
+            return .pptZoomDone
 
         case "debug":
             if let msg = dict["msg"] as? String {

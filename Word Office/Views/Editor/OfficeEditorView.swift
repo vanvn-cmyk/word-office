@@ -57,9 +57,10 @@ struct OfficeEditorView: View {
     @State private var pendingFont: String? = nil
     @State private var showSymbolSheet    = false
     @State private var pendingSymbol: String? = nil
-    @State private var showTransitionPicker = false
+    @State private var showTransitionSheet  = false
     @State private var showTextBoxSheet     = false
     @State private var pendingTextBox: String? = nil
+    @State private var pptZoomReady = false
 
     private var fileKind: EditorTopToolbar.FileKind {
         EditorTopToolbar.FileKind(ext: ref.url.pathExtension)
@@ -84,31 +85,47 @@ struct OfficeEditorView: View {
                         onCommand: handleCommand
                     )
 
-                    _OfficeWebView(
-                        ref: ref,
-                        onFileSaved: handleSave,
-                        onError: handleError,
-                        onReady: handleReady,
-                        onDirtyChange: { isDirty = $0 },
-                        onVCReady: { editorVC = $0 },
-                        onFilterRequest: { items in
-                            filterItems = items
-                            showFilterSheet = true
-                        },
-                        onSlideChange: { c, t in slideProgress = (c, t) },
-                        onSlideThumbnail: { num, data in
-                            if let img = UIImage(data: data) {
-                                slideThumbnails[num] = img
-                            }
-                        },
-                        onSheetListChange: { names, idx in
-                            sheetNames = names
-                            activeSheetIndex = idx
-                        },
-                        onExcelFontChange: { name in currentExcelFont = name },
-                        onWordFontChange:  { name in currentWordFont  = name },
-                        onPPTFontChange:   { name in currentPPTFont   = name }
-                    )
+                    ZStack {
+                        _OfficeWebView(
+                            ref: ref,
+                            onFileSaved: handleSave,
+                            onError: handleError,
+                            onReady: handleReady,
+                            onDirtyChange: { isDirty = $0 },
+                            onVCReady: { editorVC = $0 },
+                            onFilterRequest: { items in
+                                filterItems = items
+                                showFilterSheet = true
+                            },
+                            onSlideChange: { c, t in slideProgress = (c, t) },
+                            onSlideThumbnail: { num, data in
+                                if let img = UIImage(data: data) {
+                                    slideThumbnails[num] = img
+                                }
+                            },
+                            onSheetListChange: { names, idx in
+                                sheetNames = names
+                                activeSheetIndex = idx
+                            },
+                            onExcelFontChange: { name in currentExcelFont = name },
+                            onWordFontChange:  { name in currentWordFont  = name },
+                            onPPTFontChange:   { name in currentPPTFont   = name },
+                            onPPTZoomReady:    { pptZoomReady = true }
+                        )
+                        if fileKind == .ppt && !pptZoomReady {
+                            Color.dsBackgroundPrimary
+                                .ignoresSafeArea()
+                                .overlay {
+                                    VStack(spacing: 16) {
+                                        ProgressView().scaleEffect(1.2)
+                                        Text("Getting your slides ready…")
+                                            .font(.system(size: 14, weight: .medium))
+                                            .foregroundStyle(Color.secondary)
+                                    }
+                                }
+                        }
+                    }
+                    .animation(.easeOut(duration: 0.35), value: pptZoomReady)
 
                     bottomStrip
 
@@ -288,16 +305,13 @@ struct OfficeEditorView: View {
                         onCancel: { showTextBoxSheet = false }
                     )
                 }
-                .confirmationDialog("Slide Transition", isPresented: $showTransitionPicker, titleVisibility: .visible) {
-                    Button("None")    { editorVC?.execEditorCommand("ppt-apply-transition:0")  }
-                    Button("Fade")    { editorVC?.execEditorCommand("ppt-apply-transition:1")  }
-                    Button("Push")    { editorVC?.execEditorCommand("ppt-apply-transition:2")  }
-                    Button("Wipe")    { editorVC?.execEditorCommand("ppt-apply-transition:3")  }
-                    Button("Split")   { editorVC?.execEditorCommand("ppt-apply-transition:4")  }
-                    Button("Cover")   { editorVC?.execEditorCommand("ppt-apply-transition:6")  }
-                    Button("Zoom")    { editorVC?.execEditorCommand("ppt-apply-transition:8")  }
-                    Button("Random")  { editorVC?.execEditorCommand("ppt-apply-transition:10") }
-                    Button("Cancel", role: .cancel) {}
+                .sheet(isPresented: $showTransitionSheet) {
+                    SlideTransitionSheet { type in
+                        editorVC?.execEditorCommand("ppt-apply-transition:\(type)")
+                    }
+                    .presentationDetents([.height(420)])
+                    .presentationDragIndicator(.visible)
+                    .presentationBackground(Color.dsBackgroundElevated)
                 }
             }
         }
@@ -322,8 +336,7 @@ struct OfficeEditorView: View {
         switch cmd {
         case "insert-image", "insert-link", "insert-comment",
              "insert-table", "insert-chart", "insert-shape",
-             "insert-symbol", "word-font-picker", "excel-font-picker", "ppt-font-picker",
-             "ppt-insert-textbox":
+             "insert-symbol", "word-font-picker", "excel-font-picker", "ppt-font-picker":
             // webView.endEditing(true) is more reliable than UIApplication.resignFirstResponder
             // for WKWebView: it explicitly ends editing on WKContentView regardless of what
             // the current first responder is, preventing the sheet's TextFields from competing
@@ -344,10 +357,10 @@ struct OfficeEditorView: View {
         case "insert-chart":        showChartSheet         = true
         case "insert-shape":        showShapeSheet         = true
         case "insert-symbol":       showSymbolSheet        = true
-        case "ppt-insert-textbox":  showTextBoxSheet = true
+        case "ppt-insert-textbox":  editorVC?.execEditorCommand(cmd)
         case "word-find-replace":   showFindReplaceSheet   = true
         case "word-font-picker", "excel-font-picker", "ppt-font-picker": showFontPickerSheet = true
-        case "ppt-transition-picker": showTransitionPicker = true
+        case "ppt-transition-picker": showTransitionSheet = true
         case "print":               editorVC?.printDocument()
         default:                    editorVC?.execEditorCommand(cmd)
         }
@@ -692,6 +705,7 @@ private struct _OfficeWebView: UIViewControllerRepresentable {
     let onExcelFontChange: (String) -> Void
     let onWordFontChange:  (String) -> Void
     let onPPTFontChange:   (String) -> Void
+    var onPPTZoomReady: () -> Void = {}
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -709,6 +723,7 @@ private struct _OfficeWebView: UIViewControllerRepresentable {
         vc.onExcelFontChange = { name in Task { @MainActor in onExcelFontChange(name) } }
         vc.onWordFontChange  = { name in Task { @MainActor in onWordFontChange(name)  } }
         vc.onPPTFontChange   = { name in Task { @MainActor in onPPTFontChange(name)   } }
+        vc.onPPTZoomReady    = { Task { @MainActor in onPPTZoomReady() } }
         vc.openFile(at: ref.url)
         Task { @MainActor in onVCReady(vc) }
         return vc
@@ -717,4 +732,90 @@ private struct _OfficeWebView: UIViewControllerRepresentable {
     func updateUIViewController(_ vc: OfficeEditorViewController, context: Context) {}
 
     final class Coordinator {}
+}
+
+// MARK: - Slide Transition Sheet
+
+private struct SlideTransitionSheet: View {
+    let onSelect: (Int) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedType: Int? = nil
+
+    private struct Transition {
+        let name: String
+        let icon: String
+        let type: Int
+    }
+
+    private let transitions: [Transition] = [
+        .init(name: "None",    icon: "slash.circle",                         type: 0),
+        .init(name: "Fade",    icon: "circle.dotted",                        type: 1),
+        .init(name: "Push",    icon: "arrow.right.square",                   type: 2),
+        .init(name: "Wipe",    icon: "rectangle.leadinghalf.filled",         type: 3),
+        .init(name: "Split",   icon: "arrow.left.and.line.vertical.and.arrow.right", type: 4),
+        .init(name: "Cover",   icon: "square.on.square",                     type: 6),
+        .init(name: "Zoom",    icon: "arrow.up.left.and.arrow.down.right",   type: 8),
+        .init(name: "Random",  icon: "shuffle",                              type: 10),
+    ]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Text("Slide Transition")
+                .font(DSFont.headline)
+                .foregroundStyle(Color.dsTextPrimary)
+                .padding(.top, DSSpacing.lg)
+                .padding(.bottom, DSSpacing.md)
+
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: DSSpacing.sm), count: 4),
+                      spacing: DSSpacing.sm) {
+                ForEach(transitions, id: \.type) { t in
+                    let isSelected = selectedType == t.type
+                    Button {
+                        withAnimation(.easeOut(duration: 0.15)) { selectedType = t.type }
+                        onSelect(t.type)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { dismiss() }
+                    } label: {
+                        VStack(spacing: DSSpacing.xs) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous)
+                                    .fill(isSelected ? Color.dsBrandPrimarySubtle : Color.dsBackgroundSecondary)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous)
+                                            .strokeBorder(
+                                                isSelected ? Color.dsBrandPrimary : Color.dsBorderDefault,
+                                                lineWidth: isSelected ? 2 : 1
+                                            )
+                                    )
+                                if isSelected {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 18, weight: .semibold))
+                                        .foregroundStyle(Color.dsBrandPrimary)
+                                        .transition(.scale.combined(with: .opacity))
+                                } else {
+                                    Image(systemName: t.icon)
+                                        .font(.system(size: 22, weight: .regular))
+                                        .foregroundStyle(Color.dsBrandPrimary)
+                                }
+                            }
+                            .frame(height: 60)
+
+                            Text(t.name)
+                                .font(DSFont.caption)
+                                .foregroundStyle(isSelected ? Color.dsBrandPrimary : Color.dsTextSecondary)
+                                .fontWeight(isSelected ? .semibold : .regular)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, DSSpacing.lg)
+
+            Text("Plays when presenting slides")
+                .font(DSFont.caption)
+                .foregroundStyle(Color.dsTextTertiary)
+                .padding(.top, DSSpacing.md)
+
+            Spacer(minLength: 0)
+        }
+    }
 }

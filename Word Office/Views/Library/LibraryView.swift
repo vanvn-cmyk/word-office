@@ -110,8 +110,6 @@ struct LibraryView: View {
     /// TODO(paywall): route through a shared `PaywallCoordinator` if the
     /// crown ever fires from more than these two screens.
     @State private var isPaywallPresented = false
-    /// Drives the shimmer light that travels down the timeline rail (0 → section count, looping).
-    @State private var railShimmerProgress: CGFloat = 0
     @State private var badgePulse = false
     @State private var navPath = NavigationPath()
     /// Per-session search text scoped to the "View all" destination —
@@ -823,11 +821,8 @@ struct LibraryView: View {
                     in: RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous)
             .strokeBorder(Color.dsBorderSubtle))
-        .shadow(color: .black.opacity(0.04), radius: 12, y: 5)
-        .shadow(color: .black.opacity(0.05), radius: 3, y: 1)
-        .background(GeometryReader { geo in
-            Color.clear.onAppear { cardPreviewWidth = geo.size.width }
-        })
+        .shadow(color: .black.opacity(0.08), radius: 6, y: 3)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { cardPreviewWidth = $0 }
         .contextMenu(menuItems: {
             contextMenu(for: entry)
         }, preview: {
@@ -959,17 +954,11 @@ struct LibraryView: View {
     /// equals the content's height automatically (background fills parent frame).
     /// `VStack(spacing: 0)` ensures adjacent section rectangles are flush with zero
     /// gap → Draft orange → Reviewed blue → Done green with no break in the bar.
-    ///
-    /// A shimmer light (`railShimmerProgress`) travels the full rail length once every
-    /// 3 s, suggesting documents flowing forward through the pipeline.
+    /// Shimmer rail uses `TimelineRailShimmer` (isolated subview) to avoid
+    /// driving LibraryView body at 60 fps.
     private var timelineGroupedContent: some View {
         VStack(spacing: 0) {
             ForEach(groupedSections, id: \.status) { group in
-                let sectionIndex = groupedSections.firstIndex(where: { $0.status == group.status }) ?? 0
-                let isFirst = sectionIndex == 0
-                // Local shimmer phase in [0, 1] for this section's rail segment.
-                // `railShimmerProgress` increments from 0 → section count continuously.
-                let localPhase = railShimmerProgress - CGFloat(sectionIndex)
 
                 VStack(alignment: .leading, spacing: 0) {
                     statusTabHeader(status: group.status, count: group.entries.count)
@@ -1004,34 +993,12 @@ struct LibraryView: View {
                 }
                 .padding(.leading, 3 + DSSpacing.xs)
                 .background(alignment: .leading) {
-                    ZStack(alignment: .top) {
-                        Rectangle()
-                            .fill(group.status.tintColor)
-                        if !reduceMotion && localPhase > -0.15 && localPhase < 1.15 {
-                            LinearGradient(
-                                stops: [
-                                    .init(color: .clear,              location: max(0,  localPhase - 0.12)),
-                                    .init(color: .white.opacity(0.55), location: max(0, min(1, localPhase))),
-                                    .init(color: .clear,              location: min(1,  localPhase + 0.12)),
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        }
-                    }
-                    .frame(width: 3)
+                    TimelineRailShimmer(color: group.status.tintColor)
                 }
             }
         }
         .padding(.trailing, DSSpacing.xs)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.5), value: groupedSections.map(\.status))
-        .onAppear {
-            guard !reduceMotion else { return }
-            railShimmerProgress = 0
-            withAnimation(.linear(duration: 3.0).repeatForever(autoreverses: false)) {
-                railShimmerProgress = CGFloat(groupedSections.count)
-            }
-        }
     }
 
     /// Grouped grid rendered as a continuous timeline spine — same rail pattern
@@ -1039,9 +1006,6 @@ struct LibraryView: View {
     private var timelineGroupedGrid: some View {
         VStack(spacing: 0) {
             ForEach(groupedSections, id: \.status) { group in
-                let sectionIndex = groupedSections.firstIndex(where: { $0.status == group.status }) ?? 0
-                let isFirst = sectionIndex == 0
-                let localPhase = railShimmerProgress - CGFloat(sectionIndex)
                 // Attach coachmark to the first tile of the first .getStarted or
                 // .draft section (mirrors list-mode logic in the ForEach below).
                 let firstTipStatus = groupedSections.first(where: { $0.status == .getStarted })?.status
@@ -1100,34 +1064,12 @@ struct LibraryView: View {
                 }
                 .padding(.leading, 3 + DSSpacing.xs)
                 .background(alignment: .leading) {
-                    ZStack(alignment: .top) {
-                        Rectangle()
-                            .fill(group.status.tintColor)
-                        if !reduceMotion && localPhase > -0.15 && localPhase < 1.15 {
-                            LinearGradient(
-                                stops: [
-                                    .init(color: .clear,               location: max(0,  localPhase - 0.12)),
-                                    .init(color: .white.opacity(0.55), location: max(0, min(1, localPhase))),
-                                    .init(color: .clear,               location: min(1,  localPhase + 0.12)),
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        }
-                    }
-                    .frame(width: 3)
+                    TimelineRailShimmer(color: group.status.tintColor)
                 }
             }
         }
         .padding(.trailing, DSSpacing.xs)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.5), value: groupedSections.map(\.status))
-        .onAppear {
-            guard !reduceMotion else { return }
-            railShimmerProgress = 0
-            withAnimation(.linear(duration: 3.0).repeatForever(autoreverses: false)) {
-                railShimmerProgress = CGFloat(groupedSections.count)
-            }
-        }
     }
 
     /// Inline no-result content for search (dropped into the main list
@@ -1996,11 +1938,7 @@ private struct RoundIconButtonSurface: ViewModifier {
                     lineWidth: isActive ? 1 : 0.5
                 )
             )
-            // 2-layer shadow — same values as `ToolCardSurface` in
-            // `ToolsTabView` so buttons across screens share one
-            // elevation vocabulary.
-            .shadow(color: .black.opacity(0.05), radius: 2, y: 1)
-            .shadow(color: .black.opacity(0.06), radius: 14, y: 6)
+            .shadow(color: .black.opacity(0.09), radius: 6, y: 4)
     }
 }
 
@@ -2062,6 +2000,11 @@ private struct LibrarySearchAndActionsBar<Trailing: View>: View {
         // (via `isFocused`) and the trailing swap; the parent no longer
         // needs its own `.animation` modifier over the same value.
         .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: isFocused)
+        // Hide the tab bar while the keyboard is up so search results
+        // have the full screen. Published as a preference here (not on
+        // LibraryView) to preserve the @FocusState isolation that keeps
+        // LibraryView.body from re-running on every keystroke.
+        .hidesTabBarVisually(isFocused)
     }
 
     // MARK: - Pieces
@@ -2096,8 +2039,7 @@ private struct LibrarySearchAndActionsBar<Trailing: View>: View {
                 lineWidth: isFocused ? 1.2 : 0.5
             )
         )
-        .shadow(color: .black.opacity(0.05), radius: 2, y: 1)
-        .shadow(color: .black.opacity(0.06), radius: 14, y: 6)
+        .shadow(color: .black.opacity(0.09), radius: 6, y: 4)
     }
 
     private var cancelButton: some View {
@@ -2219,5 +2161,42 @@ private struct DialogButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .background(configuration.isPressed ? Color.dsSurfacePressed : Color.clear)
+    }
+}
+
+// MARK: - Isolated shimmer rail
+
+/// Animated 3pt timeline rail segment. Owns its own `@State` so the animation
+/// loop never invalidates its parent (LibraryView). Without extraction,
+/// `.repeatForever` on a parent `@State` causes the entire LibraryView body
+/// to re-evaluate at 60fps even while the user is just scrolling.
+private struct TimelineRailShimmer: View {
+    let color: Color
+    @State private var phase: CGFloat = -0.15
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            Rectangle().fill(color)
+            if !reduceMotion {
+                LinearGradient(
+                    stops: [
+                        .init(color: .clear,               location: max(0, phase - 0.12)),
+                        .init(color: .white.opacity(0.55),  location: max(0, min(1, phase))),
+                        .init(color: .clear,               location: min(1, phase + 0.12)),
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+        }
+        .frame(width: 3)
+        .onAppear {
+            guard !reduceMotion else { return }
+            phase = -0.15
+            withAnimation(.linear(duration: 3.0).repeatForever(autoreverses: false)) {
+                phase = 1.15
+            }
+        }
     }
 }

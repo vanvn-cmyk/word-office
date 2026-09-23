@@ -19,11 +19,14 @@ final class OfficeEditorViewController: UIViewController {
     // MARK: - Properties
 
     private var webView: OOKeyboardWebView!
-    /// Hidden UITextField that captures iOS keyboard input for Word/Excel documents.
+    /// Hidden UITextField that captures iOS keyboard input for Word/Excel/PPT documents.
     /// iOS RTI cannot deliver characters to DOM elements inside WKWebView inner iframes.
-    /// area_id.focus() is intercepted in JS → this field becomes first responder → characters
-    /// arrive via shouldChangeCharactersIn → injected via window.ooInjectInput.
+    /// For Word/Excel: area_id.focus() is intercepted in JS → proxy becomes first responder.
+    /// For PPT: touchend in JS posts focusKeyboard → proxy becomes first responder → ooInjectInputPPT.
     private var ooKeyboardProxy: OOKeyboardProxyTextField?
+    /// Tracks which document type is currently open ("word", "cell", "slide").
+    /// Used to route keyboard input to the correct JS injection function.
+    private var currentDocType: String = "word"
     private let bridge = OfficeBridge()
     private let schemeHandler = OfficeSchemeHandler()
     private var documentURL: URL?
@@ -64,6 +67,8 @@ final class OfficeEditorViewController: UIViewController {
     var onWordFontChange: ((String) -> Void)?
     /// Called when PPT text selection changes; provides the font name at that position.
     var onPPTFontChange: ((String) -> Void)?
+    /// Called when the PPT zoom-fit snap completes; safe to hide the loading overlay.
+    var onPPTZoomReady: (() -> Void)?
 
     // MARK: - Lifecycle
 
@@ -960,8 +965,9 @@ final class OfficeEditorViewController: UIViewController {
         kbdProxy.textContentType     = .none
         kbdProxy.delegate = self
         kbdProxy.onDeleteBackward = { [weak self] in
-            guard let wv = self?.webView else { return }
-            wv.evaluateJavaScript("window.ooInjectKeydown('Backspace',8)") { _, _ in }
+            guard let wv = self?.webView, let self else { return }
+            let fn = self.currentDocType == "slide" ? "window.ooInjectKeydownPPT('Backspace',8)" : "window.ooInjectKeydown('Backspace',8)"
+            wv.evaluateJavaScript(fn) { _, _ in }
         }
         view.addSubview(kbdProxy)
         ooKeyboardProxy = kbdProxy
@@ -980,6 +986,12 @@ final class OfficeEditorViewController: UIViewController {
 
         let fileName = url.lastPathComponent
         let fileType = url.pathExtension.lowercased()
+        // Track doc type for keyboard routing (Word/Excel use ooInjectInput; PPT uses ooInjectInputPPT).
+        switch fileType {
+        case "pptx", "ppt", "odp": currentDocType = "slide"
+        case "xlsx", "xls", "ods", "csv": currentDocType = "cell"
+        default: currentDocType = "word"
+        }
 
         let data: Data? = await Task.detached(priority: .userInitiated) {
             try? Data(contentsOf: url)
@@ -1242,6 +1254,9 @@ extension OfficeEditorViewController: OfficeBridgeDelegate {
                 self?.ooKeyboardProxy?.resignFirstResponder()
             }
 
+        case .pptZoomDone:
+            onPPTZoomReady?()
+
         case .slideThumbnail(let slideNum, let data):
             onSlideThumbnail?(slideNum, data)
 
@@ -1314,14 +1329,18 @@ extension OfficeEditorViewController: UITextFieldDelegate {
         replacementString string: String
     ) -> Bool {
         guard textField === ooKeyboardProxy, let wv = webView else { return false }
+        let isPPT = currentDocType == "slide"
         if string == "\n" || string == "\r" {
-            wv.evaluateJavaScript("window.ooInjectKeydown('Enter',13)") { _, _ in }
+            let fn = isPPT ? "window.ooInjectKeydownPPT('Enter',13)" : "window.ooInjectKeydown('Enter',13)"
+            wv.evaluateJavaScript(fn) { _, _ in }
         } else if string.isEmpty {
             // Backspace on a non-empty proxy field (rare) — primary path is deleteBackward().
-            wv.evaluateJavaScript("window.ooInjectKeydown('Backspace',8)") { _, _ in }
+            let fn = isPPT ? "window.ooInjectKeydownPPT('Backspace',8)" : "window.ooInjectKeydown('Backspace',8)"
+            wv.evaluateJavaScript(fn) { _, _ in }
         } else {
             let escaped = jsStringLiteral(string)
-            wv.evaluateJavaScript("window.ooInjectInput(\(escaped))") { _, _ in }
+            let fn = isPPT ? "window.ooInjectInputPPT(\(escaped))" : "window.ooInjectInput(\(escaped))"
+            wv.evaluateJavaScript(fn) { _, _ in }
         }
         // Keep proxy field empty so Backspace always deletes one character at a time.
         textField.text = ""
@@ -1330,7 +1349,8 @@ extension OfficeEditorViewController: UITextFieldDelegate {
 
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
         guard textField === ooKeyboardProxy, let wv = webView else { return false }
-        wv.evaluateJavaScript("window.ooInjectKeydown('Enter',13)") { _, _ in }
+        let fn = currentDocType == "slide" ? "window.ooInjectKeydownPPT('Enter',13)" : "window.ooInjectKeydown('Enter',13)"
+        wv.evaluateJavaScript(fn) { _, _ in }
         return false
     }
 }

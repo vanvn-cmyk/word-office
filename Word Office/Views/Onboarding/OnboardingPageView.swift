@@ -8,17 +8,20 @@ struct OnboardingPageView: View {
     let page: OnboardingPage
     let isActive: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.horizontalSizeClass) private var hSizeClass
 
     // S2 badge animations
     @State private var badgesRevealed = false
     @State private var splitFloat = false
     @State private var mergeFloat = false
 
+    private var isPad: Bool { hSizeClass == .regular }
+
     private var heroMaxHeight: CGFloat {
         switch page.id {
-        case .chooseFolder: 310
+        case .chooseFolder: isPad ? 420 : 310
         case .paywall:      280
-        default:            370
+        default:            isPad ? 520 : 370
         }
     }
 
@@ -146,9 +149,8 @@ struct OnboardingPageView: View {
         case .chooseFolder:
             Image(page.imageName)
                 .resizable()
-                .scaledToFill()
-                .frame(maxWidth: .infinity, maxHeight: heroMaxHeight, alignment: .top)
-                .clipped()
+                .scaledToFit()
+                .frame(maxWidth: .infinity, maxHeight: heroMaxHeight)
         }
     }
 

@@ -985,35 +985,57 @@
       //      When OO explicitly calls area_id.blur() (e.g. user taps outside text area),
       //      send 'blurKeyboard' to Swift so UITextField resigns. Also call original blur
       //      so OO properly deactivates its cursor/keyboard state.
-      if (_currentDocType === 'word' || _currentDocType === 'cell') {
+      // Keyboard proxy for Word, Excel, AND PPT — same prototype-override approach for all three.
+      //
+      // Word/Excel: OO calls area_id.focus() when the user taps to enter text-editing mode.
+      // PPT:        OO calls _oo_ppt_kbd.focus() when the user double-taps a text box.
+      //
+      // In both cases we intercept via HTMLElement.prototype.focus on the INNER frame window.
+      // This is critical: overriding on innerWin catches ALL .focus() calls inside that frame,
+      // regardless of whether they come from OO's prototype or instance methods.
+      //
+      // Why NOT fire focusKeyboard on every touchstart/touchend for PPT:
+      //   The keyboard would appear even when tapping outside a text box (OO is in selection
+      //   mode, not edit mode), so typed characters go nowhere and the keyboard blocks the view.
+      if (_currentDocType === 'word' || _currentDocType === 'cell' || _currentDocType === 'slide') {
         try {
-          // (a) focus override
+          // (a) focus override — intercepts area_id (Word/Excel) and _oo_ppt_kbd (PPT)
           var _origElFocus = innerWin.HTMLElement.prototype.focus;
           innerWin.HTMLElement.prototype.focus = function(opts) {
-            if (this && this.id === 'area_id') {
+            var _id = this && this.id;
+            if (_id === 'area_id' || _id === '_oo_ppt_kbd') {
               // Tell Swift → UITextField becomes iOS first responder for keyboard input
               try { window.webkit.messageHandlers.editorBridge.postMessage({action:'focusKeyboard'}); } catch(_kf) {}
-              // MUST call original: OO needs area_id in DOM focus to activate cursor and
-              // register N0e. Without this, OO never enters text-editing mode → injection
-              // into area_id.value has no effect.
+              // MUST call original: OO needs the element in DOM focus to activate cursor
+              // and register its keyboard handlers (N0e for Word; E4b for PPT).
               if (_origElFocus) _origElFocus.call(this, opts);
+              // PPT: re-confirm SetDeviceInputHelperId on focus so OO's E4b handler is
+              // definitely registered at the moment the keyboard is about to appear.
+              if (_id === '_oo_ppt_kbd') {
+                try {
+                  var _ed2 = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+                  if (_ed2 && typeof _ed2.SetDeviceInputHelperId === 'function') {
+                    _ed2.SetDeviceInputHelperId('_oo_ppt_kbd');
+                  }
+                } catch(_) {}
+              }
               return;
             }
             if (_origElFocus) _origElFocus.call(this, opts);
           };
-          // (b) suppress WebKit-fired blur DOM event on area_id
-          // Installed here (before area_id exists) so our capture listener precedes OO's
-          // target-phase listener, which OO registers when it creates area_id later.
+          // (b) suppress WebKit-fired blur DOM event on area_id / _oo_ppt_kbd
+          // Installed before those elements exist so our capture listener precedes OO's.
           iDoc.addEventListener('blur', function(e) {
-            if (e.target && e.target.id === 'area_id') {
-              e.stopImmediatePropagation(); // prevent OO from deregistering N0e / deactivating cursor
+            var _tid = e.target && e.target.id;
+            if (_tid === 'area_id' || _tid === '_oo_ppt_kbd') {
+              e.stopImmediatePropagation(); // prevent OO from deactivating cursor/handlers
             }
-          }, true); // capture:true → fires before target-phase listeners
+          }, true);
           // (c) blur method override — when OO explicitly dismisses keyboard
           var _origElBlur = innerWin.HTMLElement.prototype.blur;
           innerWin.HTMLElement.prototype.blur = function() {
-            if (this && this.id === 'area_id') {
-              // Let OO deactivate cursor properly, and resign UITextField
+            var _id = this && this.id;
+            if (_id === 'area_id' || _id === '_oo_ppt_kbd') {
               if (_origElBlur) _origElBlur.call(this);
               try { window.webkit.messageHandlers.editorBridge.postMessage({action:'blurKeyboard'}); } catch(_kb) {}
               return;
@@ -1023,15 +1045,46 @@
         } catch(_kbdOvE) {}
       }
 
-      // PPT keyboard: focus outer-frame proxy on every tap so iOS keyboard is available.
-      // The proxy forwards oninput → keypress events to inner _oo_ppt_kbd (OO's registered listener).
+      // PPT single-tap → edit mode: simulate a second tap 200ms after touchend so
+      // OO enters text-editing mode on first touch (mobile UX — no double-tap required).
+      // Movement guard: if finger moved >10px it's a scroll/drag, skip the simulation.
       if (_currentDocType === 'slide') {
-        var _focusPPTOuter = function() {
-          var el = document.getElementById('_oo_ppt_kbd_outer');
-          if (el) { try { el.focus(); } catch(_) {} }
-        };
-        iDoc.addEventListener('touchstart', _focusPPTOuter, { passive: true });
-        iDoc.addEventListener('touchend',   function() { setTimeout(_focusPPTOuter, 50); }, { passive: true });
+        var _pptTapX = 0, _pptTapY = 0;
+        iDoc.addEventListener('touchstart', function(e) {
+          var _t = e.touches && e.touches[0];
+          if (_t) { _pptTapX = _t.clientX; _pptTapY = _t.clientY; }
+        }, { passive: true });
+        iDoc.addEventListener('touchend', function(e) {
+          var _tc = e.changedTouches && e.changedTouches[0];
+          if (!_tc) return;
+          if (Math.abs(_tc.clientX - _pptTapX) > 10 || Math.abs(_tc.clientY - _pptTapY) > 10) return;
+          var _ex = _tc.clientX, _ey = _tc.clientY;
+          // After OO processes the first tap (select), simulate a second tap → dblclick → edit mode
+          setTimeout(function() {
+            var _el = iDoc.elementFromPoint(_ex, _ey) || iDoc.body;
+            function _pev2(type, btns) {
+              return new innerWin.PointerEvent(type, {
+                bubbles: true, cancelable: true, view: innerWin,
+                clientX: _ex, clientY: _ey, button: 0, buttons: btns,
+                pointerId: 9, pointerType: 'touch', isPrimary: false
+              });
+            }
+            try { _el.dispatchEvent(_pev2('pointerdown', 1)); } catch(_) {}
+            try { _el.dispatchEvent(_pev2('pointerup',   0)); } catch(_) {}
+            try { _el.dispatchEvent(new innerWin.MouseEvent('dblclick', {
+              bubbles: true, cancelable: true, view: innerWin,
+              clientX: _ex, clientY: _ey, button: 0, detail: 2
+            })); } catch(_) {}
+            // Explicit focus fallback: OO's SetDeviceInputHelperId path calls _oo_ppt_kbd.focus()
+            // internally to show the keyboard, but this may not fire reliably on iOS WKWebView.
+            // Focusing here explicitly ensures our prototype override sends focusKeyboard to Swift
+            // (making ooKeyboardProxy first responder) even if OO skips the focus call.
+            setTimeout(function() {
+              var _k = iDoc.getElementById('_oo_ppt_kbd');
+              if (_k) { try { _k.focus(); } catch(_kf) {} }
+            }, 150);
+          }, 200);
+        }, { passive: true });
       }
 
       // 3. System clipboard ↔ Clipboard Web API --------------------------------
@@ -1872,14 +1925,11 @@
         };
 
         // Inserts a text box at the centre of the current PPT slide via StartAddShape +
-        // mouse drag simulation on the actual <canvas> element, then double-clicks to
+        // pointer/touch drag simulation on the actual <canvas> element, then double-taps to
         // enter text-edit mode and optionally injects pre-filled text.
         //
-        // Key corrections vs. previous implementation:
-        //  - Events dispatched on the OO <canvas> element (not the container div).
-        //  - getBoundingClientRect() called on canvas (accurate slide-area coords).
-        //  - 400ms delay after StartAddShape gives OO draw-mode time to activate.
-        //  - Text injected via _oo_ppt_kbd inner-frame element (PPT keyboard path).
+        // Uses PointerEvent + TouchEvent (not MouseEvent) — OO on iOS registers pointerdown/
+        // touchstart on canvas, not mouse events. Both are dispatched for max compatibility.
         window._insertTextBoxWithText = function(text) {
           if (!_innerWin) return;
 
@@ -1887,57 +1937,77 @@
           if (!_ed) return;
 
           if (typeof _ed.StartAddShape !== 'function') return;
-          // Enter shape-draw mode: OO waits for next mouse drag on canvas.
+          // Enter shape-draw mode: OO waits for next pointer/touch drag on canvas.
           _ed.StartAddShape('textRect', true);
 
-          // 400 ms: let OO activate draw mode fully before sending mouse events.
+          // 400 ms: let OO activate draw mode fully before sending pointer events.
           setTimeout(function() {
             try {
               var _d   = _innerWin.document;
-              // Dispatch on the first canvas inside the editor_sdk container —
-              // that is OO's main rendering surface for the current slide.
               var _cv  = _d.querySelector('#editor_sdk canvas') || _d.querySelector('canvas');
               if (!_cv) return;
 
-              var _r   = _cv.getBoundingClientRect(); // coords in inner-frame viewport
-              // Draw a box from 20%,30% to 80%,60% of the canvas area.
+              var _r   = _cv.getBoundingClientRect();
               var _x1  = _r.left + _r.width  * 0.20, _y1 = _r.top + _r.height * 0.30;
               var _x2  = _r.left + _r.width  * 0.80, _y2 = _r.top + _r.height * 0.60;
               var _cx  = (_x1 + _x2) / 2,             _cy = (_y1 + _y2) / 2;
 
-              function _mev(type, x, y, detail) {
-                return new _innerWin.MouseEvent(type, {
+              // Helper: PointerEvent (primary path — OO registers pointerdown on canvas)
+              function _pev(type, x, y, btns) {
+                return new _innerWin.PointerEvent(type, {
                   bubbles: true, cancelable: true, view: _innerWin,
-                  clientX: x, clientY: y, button: 0, detail: detail || 1,
-                  pointerType: 'mouse'
+                  clientX: x, clientY: y, button: 0, buttons: btns !== undefined ? btns : 1,
+                  pointerId: 1, pointerType: 'touch', isPrimary: true, pressure: 0.5
                 });
+              }
+              // Helper: TouchEvent for environments that need it
+              function _mkTouch(x, y) {
+                try {
+                  return new _innerWin.Touch({ identifier: 1, target: _cv,
+                    clientX: x, clientY: y, pageX: x, pageY: y, radiusX: 1, radiusY: 1, rotationAngle: 0, force: 0.5 });
+                } catch(_) { return null; }
+              }
+              function _tev(type, x, y) {
+                try {
+                  var _t = _mkTouch(x, y); if (!_t) return null;
+                  return new _innerWin.TouchEvent(type, {
+                    bubbles: true, cancelable: true, view: _innerWin,
+                    touches: [_t], targetTouches: [_t], changedTouches: [_t]
+                  });
+                } catch(_) { return null; }
+              }
+              function _dispatch(el, type, x, y, btns) {
+                try { el.dispatchEvent(_pev(type, x, y, btns)); } catch(_) {}
+                var _te = _tev(type.replace('pointer', 'touch').replace('down','start').replace('up','end').replace('move','move'), x, y);
+                if (_te) try { el.dispatchEvent(_te); } catch(_) {}
               }
 
               // Step 1: drag to draw the shape.
-              _cv.dispatchEvent(_mev('mousedown', _x1, _y1));
+              _dispatch(_cv, 'pointerdown', _x1, _y1, 1);
               setTimeout(function() {
-                _cv.dispatchEvent(_mev('mousemove', _cx, _cy));
-                _cv.dispatchEvent(_mev('mouseup',   _x2, _y2));
+                _dispatch(_cv, 'pointermove', _cx, _cy, 1);
+                _dispatch(_cv, 'pointerup',   _x2, _y2, 0);
 
-                // Step 2: double-click centre → OO enters text-edit mode.
+                // Step 2: double-tap/click → OO enters text-edit mode.
                 setTimeout(function() {
-                  _cv.dispatchEvent(_mev('click',    _cx, _cy));
-                  _cv.dispatchEvent(_mev('dblclick', _cx, _cy, 2));
+                  _dispatch(_cv, 'pointerdown', _cx, _cy, 1);
+                  _dispatch(_cv, 'pointerup',   _cx, _cy, 0);
+                  try { _cv.dispatchEvent(new _innerWin.MouseEvent('click',    {bubbles:true,cancelable:true,view:_innerWin,clientX:_cx,clientY:_cy,button:0,detail:1})); } catch(_) {}
+                  setTimeout(function() {
+                    _dispatch(_cv, 'pointerdown', _cx, _cy, 1);
+                    _dispatch(_cv, 'pointerup',   _cx, _cy, 0);
+                    try { _cv.dispatchEvent(new _innerWin.MouseEvent('dblclick', {bubbles:true,cancelable:true,view:_innerWin,clientX:_cx,clientY:_cy,button:0,detail:2})); } catch(_) {}
 
-                  // Step 3: inject pre-filled text via PPT keyboard path.
-                  if (text && text.length > 0) {
-                    setTimeout(function() {
-                      var _pptKbd = _d.getElementById('_oo_ppt_kbd');
-                      if (!_pptKbd) return;
-                      for (var i = 0; i < text.length; i++) {
-                        var ch = text[i], cc = text.charCodeAt(i);
-                        try { _pptKbd.dispatchEvent(new _innerWin.KeyboardEvent('keypress', {
-                          key: ch, keyCode: cc, which: cc, charCode: cc,
-                          bubbles: true, cancelable: true
-                        })); } catch(_ev) {}
-                      }
-                    }, 300);
-                  }
+                    // Step 3: inject pre-filled text via PPT keyboard path.
+                    if (text && text.length > 0) {
+                      setTimeout(function() {
+                        var _pptKbd = _d.getElementById('_oo_ppt_kbd');
+                        if (!_pptKbd) return;
+                        _pptKbd.value = (_pptKbd.value || '') + text;
+                        try { _pptKbd.dispatchEvent(new (_innerWin.Event || Event)('input', {bubbles:true, cancelable:false})); } catch(_ev) {}
+                      }, 300);
+                    }
+                  }, 120);
                 }, 150);
               }, 80);
             } catch(_simErr) {}
@@ -2028,6 +2098,50 @@
           if (!ai) return;
           try {
             ai.dispatchEvent(new KeyboardEvent('keydown', {
+              key: key, keyCode: keyCode, which: keyCode,
+              bubbles: true, cancelable: true
+            }));
+          } catch(_ev) {}
+        };
+
+        // PPT-specific inject: routes to _oo_ppt_kbd (OO's registered PPT keyboard helper).
+        // Called by Swift shouldChangeCharactersIn when currentDocType == 'slide'.
+        // Mirrors ooInjectInput (Word): set .value + fire input event so OO's oninput handler
+        // reads the accumulated value, then also dispatch keypress for older OO paths.
+        window.ooInjectInputPPT = function(data) {
+          if (!data) return;
+          var _fr = document.querySelector('iframe[name="frameEditor"]');
+          if (!_fr || !_fr.contentDocument) return;
+          var inner = _fr.contentDocument.getElementById('_oo_ppt_kbd');
+          if (!inner) return;
+          var _iWin = _fr.contentWindow;
+          // Primary path: set value to ONLY the new data (not cumulative) + input event.
+          // OO's oninput handler reads .value to get the inserted text; using fresh value
+          // prevents re-insertion of previously typed characters on each keystroke.
+          inner.value = data;
+          try { inner.dispatchEvent(new (_iWin.Event || Event)('input', {bubbles: true, cancelable: false})); } catch(_ie) {}
+          inner.value = ''; // Clear so next injection starts fresh
+          // Secondary path: keypress per character (for OO builds using onkeypress+charCode)
+          for (var _i = 0; _i < data.length; _i++) {
+            var _ch = data[_i], _cc = data.charCodeAt(_i);
+            try {
+              inner.dispatchEvent(new _iWin.KeyboardEvent('keypress', {
+                key: _ch, keyCode: _cc, which: _cc, charCode: _cc,
+                bubbles: true, cancelable: true
+              }));
+            } catch(_ev) {}
+          }
+        };
+
+        // PPT-specific keydown: for Backspace (8), Enter (13), arrow keys in PPT text boxes.
+        window.ooInjectKeydownPPT = function(key, keyCode) {
+          var _fr = document.querySelector('iframe[name="frameEditor"]');
+          if (!_fr || !_fr.contentDocument) return;
+          var inner = _fr.contentDocument.getElementById('_oo_ppt_kbd');
+          if (!inner) return;
+          var _iWin = _fr.contentWindow;
+          try {
+            inner.dispatchEvent(new _iWin.KeyboardEvent('keydown', {
               key: key, keyCode: keyCode, which: keyCode,
               bubbles: true, cancelable: true
             }));
@@ -3250,6 +3364,8 @@
                           if (_d.body) _d.body.appendChild(_pptKbd);
                         }
                         if (typeof _ed.SetDeviceInputHelperId === 'function') _ed.SetDeviceInputHelperId('_oo_ppt_kbd');
+                        // blur → blurKeyboard is handled by HTMLElement.prototype.blur override
+                        // in installTouchEditingBridge (same mechanism as Word/Excel area_id).
                       } catch(_pptKbdE) {}
                       // Outer-frame keyboard proxy for PPT: iOS RTI delivers input to outer-frame
                       // elements; we forward keypress/keydown/input to inner _oo_ppt_kbd which
@@ -3321,6 +3437,10 @@
                           if (_zoomFitDone) return;
                           _zoomFitDone = true;
                           try { if (typeof _ed.zoomFitToPage === 'function') _ed.zoomFitToPage(); } catch(_) {}
+                          // Notify Swift that zoom-fit is applied; overlay can now fade out.
+                          setTimeout(function() {
+                            try { window.webkit.messageHandlers.editorBridge.postMessage({ action: 'pptZoomDone' }); } catch(_zd) {}
+                          }, 350);
                         };
                         if (typeof _ed.asc_registerCallback === 'function') {
                           _ed.asc_registerCallback('asc_onEndLoadPresentation', function() {
@@ -4352,6 +4472,11 @@
           // ── Zoom in / out ─────────────────────────────────────────────────────
           if (cmd === 'zoom-in' || cmd === 'zoom-out') {
             var _zIn = cmd === 'zoom-in';
+            // PPT: use zoomIn()/zoomOut() — confirmed in app.js (e.api.zoomIn/zoomOut via Ctrl+/-)
+            if (_currentDocType === 'slide') {
+              if (_zIn && typeof _ed.zoomIn  === 'function') { try { _ed.zoomIn();  return; } catch(_) {} }
+              if (!_zIn && typeof _ed.zoomOut === 'function') { try { _ed.zoomOut(); return; } catch(_) {} }
+            }
             // Try OO's zoom buttons first (off-screen toolbar, always clickable)
             if (_clickOOBtn(_zIn
                 ? ['zoom in','zoom+','zoomin','increase zoom','zoom increase']
@@ -5264,7 +5389,9 @@
           // Do NOT call _innerWin.focus() — disrupts PPT canvas state and breaks _focusedCmd.
           var _sled = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
           if (_sled) {
-            if      (typeof _sled.asc_addSlide        === 'function') { try { _sled.asc_addSlide();        setTimeout(_reportSlidePos, 400); return; } catch(_) {} }
+            // AddSlide (no prefix) — confirmed in sdk-all.js b.prototype.AddSlide + app.js this.api.AddSlide()
+            if      (typeof _sled.AddSlide            === 'function') { try { _sled.AddSlide();            setTimeout(_reportSlidePos, 400); return; } catch(_) {} }
+            else if (typeof _sled.asc_addSlide        === 'function') { try { _sled.asc_addSlide();        setTimeout(_reportSlidePos, 400); return; } catch(_) {} }
             else if (typeof _sled.asc_AddSlide        === 'function') { try { _sled.asc_AddSlide();        setTimeout(_reportSlidePos, 400); return; } catch(_) {} }
             else if (typeof _sled.asc_insertSlide     === 'function') { try { _sled.asc_insertSlide();     setTimeout(_reportSlidePos, 400); return; } catch(_) {} }
           }
@@ -5277,6 +5404,17 @@
           // Do NOT call _innerWin.focus() — disrupts PPT canvas state and breaks _focusedCmd.
           var _slded = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
           if (_slded) {
+            // RemoveSlides(startIdx, count) — confirmed in sdk-all.js b.prototype.RemoveSlides=b.prototype.Ptf
+            // Use same lookup chain as _reportSlidePos so we get the actual selected slide index (0-based).
+            if (typeof _slded.RemoveSlides === 'function') {
+              var _rdCur = 0;
+              if      (typeof _slded.asc_getCurrentSlide     === 'function') _rdCur = _slded.asc_getCurrentSlide()     || 0;
+              else if (typeof _slded.asc_getCurrentPage      === 'function') _rdCur = _slded.asc_getCurrentPage()      || 0;
+              else if (typeof _slded.asc_getCurrentPageIndex === 'function') _rdCur = _slded.asc_getCurrentPageIndex() || 0;
+              else if (typeof _slded.getCurrentPageIndex     === 'function') _rdCur = _slded.getCurrentPageIndex()     || 0;
+              else if (typeof _slded.getCurrentPage          === 'function') _rdCur = _slded.getCurrentPage()          || 0;
+              try { _slded.RemoveSlides(_rdCur, 1); setTimeout(_reportSlidePos, 400); return; } catch(_) {}
+            }
             if      (typeof _slded.asc_deleteSlide    === 'function') { try { _slded.asc_deleteSlide();    setTimeout(_reportSlidePos, 400); return; } catch(_) {} }
             else if (typeof _slded.asc_DeleteSlide    === 'function') { try { _slded.asc_DeleteSlide();    setTimeout(_reportSlidePos, 400); return; } catch(_) {} }
             else if (typeof _slded.asc_removeSlide    === 'function') { try { _slded.asc_removeSlide();    setTimeout(_reportSlidePos, 400); return; } catch(_) {} }
@@ -5290,7 +5428,9 @@
           // Do NOT call _innerWin.focus() — disrupts PPT canvas state and breaks _focusedCmd.
           var _slduped = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
           if (_slduped) {
-            if      (typeof _slduped.asc_duplicateSlide === 'function') { try { _slduped.asc_duplicateSlide(); setTimeout(_reportSlidePos, 400); return; } catch(_) {} }
+            // DublicateSlide (OO's own misspelling) — confirmed in app.js this.api.DublicateSlide()
+            if      (typeof _slduped.DublicateSlide   === 'function') { try { _slduped.DublicateSlide();   setTimeout(_reportSlidePos, 400); return; } catch(_) {} }
+            else if (typeof _slduped.asc_duplicateSlide === 'function') { try { _slduped.asc_duplicateSlide(); setTimeout(_reportSlidePos, 400); return; } catch(_) {} }
             else if (typeof _slduped.asc_copySlide      === 'function') { try { _slduped.asc_copySlide();      setTimeout(_reportSlidePos, 400); return; } catch(_) {} }
             else if (typeof _slduped.asc_DuplicateSlide === 'function') { try { _slduped.asc_DuplicateSlide(); setTimeout(_reportSlidePos, 400); return; } catch(_) {} }
           }
