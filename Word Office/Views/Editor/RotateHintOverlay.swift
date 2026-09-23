@@ -1,13 +1,12 @@
 import SwiftUI
+import Lottie
 
 /// One-time overlay shown on first open of any Word/Excel/PPT file on iPhone.
 /// Hints the user that landscape orientation is available for more editing space.
 /// Dismissed by tap or auto-dismissed after 3.5 s.
-/// Visibility is controlled by the caller; this view owns only its own fade/animation.
 struct RotateHintOverlay: View {
     let onDismiss: () -> Void
 
-    @State private var rotation: Double = 0
     @State private var opacity: Double = 0
 
     var body: some View {
@@ -17,14 +16,9 @@ struct RotateHintOverlay: View {
                 .onTapGesture { triggerDismiss() }
 
             VStack(spacing: 28) {
-                Image(systemName: "iphone")
-                    .font(.system(size: 84, weight: .thin))
-                    .foregroundStyle(.white)
-                    .rotationEffect(.degrees(rotation))
-                    .animation(
-                        .spring(response: 0.65, dampingFraction: 0.52).delay(0.4),
-                        value: rotation
-                    )
+                LottieView(animation: .named("Rotate Phone"))
+                    .playing(loopMode: .loop)
+                    .frame(width: 200, height: 200)
 
                 VStack(spacing: 8) {
                     Text("Tip: Go landscape")
@@ -48,7 +42,6 @@ struct RotateHintOverlay: View {
         .animation(.easeIn(duration: 0.22), value: opacity)
         .onAppear {
             opacity = 1
-            rotation = 90
             DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { triggerDismiss() }
         }
     }
@@ -57,8 +50,4 @@ struct RotateHintOverlay: View {
         opacity = 0
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) { onDismiss() }
     }
-}
-
-#Preview {
-    RotateHintOverlay {}
 }
