@@ -49,12 +49,12 @@ struct EditorTopToolbar: View {
     let kind: FileKind
     /// Current/total slide number for PPT — nil for all other kinds.
     var slideInfo: (current: Int, total: Int)? = nil
-    /// Current/total page number for Word — nil for all other kinds.
-    var wordPageInfo: (current: Int, total: Int)? = nil
     /// Current font name for Excel — shown in the Font picker button.
     var excelFontName: String = "Font"
     /// Current font name for Word — shown in the Font picker chip.
     var wordFontName: String = "Font"
+    /// Current font name for PPT — shown in the Font picker chip in Home tab.
+    var pptFontName:  String = "Font"
     let onCommand: (String) -> Void
 
     @State private var excelTab: ExcelTab = .home
@@ -383,34 +383,6 @@ struct EditorTopToolbar: View {
 
     private var wordContentRow: some View {
         HStack(spacing: 0) {
-            // Page counter pinned on the left — always visible regardless of scroll position
-            if let info = wordPageInfo {
-                Button { onCommand("word-page-prev") } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 13, weight: .semibold))
-                        .frame(width: 30, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .foregroundStyle(info.current > 1 ? .primary : Color.secondary.opacity(0.3))
-                .disabled(info.current <= 1)
-                .accessibilityLabel("Previous page")
-                Text("\(info.current)/\(info.total)")
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(Color.secondary.opacity(0.1), in: Capsule())
-                Button { onCommand("word-page-next") } label: {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 13, weight: .semibold))
-                        .frame(width: 30, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .foregroundStyle(info.current < info.total ? .primary : Color.secondary.opacity(0.3))
-                .disabled(info.current >= info.total && info.total > 1)
-                .accessibilityLabel("Next page")
-                vDivider()
-            }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
                     switch wordTab {
@@ -529,7 +501,13 @@ struct EditorTopToolbar: View {
                     switch pptTab {
 
                     case .home:
-                        // Undo / Redo — first so thumb can reach while keyboard is open
+                        // Font name chip first — mirrors Word/Excel Home tab pattern
+                        chipBtn(
+                            String(pptFontName.prefix(11)) + (pptFontName.count > 11 ? "…" : ""),
+                            label: "Font face", cmd: "ppt-font-picker"
+                        )
+                        vDivider()
+                        // Undo / Redo
                         iconBtn("arrow.uturn.backward", label: "Undo", cmd: "undo")
                         iconBtn("arrow.uturn.forward",  label: "Redo", cmd: "redo")
                         vDivider()
@@ -555,6 +533,8 @@ struct EditorTopToolbar: View {
                         iconBtn("eraser", label: "Clear formatting", cmd: "clear-format")
 
                     case .insert:
+                        chipBtn("Text Box",      label: "Insert text box", cmd: "ppt-insert-textbox")
+                        vDivider()
                         iconBtn("photo",         label: "Insert image",  cmd: "insert-image")
                         chipBtn("Table",         label: "Insert table",  cmd: "insert-table")
                         chipBtn("Shape",         label: "Insert shape",  cmd: "insert-shape")
@@ -562,7 +542,6 @@ struct EditorTopToolbar: View {
                         iconBtn("link",          label: "Hyperlink",     cmd: "insert-link")
                         iconBtn("text.bubble",   label: "Comment",       cmd: "insert-comment")
                         vDivider()
-                        chipBtn("Text Box",      label: "Insert text box", cmd: "ppt-insert-textbox")
                         chipBtn("Symbol",        label: "Insert symbol",   cmd: "insert-symbol")
 
                     case .slide:
@@ -574,6 +553,9 @@ struct EditorTopToolbar: View {
                         // Navigation — counter is in the tab bar, so just prev/next here
                         iconBtn("chevron.left",  label: "Previous slide", cmd: "slide-prev")
                         iconBtn("chevron.right", label: "Next slide",     cmd: "slide-next")
+                        vDivider()
+                        // Transition picker
+                        chipBtn("Transition", label: "Slide transition", cmd: "ppt-transition-picker")
                         vDivider()
                         // Layouts
                         layoutChipBtn("Blank",   icon: "rectangle",                   cmd: "slide-layout:0")

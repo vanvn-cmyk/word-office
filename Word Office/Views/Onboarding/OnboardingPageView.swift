@@ -24,6 +24,8 @@ struct OnboardingPageView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            Spacer(minLength: 0)
+
             heroCard
                 .frame(maxWidth: .infinity, maxHeight: heroMaxHeight, alignment: .top)
                 .modifier(HeroBobModifier(enabled: !reduceMotion, phaseSeed: page.id))
@@ -43,6 +45,8 @@ struct OnboardingPageView: View {
             .padding(.horizontal, DSSpacing.lg)
             .padding(.top, (page.id == .editOffice || page.id == .tools) ? DSSpacing.xxl : DSSpacing.lg)
             .padding(.bottom, DSSpacing.md)
+
+            Spacer(minLength: 0)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel)

@@ -147,6 +147,7 @@
         else if (typeof _ed.asc_getCurrentPage          === 'function') _cur = (_ed.asc_getCurrentPage()          || 0) + 1;
         else if (typeof _ed.asc_getCurrentPageIndex     === 'function') _cur = (_ed.asc_getCurrentPageIndex()     || 0) + 1;
         else if (typeof _ed.getCurrentPageIndex         === 'function') _cur = (_ed.getCurrentPageIndex()         || 0) + 1;
+        else if (typeof _ed.getCurrentPage              === 'function') _cur = (_ed.getCurrentPage()              || 0) + 1;
         // total slides
         if      (typeof _ed.asc_getSlidesCount          === 'function') _tot = _ed.asc_getSlidesCount()          || 1;
         else if (typeof _ed.asc_getSlideCount           === 'function') _tot = _ed.asc_getSlideCount()           || 1;
@@ -955,27 +956,82 @@
       iDoc.addEventListener('pointerup', cancelPress, true);
       iDoc.addEventListener('pointercancel', cancelPress, true);
 
-      // 2. Excel keyboard pre-warm — same iOS WKWebView synchronous-focus rule as Word.
-      // Excel's virtual input element is AscCommon.eu.vM with DOM id="area_id".
-      if (_currentDocType === 'cell') {
-        iDoc.addEventListener('touchstart', function() {
-          var _dbg = function(msg) {
-            try { window.webkit.messageHandlers.editorBridge.postMessage({action:'debug', msg:msg}); } catch(_) {}
+      // 2. Word/Excel keyboard proxy — intercept area_id.focus/blur in the inner frame.
+      //
+      // WHY THIS IS NEEDED:
+      //   iOS RTI (Remote Text Input) silently drops keystrokes sent to DOM elements inside
+      //   nested WKWebView iframes. area_id lives in frameEditor (inner iframe) — every
+      //   character the user types is dropped before reaching OO's event handlers.
+      //
+      // HOW IT WORKS:
+      //   a) Override HTMLElement.prototype.focus on the inner frame.
+      //      When OO calls area_id.focus(), we send 'focusKeyboard' to Swift so that
+      //      ooKeyboardProxy (a UITextField off-screen at -400/-100) becomes iOS first
+      //      responder. iOS then routes keyboard characters through UITextFieldDelegate
+      //      → evaluateJavaScript("window.ooInjectInput(text)"), which sets area_id.value
+      //      and fires a synthetic 'input' event → OO's N0e/Vff handler inserts text.
+      //      We ALSO call the original focus() so OO enters text-editing mode (cursor active,
+      //      N0e registered). Without this, cursor is never placed and injection is a no-op.
+      //
+      //   b) Suppress WebKit-fired 'blur' DOM events on area_id (capture phase on iDoc).
+      //      When UITextField steals iOS first responder, WKWebView fires a real DOM 'blur'
+      //      event on area_id. If OO sees it, it deregisters N0e and deactivates cursor.
+      //      We install this capture listener BEFORE OO registers its target-phase listener
+      //      on area_id (area_id is created later, during doc load — after this bridge runs).
+      //      stopImmediatePropagation() in capture phase prevents the event from ever
+      //      reaching area_id's own listeners.
+      //
+      //   c) Override HTMLElement.prototype.blur on the inner frame.
+      //      When OO explicitly calls area_id.blur() (e.g. user taps outside text area),
+      //      send 'blurKeyboard' to Swift so UITextField resigns. Also call original blur
+      //      so OO properly deactivates its cursor/keyboard state.
+      if (_currentDocType === 'word' || _currentDocType === 'cell') {
+        try {
+          // (a) focus override
+          var _origElFocus = innerWin.HTMLElement.prototype.focus;
+          innerWin.HTMLElement.prototype.focus = function(opts) {
+            if (this && this.id === 'area_id') {
+              // Tell Swift → UITextField becomes iOS first responder for keyboard input
+              try { window.webkit.messageHandlers.editorBridge.postMessage({action:'focusKeyboard'}); } catch(_kf) {}
+              // MUST call original: OO needs area_id in DOM focus to activate cursor and
+              // register N0e. Without this, OO never enters text-editing mode → injection
+              // into area_id.value has no effect.
+              if (_origElFocus) _origElFocus.call(this, opts);
+              return;
+            }
+            if (_origElFocus) _origElFocus.call(this, opts);
           };
-          // Primary: focus area_id directly (eu.vM — OO Excel's virtual keyboard textarea)
-          var _area = iDoc.getElementById('area_id');
-          if (_area) { _dbg('[Excel-kbd] area_id found, focusing'); try { _area.focus(); } catch(_) {} return; }
-          // Secondary: access via AscCommon.eu.vM if area_id not in top-level doc
-          try {
-            var _eu = innerWin.AscCommon && innerWin.AscCommon.eu;
-            _dbg('[Excel-kbd] eu=' + (!!_eu) + ' eu.vM=' + (_eu && !!_eu.vM));
-            if (_eu && _eu.vM && typeof _eu.vM.focus === 'function') { _eu.vM.focus(); return; }
-          } catch(e) { _dbg('[Excel-kbd] err: ' + e.message); }
-          // Fallback: formula bar input (#ce-cell-content)
-          _dbg('[Excel-kbd] fallback to ce-cell-content');
-          var _fbar = iDoc.getElementById('ce-cell-content');
-          if (_fbar) { try { _fbar.focus(); } catch(_) {} }
-        }, { passive: true });
+          // (b) suppress WebKit-fired blur DOM event on area_id
+          // Installed here (before area_id exists) so our capture listener precedes OO's
+          // target-phase listener, which OO registers when it creates area_id later.
+          iDoc.addEventListener('blur', function(e) {
+            if (e.target && e.target.id === 'area_id') {
+              e.stopImmediatePropagation(); // prevent OO from deregistering N0e / deactivating cursor
+            }
+          }, true); // capture:true → fires before target-phase listeners
+          // (c) blur method override — when OO explicitly dismisses keyboard
+          var _origElBlur = innerWin.HTMLElement.prototype.blur;
+          innerWin.HTMLElement.prototype.blur = function() {
+            if (this && this.id === 'area_id') {
+              // Let OO deactivate cursor properly, and resign UITextField
+              if (_origElBlur) _origElBlur.call(this);
+              try { window.webkit.messageHandlers.editorBridge.postMessage({action:'blurKeyboard'}); } catch(_kb) {}
+              return;
+            }
+            if (_origElBlur) _origElBlur.call(this);
+          };
+        } catch(_kbdOvE) {}
+      }
+
+      // PPT keyboard: focus outer-frame proxy on every tap so iOS keyboard is available.
+      // The proxy forwards oninput → keypress events to inner _oo_ppt_kbd (OO's registered listener).
+      if (_currentDocType === 'slide') {
+        var _focusPPTOuter = function() {
+          var el = document.getElementById('_oo_ppt_kbd_outer');
+          if (el) { try { el.focus(); } catch(_) {} }
+        };
+        iDoc.addEventListener('touchstart', _focusPPTOuter, { passive: true });
+        iDoc.addEventListener('touchend',   function() { setTimeout(_focusPPTOuter, 50); }, { passive: true });
       }
 
       // 3. System clipboard ↔ Clipboard Web API --------------------------------
@@ -1736,7 +1792,6 @@
 
           setTimeout(function() {
             try {
-              try { _innerWin.focus(); } catch(_) {}
               var _ed = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
               if (!_ed) {
                 _showInsertToast('Editor not ready — please try again');
@@ -1810,79 +1865,83 @@
           }, 30);
         };
 
-        // Insert a text box on the current PPT slide via StartAddShape('textRect') and
-        // automatically double-click the placed box so OO enters text-edit mode immediately.
+        // Insert a text box on the current PPT slide.
+        // Calls _insertTextBoxWithText('') — kept for backward compat.
         window._insertTextBox = function() {
+          window._insertTextBoxWithText('');
+        };
+
+        // Inserts a text box at the centre of the current PPT slide via StartAddShape +
+        // mouse drag simulation on the actual <canvas> element, then double-clicks to
+        // enter text-edit mode and optionally injects pre-filled text.
+        //
+        // Key corrections vs. previous implementation:
+        //  - Events dispatched on the OO <canvas> element (not the container div).
+        //  - getBoundingClientRect() called on canvas (accurate slide-area coords).
+        //  - 400ms delay after StartAddShape gives OO draw-mode time to activate.
+        //  - Text injected via _oo_ppt_kbd inner-frame element (PPT keyboard path).
+        window._insertTextBoxWithText = function(text) {
           if (!_innerWin) return;
-          window._filterInterceptEnabled = false;
-          try { _innerWin._ooInjectEnabled = false; } catch(_) {}
 
-          var _tbDone = false;
-          var _tbRestore = function() {
-            if (_tbDone) return; _tbDone = true;
-            window._filterInterceptEnabled = true;
-            try { _innerWin._ooInjectEnabled = true; } catch(_) {}
-          };
-          setTimeout(_tbRestore, 8000);
+          var _ed = _innerWin.Asc && _innerWin.Asc.editor;
+          if (!_ed) return;
 
+          if (typeof _ed.StartAddShape !== 'function') return;
+          // Enter shape-draw mode: OO waits for next mouse drag on canvas.
+          _ed.StartAddShape('textRect', true);
+
+          // 400 ms: let OO activate draw mode fully before sending mouse events.
           setTimeout(function() {
-            try { _innerWin.focus(); } catch(_) {}
             try {
-              var _ed = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
-              if (!_ed) { _tbRestore(); return; }
+              var _d   = _innerWin.document;
+              // Dispatch on the first canvas inside the editor_sdk container —
+              // that is OO's main rendering surface for the current slide.
+              var _cv  = _d.querySelector('#editor_sdk canvas') || _d.querySelector('canvas');
+              if (!_cv) return;
 
-              // Enter text-box draw mode
-              if (typeof _ed.StartAddShape === 'function') {
-                _ed.StartAddShape('textRect', true);
-              } else if (typeof _ed.asc_startAddShape === 'function') {
-                _ed.asc_startAddShape('textRect');
-              } else {
-                _showInsertToast('Text box not available in this editor version');
-                _tbRestore(); return;
+              var _r   = _cv.getBoundingClientRect(); // coords in inner-frame viewport
+              // Draw a box from 20%,30% to 80%,60% of the canvas area.
+              var _x1  = _r.left + _r.width  * 0.20, _y1 = _r.top + _r.height * 0.30;
+              var _x2  = _r.left + _r.width  * 0.80, _y2 = _r.top + _r.height * 0.60;
+              var _cx  = (_x1 + _x2) / 2,             _cy = (_y1 + _y2) / 2;
+
+              function _mev(type, x, y, detail) {
+                return new _innerWin.MouseEvent(type, {
+                  bubbles: true, cancelable: true, view: _innerWin,
+                  clientX: x, clientY: y, button: 0, detail: detail || 1,
+                  pointerType: 'mouse'
+                });
               }
 
-              // Simulate mousedown → mousemove → mouseup to draw the box, then dblclick to enter text mode
+              // Step 1: drag to draw the shape.
+              _cv.dispatchEvent(_mev('mousedown', _x1, _y1));
               setTimeout(function() {
-                try {
-                  var _doc = _innerWin.document;
-                  var _target = _doc.getElementById('editor_sdk') ||
-                                _doc.getElementById('id_main_scroll') ||
-                                _doc.querySelector('canvas') || _doc.body;
-                  var _r  = _target.getBoundingClientRect();
-                  // Place in centre of slide at a comfortable size (~60% width, 30% height)
-                  var _x1 = _r.left + _r.width  * 0.20;
-                  var _y1 = _r.top  + _r.height * 0.30;
-                  var _x2 = _r.left + _r.width  * 0.80;
-                  var _y2 = _r.top  + _r.height * 0.60;
-                  var _cx = (_x1 + _x2) / 2, _cy = (_y1 + _y2) / 2;
+                _cv.dispatchEvent(_mev('mousemove', _cx, _cy));
+                _cv.dispatchEvent(_mev('mouseup',   _x2, _y2));
 
-                  function _fire(name, cx, cy) {
-                    try {
-                      _target.dispatchEvent(new _innerWin.MouseEvent(name, {
-                        bubbles: true, cancelable: true,
-                        clientX: cx, clientY: cy, button: 0, detail: name === 'dblclick' ? 2 : 1,
-                        view: _innerWin
-                      }));
-                    } catch(_) {}
-                  }
+                // Step 2: double-click centre → OO enters text-edit mode.
+                setTimeout(function() {
+                  _cv.dispatchEvent(_mev('click',    _cx, _cy));
+                  _cv.dispatchEvent(_mev('dblclick', _cx, _cy, 2));
 
-                  _fire('mousedown', _x1, _y1);
-                  setTimeout(function() {
-                    _fire('mousemove', _cx, _cy);
-                    _fire('mouseup',   _x2, _y2);
-                    try { _doc.body.dispatchEvent(new _innerWin.MouseEvent('mouseup', { bubbles: true, clientX: _x2, clientY: _y2, view: _innerWin })); } catch(_) {}
-                    // Double-click the centre to enter text-edit mode
+                  // Step 3: inject pre-filled text via PPT keyboard path.
+                  if (text && text.length > 0) {
                     setTimeout(function() {
-                      _fire('click',    _cx, _cy);
-                      _fire('dblclick', _cx, _cy);
-                      console.log('[iOS] _insertTextBox: placed + dblclick to enter text mode');
-                    }, 150);
-                  }, 80);
-                } catch(evtErr) { console.warn('[iOS] _insertTextBox mouse sim:', evtErr); }
-                setTimeout(_tbRestore, 2000);
-              }, 120);
-            } catch(outerErr) { console.warn('[iOS] _insertTextBox outer:', outerErr); }
-          }, 200);
+                      var _pptKbd = _d.getElementById('_oo_ppt_kbd');
+                      if (!_pptKbd) return;
+                      for (var i = 0; i < text.length; i++) {
+                        var ch = text[i], cc = text.charCodeAt(i);
+                        try { _pptKbd.dispatchEvent(new _innerWin.KeyboardEvent('keypress', {
+                          key: ch, keyCode: cc, which: cc, charCode: cc,
+                          bubbles: true, cancelable: true
+                        })); } catch(_ev) {}
+                      }
+                    }, 300);
+                  }
+                }, 150);
+              }, 80);
+            } catch(_simErr) {}
+          }, 400);
         };
 
         // Called by Swift's onDismiss after the native table sheet closes.
@@ -1930,17 +1989,49 @@
             var _ed = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
             if (!_ed) return;
             try {
-              // Excel uses asc_setCellFontName; Word uses put_TextPrFontName (confirmed in Word SDK v9)
-              if      (_currentDocType === 'cell' && typeof _ed.asc_setCellFontName === 'function') { _ed.asc_setCellFontName(name);  return; }
-              else if (typeof _ed.put_TextPrFontName   === 'function') { _ed.put_TextPrFontName(name);   return; }
-              else if (typeof _ed.asc_setFontFamily    === 'function') { _ed.asc_setFontFamily(name);    return; }
-              else if (typeof _ed.asc_SetFontFamily    === 'function') { _ed.asc_SetFontFamily(name);    return; }
-              else if (typeof _ed.asc_changeFontFamily === 'function') { _ed.asc_changeFontFamily(name); return; }
-              else if (_innerWin.AscDesktopEditor) {
-                _innerWin.AscDesktopEditor.executeFocusedCommand('fontFamily', name);
+              // asc_setFontName: confirmed in Word and Excel SDK. PPT uses put_TextPrFontName.
+              var _applied = false;
+              if (typeof _ed.asc_setFontName === 'function') {
+                _ed.asc_setFontName(name); _applied = true;
+              } else if (typeof _ed.put_TextPrFontName === 'function') {
+                _ed.put_TextPrFontName(name); _applied = true;
+              } else if (_innerWin.AscDesktopEditor) {
+                _innerWin.AscDesktopEditor.executeFocusedCommand('fontFamily', name); _applied = true;
               }
+              // Immediately update font chip — don't rely solely on OO callback which may not fire.
+              if (_applied) {
+                var _action = (_currentDocType === 'cell') ? 'excelFont' : (_currentDocType === 'slide') ? 'pptFont' : 'wordFont';
+                try { window.webkit.messageHandlers.editorBridge.postMessage({action: _action, font: name}); } catch(_pf) {}
+              }
+              try { window.webkit.messageHandlers.editorBridge.postMessage({action:'debug', msg:'[font] applied=' + _applied + ' name=' + name}); } catch(_) {}
             } catch(e) { console.warn('[iOS] ooSetFontFamily:', e); }
           }, 150);
+        };
+
+        // Called by Swift keyboard proxy — injects typed text into OO's area_id.
+        // Swift UITextField receives iOS RTI keyboard input then calls evaluateJavaScript.
+        window.ooInjectInput = function(data) {
+          if (!data) return;
+          var _fr = document.querySelector('iframe[name="frameEditor"]');
+          if (!_fr || !_fr.contentDocument) return;
+          var ai = _fr.contentDocument.getElementById('area_id');
+          if (!ai) return;
+          ai.value = ai.value + data;
+          try { ai.dispatchEvent(new Event('input', {bubbles:true, cancelable:false})); } catch(_ev) {}
+        };
+
+        // Called by Swift keyboard proxy for special keys: Backspace (8), Enter (13), arrows.
+        window.ooInjectKeydown = function(key, keyCode) {
+          var _fr = document.querySelector('iframe[name="frameEditor"]');
+          if (!_fr || !_fr.contentDocument) return;
+          var ai = _fr.contentDocument.getElementById('area_id');
+          if (!ai) return;
+          try {
+            ai.dispatchEvent(new KeyboardEvent('keydown', {
+              key: key, keyCode: keyCode, which: keyCode,
+              bubbles: true, cancelable: true
+            }));
+          } catch(_ev) {}
         };
 
         // Called by Swift for native Find & Replace
@@ -3105,6 +3196,25 @@
                       if (typeof _ed.asc_setMobileView    === 'function') _ed.asc_setMobileView(true);
                       if (typeof _ed.asc_SetFitPage       === 'function') _ed.asc_SetFitPage(true);
                       if (typeof _ed.asc_setViewLayout    === 'function') _ed.asc_setViewLayout(1);
+                      // Keyboard: outer-frame proxy so iOS RTI delivers keyboard to WKWebView.
+                      // OO's inner area_id (textarea) is in an inner iframe; iOS RTI cannot deliver
+                      // keyboard input to inner-iframe elements. We create a proxy in the outer frame
+                      // (same document as editor.html), focus it on each cell tap, and
+                      // OOKeyboardWebView.insertText intercepts keystrokes → ooInjectInput → area_id.
+                      (function() {
+                        var _exKbd = document.getElementById('_oo_excel_kbd_outer');
+                        if (!_exKbd) {
+                          _exKbd = document.createElement('input');
+                          _exKbd.id = '_oo_excel_kbd_outer';
+                          _exKbd.type = 'text';
+                          _exKbd.setAttribute('autocomplete','off');
+                          _exKbd.setAttribute('autocorrect','off');
+                          _exKbd.setAttribute('autocapitalize','off');
+                          _exKbd.setAttribute('spellcheck','false');
+                          _exKbd.style.cssText = 'position:fixed;left:-400px;top:-100px;width:1px;height:1px;opacity:0;pointer-events:none;font-size:16px;';
+                          document.body.appendChild(_exKbd);
+                        }
+                      })();
                       // Send current cell's font name to native toolbar on selection change.
                       if (typeof _ed.asc_registerCallback === 'function') {
                         _ed.asc_registerCallback('asc_onSelectionChanged', function() {
@@ -3121,8 +3231,116 @@
                     } else if (_currentDocType === 'slide') {
                       // PPT: asc_setMobileView + asc_SetFitPage both cause blank canvas when called
                       // before slide content finishes rendering (zoom calculated to 0 → permanent blank).
-                      // Use CSS + geo-hide instead to collapse the thumbnail panel.
-                      // Only hide ruler — same as Word path.
+                      // Use CSS + geo-hide instead to collapse the thumbnail panel. Only hide ruler.
+                      // Keyboard: wire a hidden <input> as OO's device input helper so that when the
+                      // user double-taps a text box (handled in installTouchEditingBridge), focusing
+                      // _oo_ppt_kbd makes the iOS keyboard appear and keystrokes reach OO.
+                      try { if (typeof _ed.SetTextBoxInputMode === 'function') _ed.SetTextBoxInputMode(true); } catch(_) {}
+                      try {
+                        var _pptKbd = _d.getElementById('_oo_ppt_kbd');
+                        if (!_pptKbd) {
+                          _pptKbd = _d.createElement('input');
+                          _pptKbd.id = '_oo_ppt_kbd';
+                          _pptKbd.type = 'text';
+                          _pptKbd.setAttribute('autocomplete','off');
+                          _pptKbd.setAttribute('autocorrect','off');
+                          _pptKbd.setAttribute('autocapitalize','off');
+                          _pptKbd.setAttribute('spellcheck','false');
+                          _pptKbd.style.cssText = 'position:fixed;left:-200px;top:-100px;width:1px;height:1px;opacity:0;pointer-events:none;font-size:16px;';
+                          if (_d.body) _d.body.appendChild(_pptKbd);
+                        }
+                        if (typeof _ed.SetDeviceInputHelperId === 'function') _ed.SetDeviceInputHelperId('_oo_ppt_kbd');
+                      } catch(_pptKbdE) {}
+                      // Outer-frame keyboard proxy for PPT: iOS RTI delivers input to outer-frame
+                      // elements; we forward keypress/keydown/input to inner _oo_ppt_kbd which
+                      // OO has registered and attached its onkeypress/onkeydown handlers to.
+                      (function() {
+                        var _outerPPTKbd = document.getElementById('_oo_ppt_kbd_outer');
+                        if (!_outerPPTKbd) {
+                          _outerPPTKbd = document.createElement('input');
+                          _outerPPTKbd.id = '_oo_ppt_kbd_outer';
+                          _outerPPTKbd.type = 'text';
+                          _outerPPTKbd.setAttribute('autocomplete','off');
+                          _outerPPTKbd.setAttribute('autocorrect','off');
+                          _outerPPTKbd.setAttribute('autocapitalize','off');
+                          _outerPPTKbd.setAttribute('spellcheck','false');
+                          _outerPPTKbd.style.cssText = 'position:fixed;left:-400px;top:-100px;width:1px;height:1px;opacity:0;pointer-events:none;font-size:16px;';
+                          document.body.appendChild(_outerPPTKbd);
+                        }
+                        var _pptIDoc = _d; // inner frame document (captured from _reInjectOO scope)
+                        var _getInner = function() { return _pptIDoc.getElementById('_oo_ppt_kbd'); };
+                        _outerPPTKbd.onkeypress = function(e) {
+                          var inner = _getInner(); if (!inner) return;
+                          try { inner.dispatchEvent(new KeyboardEvent('keypress', {
+                            key: e.key, code: e.code || '', keyCode: e.keyCode || e.which,
+                            which: e.which || e.keyCode, charCode: e.charCode || 0,
+                            bubbles: true, cancelable: true,
+                            shiftKey: !!e.shiftKey, ctrlKey: !!e.ctrlKey, metaKey: !!e.metaKey
+                          })); } catch(_ev) {}
+                        };
+                        _outerPPTKbd.onkeydown = function(e) {
+                          var inner = _getInner(); if (!inner) return;
+                          var kc = e.keyCode || e.which; if (!kc) return;
+                          try { inner.dispatchEvent(new KeyboardEvent('keydown', {
+                            key: e.key, code: e.code || '', keyCode: kc, which: kc,
+                            bubbles: true, cancelable: true,
+                            shiftKey: !!e.shiftKey, ctrlKey: !!e.ctrlKey, metaKey: !!e.metaKey
+                          })); } catch(_ev) {}
+                        };
+                        _outerPPTKbd.oninput = function(e) {
+                          // Forward input events (CJK/emoji/autocorrect chars arrive via oninput, not keypress)
+                          var data = e.data; if (!data) return;
+                          _outerPPTKbd.value = '';
+                          var inner = _getInner(); if (!inner) return;
+                          // Dispatch as synthetic keypress events for each character
+                          for (var _ci = 0; _ci < data.length; _ci++) {
+                            var _ch = data[_ci], _cc = data.charCodeAt(_ci);
+                            try { inner.dispatchEvent(new KeyboardEvent('keypress', {
+                              key: _ch, keyCode: _cc, which: _cc, charCode: _cc,
+                              bubbles: true, cancelable: true
+                            })); } catch(_ev) {}
+                          }
+                        };
+                      })();
+                      // Report font name changes to native toolbar (font chip in PPT Home tab).
+                      try {
+                        if (typeof _ed.asc_registerCallback === 'function') {
+                          _ed.asc_registerCallback('sync_TextPrFontFamilyCallBack', function(_pfName) {
+                            if (!_pfName) return;
+                            try { window.webkit.messageHandlers.editorBridge.postMessage({ action: 'pptFont', font: _pfName }); } catch(_) {}
+                          });
+                        }
+                      } catch(_pfCbE) {}
+                      // Fit slide to screen via zoomFitToPage().
+                      // MUST NOT call in onDocumentReady (too early — OO mid-transition → zoom=0 → blank).
+                      // Safe in asc_onEndLoadPresentation (all slides rendered, transitions complete).
+                      // Fixed 4s fallback covers PPTs where the callback never fires.
+                      try {
+                        var _zoomFitDone = false;
+                        var _doZoomFit = function() {
+                          if (_zoomFitDone) return;
+                          _zoomFitDone = true;
+                          try { if (typeof _ed.zoomFitToPage === 'function') _ed.zoomFitToPage(); } catch(_) {}
+                        };
+                        if (typeof _ed.asc_registerCallback === 'function') {
+                          _ed.asc_registerCallback('asc_onEndLoadPresentation', function() {
+                            setTimeout(_doZoomFit, 800);
+                            // Re-call SetDeviceInputHelperId here: at _reInjectOO time this.ra.wI
+                            // may be null (presentation not yet loaded) → guard short-circuits →
+                            // a.E4b stays undefined and onkeypress/onkeydown are never registered.
+                            // asc_onEndLoadPresentation guarantees wI is non-null, so the second
+                            // call succeeds (a.E4b is still undefined → handlers get registered).
+                            setTimeout(function() {
+                              try {
+                                if (typeof _ed.SetDeviceInputHelperId === 'function') {
+                                  _ed.SetDeviceInputHelperId('_oo_ppt_kbd');
+                                }
+                              } catch(_) {}
+                            }, 100);
+                          });
+                        }
+                        setTimeout(_doZoomFit, 4000);
+                      } catch(_zfE) {}
                     } else {
                       // Word: activate mobile view (removes page margins/borders, content fills width).
                       // Do NOT call asc_SetFitPage — it switches back to page-layout mode (undoes mobile view).
@@ -3131,6 +3349,7 @@
                       // asc_setMobileView does NOT exist in the Word SDK (only Excel/Slide have it).
                       try { if (typeof _ed.SetTextBoxInputMode === 'function') _ed.SetTextBoxInputMode(true); } catch(_) {}
                       if (typeof _ed.asc_setMobileView === 'function') _ed.asc_setMobileView(true);
+                      // Input is now handled by the native Swift UITextField proxy (ooInjectInput/ooInjectKeydown).
                       // Report current selection font name to native toolbar (chip display)
                       if (typeof _ed.asc_registerCallback === 'function') {
                         _ed.asc_registerCallback('asc_onFontFamily', function(name) {
@@ -3770,7 +3989,7 @@
           'list-bullet': 'InsertBulletList', 'list-numbered': 'InsertNumberedList',
         };
         if (MAP[cmd]) {
-          try { _innerWin && _innerWin.focus(); } catch(_) {}
+          // Do NOT call _innerWin.focus() — breaks PPT canvas/text selection state.
           var _mkwMap = {
             'align-left':    ['align left','left align','alignleft'],
             'align-center':  ['align center','center align','aligncenter','centered'],
@@ -4864,10 +5083,10 @@
           return;
         }
 
-        // insert-link and insert-comment are intercepted in Swift (NativeLinkView / NativeCommentView)
-        // before reaching JS. These handlers remain as fallbacks in case execEditorCommand is called
-        // directly, and for any non-native path.
+        // insert-link and insert-comment: try _clickOOBtn first (works reliably in PPT/Word/Excel),
+        // then fall back to direct API. NativeLinkView/NativeCommentView may intercept in Swift first.
         if (cmd === 'insert-link') {
+          if (_clickOOBtn(['insert link','add link','insert hyperlink','hyperlink','link'])) return;
           try {
             var _xed4 = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
             var _A4 = _innerWin.Asc || {};
@@ -4881,6 +5100,7 @@
           return;
         }
         if (cmd === 'insert-comment') {
+          if (_clickOOBtn(['add comment','insert comment','comment','new comment'])) return;
           try {
             var _xed5 = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
             if      (_xed5 && typeof _xed5.asc_addComment === 'function') { _xed5.asc_addComment('', false); }
@@ -5041,7 +5261,7 @@
           setTimeout(_reportSlidePos, 200);
         }
         if (cmd === 'slide-add') {
-          try { _innerWin.focus(); } catch(_) {}
+          // Do NOT call _innerWin.focus() — disrupts PPT canvas state and breaks _focusedCmd.
           var _sled = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
           if (_sled) {
             if      (typeof _sled.asc_addSlide        === 'function') { try { _sled.asc_addSlide();        setTimeout(_reportSlidePos, 400); return; } catch(_) {} }
@@ -5054,7 +5274,7 @@
           return;
         }
         if (cmd === 'slide-delete') {
-          try { _innerWin.focus(); } catch(_) {}
+          // Do NOT call _innerWin.focus() — disrupts PPT canvas state and breaks _focusedCmd.
           var _slded = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
           if (_slded) {
             if      (typeof _slded.asc_deleteSlide    === 'function') { try { _slded.asc_deleteSlide();    setTimeout(_reportSlidePos, 400); return; } catch(_) {} }
@@ -5067,7 +5287,7 @@
           return;
         }
         if (cmd === 'slide-duplicate') {
-          try { _innerWin.focus(); } catch(_) {}
+          // Do NOT call _innerWin.focus() — disrupts PPT canvas state and breaks _focusedCmd.
           var _slduped = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
           if (_slduped) {
             if      (typeof _slduped.asc_duplicateSlide === 'function') { try { _slduped.asc_duplicateSlide(); setTimeout(_reportSlidePos, 400); return; } catch(_) {} }
@@ -5079,43 +5299,19 @@
           setTimeout(_reportSlidePos, 400);
           return;
         }
-        if (cmd === 'slide-prev') {
-          try { _innerWin.focus(); } catch(_) {}
-          var _slped = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
-          if (_slped) {
-            if (typeof _slped.asc_prevSlide     === 'function') { try { _slped.asc_prevSlide();     setTimeout(_reportSlidePos, 200); return; } catch(_) {} }
-            if (typeof _slped.asc_goToPrevSlide === 'function') { try { _slped.asc_goToPrevSlide(); setTimeout(_reportSlidePos, 200); return; } catch(_) {} }
-            // goToPage (confirmed OO 9.x name): navigate to current − 1 (0-based)
-            if (typeof _slped.goToPage === 'function') {
-              var _curPrev = 0;
-              if      (typeof _slped.asc_getCurrentSlide     === 'function') _curPrev = _slped.asc_getCurrentSlide()     || 0;
-              else if (typeof _slped.asc_getCurrentPage      === 'function') _curPrev = _slped.asc_getCurrentPage()      || 0;
-              else if (typeof _slped.asc_getCurrentPageIndex === 'function') _curPrev = _slped.asc_getCurrentPageIndex() || 0;
-              if (_curPrev > 0) { try { _slped.goToPage(_curPrev - 1); setTimeout(_reportSlidePos, 200); return; } catch(_) {} }
-            }
+        if (cmd === 'slide-prev' || cmd === 'slide-next') {
+          // Mirror slide-goto:N exactly (confirmed working) — do NOT call _innerWin.focus()
+          // first as it disrupts OO's internal state and breaks goToPage.
+          var _snEd = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+          if (_snEd && typeof _snEd.goToPage === 'function') {
+            // getCurrentPage() = ike = function(){ return this.ra.yd.Po; } (0-based, confirmed)
+            var _snCur = typeof _snEd.getCurrentPage === 'function' ? (_snEd.getCurrentPage() || 0) : 0;
+            var _snTot = typeof _snEd.getCountPages === 'function' ? (_snEd.getCountPages() || 1) : 99;
+            var _snTarget = cmd === 'slide-prev'
+              ? Math.max(0, _snCur - 1)
+              : Math.min(_snTot - 1, _snCur + 1);
+            try { _snEd.goToPage(_snTarget); setTimeout(_reportSlidePos, 200); return; } catch(_) {}
           }
-          // executeFocusedCommand: confirmed OO sdkjs/slide name
-          _focusedCmd('GoToPreviousSlide');
-          setTimeout(_reportSlidePos, 200);
-          return;
-        }
-        if (cmd === 'slide-next') {
-          try { _innerWin.focus(); } catch(_) {}
-          var _slned = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
-          if (_slned) {
-            if (typeof _slned.asc_nextSlide     === 'function') { try { _slned.asc_nextSlide();     setTimeout(_reportSlidePos, 200); return; } catch(_) {} }
-            if (typeof _slned.asc_goToNextSlide === 'function') { try { _slned.asc_goToNextSlide(); setTimeout(_reportSlidePos, 200); return; } catch(_) {} }
-            // goToPage (confirmed OO 9.x name): navigate to current + 1 (0-based)
-            if (typeof _slned.goToPage === 'function') {
-              var _curNext = 0;
-              if      (typeof _slned.asc_getCurrentSlide     === 'function') _curNext = _slned.asc_getCurrentSlide()     || 0;
-              else if (typeof _slned.asc_getCurrentPage      === 'function') _curNext = _slned.asc_getCurrentPage()      || 0;
-              else if (typeof _slned.asc_getCurrentPageIndex === 'function') _curNext = _slned.asc_getCurrentPageIndex() || 0;
-              try { _slned.goToPage(_curNext + 1); setTimeout(_reportSlidePos, 200); return; } catch(_) {}
-            }
-          }
-          // executeFocusedCommand: confirmed OO sdkjs/slide name
-          _focusedCmd('GoToNextSlide');
           setTimeout(_reportSlidePos, 200);
           return;
         }
@@ -5172,36 +5368,26 @@
           if (isNaN(_slLayoutIdx)) return;
           var _sllaed = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
           if (_sllaed) {
-            if      (typeof _sllaed.asc_applyLayout        === 'function') { try { _sllaed.asc_applyLayout(_slLayoutIdx);        return; } catch(_) {} }
+            // ChangeLayout(index) confirmed in sdk-all-min.js (= TMg): applies layout to current slide.
+            if      (typeof _sllaed.ChangeLayout           === 'function') { try { _sllaed.ChangeLayout(_slLayoutIdx);           return; } catch(_) {} }
+            else if (typeof _sllaed.asc_applyLayout        === 'function') { try { _sllaed.asc_applyLayout(_slLayoutIdx);        return; } catch(_) {} }
             else if (typeof _sllaed.asc_setSlideLayout     === 'function') { try { _sllaed.asc_setSlideLayout(_slLayoutIdx);     return; } catch(_) {} }
             else if (typeof _sllaed.asc_changeSlideLayout  === 'function') { try { _sllaed.asc_changeSlideLayout(_slLayoutIdx);  return; } catch(_) {} }
           }
           if (_clickOOBtn(['slide layout','layout','change layout'])) return;
+          _focusedCmd('ChangeLayout');
           return;
         }
         // ppt-insert-textbox — insert a text box on the current slide
+        // Uses _insertTextBox() which calls StartAddShape('textRect', true) — the only API
+        // confirmed present in the PPT SDK (asc_insertTextBox/asc_setShapePreset do NOT exist).
         if (cmd === 'ppt-insert-textbox') {
-          try { _innerWin.focus(); } catch(_) {}
-          var _txed = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
-          if (_txed) {
-            if      (typeof _txed.asc_insertTextBox    === 'function') { try { _txed.asc_insertTextBox();    return; } catch(_) {} }
-            else if (typeof _txed.asc_addTextBox       === 'function') { try { _txed.asc_addTextBox();       return; } catch(_) {} }
-            else if (typeof _txed.asc_InsertTextBox    === 'function') { try { _txed.asc_InsertTextBox();    return; } catch(_) {} }
-          }
-          if (_clickOOBtn(['text box','textbox','insert text box','add text box'])) return;
-          // Fallback: shape presets — 'textRect' is OO's internal name for a text box;
-          // 'textBox' is incorrect and silently fails; 'rect' inserts a plain rectangle.
-          if (_txed && typeof _txed.asc_setShapePreset === 'function') {
-            try { _txed.asc_setShapePreset('textRect'); return; } catch(_) {}
-            try { _txed.asc_setShapePreset('textBox');  return; } catch(_) {}
-            try { _txed.asc_setShapePreset('rect');     return; } catch(_) {}
-          }
-          _focusedCmd('InsertTextBox');
+          window._insertTextBox();
           return;
         }
         // ppt-valign-top/middle/bottom — set vertical text alignment in selected text box
         if (cmd === 'ppt-valign-top' || cmd === 'ppt-valign-middle' || cmd === 'ppt-valign-bottom') {
-          try { _innerWin.focus(); } catch(_) {}
+          // Do NOT call _innerWin.focus() — breaks PPT text box selection state.
           var _vaed = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
           if (_vaed) {
             // c_oAscVertAlignJc: 0=top, 1=center, 2=bottom (OO internal enum)
@@ -5214,6 +5400,40 @@
                     : cmd === 'ppt-valign-middle' ? ['align middle','vertical center','middle align']
                     : ['align bottom','vertical bottom','bottom align'];
           if (_clickOOBtn(_vaKw)) return;
+          return;
+        }
+
+        // ppt-apply-transition:{type} — apply slide transition by integer type index.
+        // Pattern from OO app.js: new CAscSlideProps + put_transition(CAscSlideTransition) + SetSlideProps.
+        // Types: 0=None,1=Fade,2=Push,3=Wipe,4=Split,5=UnCover,6=Cover,7=Clock,8=Zoom,9=Morph,10=Random
+        if (cmd.indexOf('ppt-apply-transition:') === 0) {
+          var _trType = parseInt(cmd.slice(21), 10);
+          if (isNaN(_trType)) return;
+          var _trAsc = _innerWin && _innerWin.Asc;
+          var _tred  = _trAsc && _trAsc.editor;
+          if (_tred && _trAsc.CAscSlideTransition && _trAsc.CAscSlideProps
+              && typeof _tred.SetSlideProps === 'function') {
+            try {
+              var _trTypes = _trAsc.c_oAscSlideTransitionTypes || {};
+              // Minified keys (cg:0,Ncf:1,Uoa:2,...) so named lookup fails; fall back to raw int.
+              var _trKey = ['None','Fade','Push','Wipe','Split','UnCover','Cover','Clock','Zoom','Morph','Random'][_trType];
+              var _trVal = (_trKey !== undefined && _trTypes[_trKey] !== undefined) ? _trTypes[_trKey] : _trType;
+              var _tr    = new _trAsc.CAscSlideTransition();
+              _tr.put_TransitionType(_trVal);
+              // put_TransitionOption(0) sets the first animation variant so the transition plays.
+              if (typeof _tr.put_TransitionOption === 'function') { try { _tr.put_TransitionOption(0); } catch(_) {} }
+              var _props = new _trAsc.CAscSlideProps();
+              _props.put_transition(_tr);
+              _tred.SetSlideProps(_props);
+              console.log('[iOS] ppt-apply-transition: type=' + _trType + ' val=' + _trVal);
+            } catch(_trE) { console.warn('[iOS] ppt-apply-transition error', _trE); }
+          } else {
+            console.warn('[iOS] ppt-apply-transition: missing APIs', {
+              hasEd: !!_tred, hasTransCls: !!(_trAsc && _trAsc.CAscSlideTransition),
+              hasPropsCls: !!(_trAsc && _trAsc.CAscSlideProps),
+              hasSetSlideProps: !!(_tred && typeof _tred.SetSlideProps === 'function')
+            });
+          }
           return;
         }
 
@@ -5362,15 +5582,20 @@
             var blobURL = iURL.createObjectURL(new BlobCls([u8], { type: d.mime }));
             var ok = false;
 
-            // Step 3: Word/PPT — pre-register blob URL in OO image cache so srb(blobURL) returns
-            // truthy → AddImageUrl/ccf skips the WASM/HTTP fetcher → calls sUa([blobURL]) directly
-            // → yo.Efa preloads from blob: URL → yo.$D resolves → inline image is inserted.
-            // AddImageUrl = g.prototype.ccf = g.prototype.AddImageUrl (sdk-all-min.js line 2083)
+            // Step 3: Pre-register blob URL in OO image cache so AddImageUrl skips WASM fetcher.
+            // Word uses AscCommon.Ew.y3a; PPT/Excel use AscCommon.py.DWa — try both.
+            // Direct py.M_e/py.urls assignment is the fallback in case DWa is mangled.
             try {
               var _cacheKey = 'media/iOSimg_' + Date.now();
               var _cacheMap = {};
               _cacheMap[_cacheKey] = blobURL;
-              _innerWin.AscCommon.Ew.y3a(_cacheMap);
+              try { _innerWin.AscCommon.Ew.y3a(_cacheMap); } catch(_) {}
+              try { _innerWin.AscCommon.py.DWa(_cacheMap); } catch(_) {}
+              try {
+                var _py = _innerWin.AscCommon.py;
+                if (_py.M_e)   { _py.M_e[blobURL]    = _cacheKey; }
+                if (_py.urls)  { _py.urls[_cacheKey]  = blobURL;  }
+              } catch(_) {}
             } catch(_cacheErr) { console.warn('[iOS] image cache pre-reg:', _cacheErr); }
 
             if (!ok && typeof ed.AddImageUrl === 'function') {

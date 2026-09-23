@@ -26,11 +26,11 @@ struct OfficeEditorView: View {
     @State private var editorVC: OfficeEditorViewController?
     @State private var slideProgress: (current: Int, total: Int) = (1, 1)
     @State private var slideThumbnails: [Int: UIImage] = [:]
-    @State private var wordPageProgress: (current: Int, total: Int) = (1, 1)
     @State private var sheetNames: [String] = []
     @State private var activeSheetIndex: Int = 0
     @State private var currentExcelFont: String = "Font"
     @State private var currentWordFont:  String = "Font"
+    @State private var currentPPTFont:   String = "Font"
 
     // Native photo insertion
     @State private var showImagePicker = false
@@ -57,6 +57,9 @@ struct OfficeEditorView: View {
     @State private var pendingFont: String? = nil
     @State private var showSymbolSheet    = false
     @State private var pendingSymbol: String? = nil
+    @State private var showTransitionPicker = false
+    @State private var showTextBoxSheet     = false
+    @State private var pendingTextBox: String? = nil
 
     private var fileKind: EditorTopToolbar.FileKind {
         EditorTopToolbar.FileKind(ext: ref.url.pathExtension)
@@ -75,9 +78,9 @@ struct OfficeEditorView: View {
                     EditorTopToolbar(
                         kind: fileKind,
                         slideInfo: fileKind == .ppt ? slideProgress : nil,
-                        wordPageInfo: fileKind == .word ? wordPageProgress : nil,
                         excelFontName: currentExcelFont,
                         wordFontName: currentWordFont,
+                        pptFontName: currentPPTFont,
                         onCommand: handleCommand
                     )
 
@@ -98,13 +101,13 @@ struct OfficeEditorView: View {
                                 slideThumbnails[num] = img
                             }
                         },
-                        onWordPageChange: { c, t in wordPageProgress = (c, t) },
                         onSheetListChange: { names, idx in
                             sheetNames = names
                             activeSheetIndex = idx
                         },
                         onExcelFontChange: { name in currentExcelFont = name },
-                        onWordFontChange:  { name in currentWordFont  = name }
+                        onWordFontChange:  { name in currentWordFont  = name },
+                        onPPTFontChange:   { name in currentPPTFont   = name }
                     )
 
                     bottomStrip
@@ -240,6 +243,7 @@ struct OfficeEditorView: View {
                     if let font = pendingFont {
                         editorVC?.setFontFamily(font)
                         if fileKind == .excel { currentExcelFont = font }
+                        if fileKind == .ppt   { currentPPTFont   = font }
                         pendingFont = nil
                     }
                 }) {
@@ -267,6 +271,34 @@ struct OfficeEditorView: View {
                         onCancel: { showSymbolSheet = false }
                     )
                 }
+                // Native text box insert sheet — insertTextBoxWithText fires in onDismiss
+                // so WKWebView has fully regained focus before JS is evaluated.
+                .sheet(isPresented: $showTextBoxSheet, onDismiss: {
+                    let text = pendingTextBox ?? ""
+                    pendingTextBox = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        editorVC?.insertTextBoxWithText(text)
+                    }
+                }) {
+                    NativeTextBoxView(
+                        onCommit: { text in
+                            pendingTextBox = text
+                            showTextBoxSheet = false
+                        },
+                        onCancel: { showTextBoxSheet = false }
+                    )
+                }
+                .confirmationDialog("Slide Transition", isPresented: $showTransitionPicker, titleVisibility: .visible) {
+                    Button("None")    { editorVC?.execEditorCommand("ppt-apply-transition:0")  }
+                    Button("Fade")    { editorVC?.execEditorCommand("ppt-apply-transition:1")  }
+                    Button("Push")    { editorVC?.execEditorCommand("ppt-apply-transition:2")  }
+                    Button("Wipe")    { editorVC?.execEditorCommand("ppt-apply-transition:3")  }
+                    Button("Split")   { editorVC?.execEditorCommand("ppt-apply-transition:4")  }
+                    Button("Cover")   { editorVC?.execEditorCommand("ppt-apply-transition:6")  }
+                    Button("Zoom")    { editorVC?.execEditorCommand("ppt-apply-transition:8")  }
+                    Button("Random")  { editorVC?.execEditorCommand("ppt-apply-transition:10") }
+                    Button("Cancel", role: .cancel) {}
+                }
             }
         }
         .preference(key: EditorDirtyPreferenceKey.self, value: isDirty)
@@ -290,7 +322,8 @@ struct OfficeEditorView: View {
         switch cmd {
         case "insert-image", "insert-link", "insert-comment",
              "insert-table", "insert-chart", "insert-shape",
-             "insert-symbol", "word-font-picker", "excel-font-picker":
+             "insert-symbol", "word-font-picker", "excel-font-picker", "ppt-font-picker",
+             "ppt-insert-textbox":
             // webView.endEditing(true) is more reliable than UIApplication.resignFirstResponder
             // for WKWebView: it explicitly ends editing on WKContentView regardless of what
             // the current first responder is, preventing the sheet's TextFields from competing
@@ -311,12 +344,10 @@ struct OfficeEditorView: View {
         case "insert-chart":        showChartSheet         = true
         case "insert-shape":        showShapeSheet         = true
         case "insert-symbol":       showSymbolSheet        = true
-        // ppt-insert-textbox: _insertTextBox uses StartAddShape('textRect') + mouse simulation
-        // to draw the box, then auto-double-clicks to enter text-edit mode immediately.
-        // Direct APIs (asc_insertTextBox, asc_setShapePreset) crash on iOS.
-        case "ppt-insert-textbox":  editorVC?.insertTextBox()
+        case "ppt-insert-textbox":  showTextBoxSheet = true
         case "word-find-replace":   showFindReplaceSheet   = true
-        case "word-font-picker", "excel-font-picker": showFontPickerSheet = true
+        case "word-font-picker", "excel-font-picker", "ppt-font-picker": showFontPickerSheet = true
+        case "ppt-transition-picker": showTransitionPicker = true
         case "print":               editorVC?.printDocument()
         default:                    editorVC?.execEditorCommand(cmd)
         }
@@ -656,10 +687,11 @@ private struct _OfficeWebView: UIViewControllerRepresentable {
     let onFilterRequest: ([NativeFilterItem]) -> Void
     let onSlideChange: (Int, Int) -> Void
     let onSlideThumbnail: (Int, Data) -> Void
-    let onWordPageChange: (Int, Int) -> Void
+    var onWordPageChange: (Int, Int) -> Void = { _, _ in }
     let onSheetListChange: ([String], Int) -> Void
     let onExcelFontChange: (String) -> Void
     let onWordFontChange:  (String) -> Void
+    let onPPTFontChange:   (String) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -676,6 +708,7 @@ private struct _OfficeWebView: UIViewControllerRepresentable {
         vc.onSheetListChange = { names, idx in Task { @MainActor in onSheetListChange(names, idx) } }
         vc.onExcelFontChange = { name in Task { @MainActor in onExcelFontChange(name) } }
         vc.onWordFontChange  = { name in Task { @MainActor in onWordFontChange(name)  } }
+        vc.onPPTFontChange   = { name in Task { @MainActor in onPPTFontChange(name)   } }
         vc.openFile(at: ref.url)
         Task { @MainActor in onVCReady(vc) }
         return vc

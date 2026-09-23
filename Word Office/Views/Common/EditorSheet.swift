@@ -33,8 +33,11 @@ struct EditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(DSToastPresenter.self) private var toaster
 
+    @AppStorage("hasSeenRotateHint") private var hasSeenRotateHint = false
+
     @State private var isDirty = false
     @State private var showDiscardAlert = false
+    @State private var showRotateHint = false
 
     var body: some View {
         NavigationStack {
@@ -90,12 +93,33 @@ struct EditorSheet: View {
         } message: {
             Text("Your unsaved edits will be lost.")
         }
+        .overlay {
+            if showRotateHint {
+                RotateHintOverlay { showRotateHint = false }
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.22), value: showRotateHint)
         .toastHost(toaster)
-        .onAppear { OrientationManager.shared.allowAll() }
+        .onAppear {
+            OrientationManager.shared.allowAll()
+            scheduleRotateHintIfNeeded()
+        }
         .onDisappear { OrientationManager.shared.lockToPortrait() }
     }
 
     private func closeEditor() {
         dismiss()
+    }
+
+    private func scheduleRotateHintIfNeeded() {
+        guard !hasSeenRotateHint,
+              ref.kind.isOnlyOfficeEditable,
+              UIDevice.current.userInterfaceIdiom == .phone
+        else { return }
+        hasSeenRotateHint = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            showRotateHint = true
+        }
     }
 }

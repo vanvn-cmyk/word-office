@@ -185,53 +185,56 @@ struct PaywallView: View {
         // Capped at 195pt on tall devices; collapses toward 0 on small ones.
         GeometryReader { geo in
             let imageH = max(0, min(195, geo.size.height - 300))
-            VStack(spacing: DSSpacing.md) {
-                Image("PaywallHeroIllustration")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(height: imageH)
-                    .padding(.horizontal, DSSpacing.xs)
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                VStack(spacing: DSSpacing.md) {
+                    Image("PaywallHeroIllustration")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: imageH)
+                        .padding(.horizontal, DSSpacing.xs)
 
-                VStack(spacing: DSSpacing.xxs) {
-                    Text("Your Office, Upgraded")
-                        .font(.largeTitle.bold())
-                        .foregroundStyle(.white)
-                        .multilineTextAlignment(.center)
-                        .shadow(color: .black.opacity(0.15), radius: 6, y: 2)
+                    VStack(spacing: DSSpacing.xxs) {
+                        Text("Your Office, Upgraded")
+                            .font(.largeTitle.bold())
+                            .foregroundStyle(.white)
+                            .multilineTextAlignment(.center)
+                            .shadow(color: .black.opacity(0.15), radius: 6, y: 2)
 
-                    Text("Professional tools, made for you")
-                        .font(DSFont.body)
-                        .foregroundStyle(.white.opacity(0.85))
-                        .multilineTextAlignment(.center)
+                        Text("Professional tools, made for you")
+                            .font(DSFont.body)
+                            .foregroundStyle(.white.opacity(0.85))
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.horizontal, DSSpacing.lg)
+
+                    VStack(alignment: .leading, spacing: DSSpacing.xs) {
+                        HeroBenefitRow(
+                            icon: "square.and.pencil",
+                            title: "Edit Office Files",
+                            subtitle: "Open, edit, and convert your documents"
+                        )
+                        HeroBenefitRow(
+                            icon: "doc.text.viewfinder",
+                            title: "Unlimited Scans",
+                            subtitle: "Turn any document into a clean PDF"
+                        )
+                        HeroBenefitRow(
+                            icon: "checkmark.seal.fill",
+                            title: "Never Lose Track",
+                            subtitle: "Keep every file organized in one place"
+                        )
+                        HeroBenefitRow(
+                            icon: "square.grid.2x2.fill",
+                            title: "All Tools in One Place",
+                            subtitle: "Edit, scan, sign, and convert — no extra apps"
+                        )
+                    }
+                    .padding(.horizontal, DSSpacing.lg)
                 }
-                .padding(.horizontal, DSSpacing.lg)
-
-                VStack(alignment: .leading, spacing: DSSpacing.xs) {
-                    HeroBenefitRow(
-                        icon: "square.and.pencil",
-                        title: "Edit Office Files",
-                        subtitle: "Open, edit, and convert your documents"
-                    )
-                    HeroBenefitRow(
-                        icon: "doc.text.viewfinder",
-                        title: "Unlimited Scans",
-                        subtitle: "Turn any document into a clean PDF"
-                    )
-                    HeroBenefitRow(
-                        icon: "checkmark.seal.fill",
-                        title: "Never Lose Track",
-                        subtitle: "Keep every file organized in one place"
-                    )
-                    HeroBenefitRow(
-                        icon: "square.grid.2x2.fill",
-                        title: "All Tools in One Place",
-                        subtitle: "Edit, scan, sign, and convert — no extra apps"
-                    )
-                }
-                .padding(.horizontal, DSSpacing.lg)
+                Spacer(minLength: 0)
             }
-            .padding(.top, DSSpacing.xxs)
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

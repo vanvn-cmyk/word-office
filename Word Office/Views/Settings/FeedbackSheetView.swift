@@ -12,10 +12,12 @@ struct FeedbackSheetView: View {
 
     private var currentDetent: PresentationDetent {
         switch step {
-        case 0: return .height(310)       // stars only — fixed height fits content (~293pt) on all devices
-        case 2: return .large             // 9 options — needs max height; content fills most of sheet on all devices
-        case 3: return .fraction(0.78)    // 7 options, no subtitle — tighter fit
-        default: return .fraction(0.88)   // 8 options with subtitle (steps 1 & 4)
+        case 0: return .height(310)   // stars only
+        case 1: return .height(670)   // 8 options + subtitle → ~662pt content
+        case 2: return .height(780)   // 10 options + subtitle → ~766pt content; no-scroll on ≥iPhone 15
+        case 3: return .height(600)   // 7 options, no subtitle → ~588pt content
+        case 4: return .height(670)   // 8 options + subtitle → ~662pt content
+        default: return .height(670)
         }
     }
 
@@ -161,7 +163,8 @@ struct FeedbackSheetView: View {
                     "Formatting broke after editing":"textformat",
                     "Couldn't sync with cloud":      "icloud.slash",
                     "Feature I need is paywalled":   "lock",
-                    "UI was hard to navigate":       "map"
+                    "UI was hard to navigate":       "map",
+                    "No templates available":        "square.dashed"
                 ],
                 isSelected: { vm.selectedFrictions.contains($0) }
             ) { vm.toggleFriction($0) }

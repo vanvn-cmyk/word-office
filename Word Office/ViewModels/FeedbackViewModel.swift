@@ -39,7 +39,8 @@ final class FeedbackViewModel {
         "Formatting broke after editing",
         "Couldn't sync with cloud",
         "Feature I need is paywalled",
-        "UI was hard to navigate"
+        "UI was hard to navigate",
+        "No templates available"
     ]
 
     // Q4 — most-used feature: drives retention prioritization

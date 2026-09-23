@@ -18,7 +18,12 @@ final class OfficeEditorViewController: UIViewController {
 
     // MARK: - Properties
 
-    private var webView: WKWebView!
+    private var webView: OOKeyboardWebView!
+    /// Hidden UITextField that captures iOS keyboard input for Word/Excel documents.
+    /// iOS RTI cannot deliver characters to DOM elements inside WKWebView inner iframes.
+    /// area_id.focus() is intercepted in JS → this field becomes first responder → characters
+    /// arrive via shouldChangeCharactersIn → injected via window.ooInjectInput.
+    private var ooKeyboardProxy: OOKeyboardProxyTextField?
     private let bridge = OfficeBridge()
     private let schemeHandler = OfficeSchemeHandler()
     private var documentURL: URL?
@@ -57,6 +62,8 @@ final class OfficeEditorViewController: UIViewController {
     var onExcelFontChange: ((String) -> Void)?
     /// Called when the Word cursor/selection changes; provides the font name at that position.
     var onWordFontChange: ((String) -> Void)?
+    /// Called when PPT text selection changes; provides the font name at that position.
+    var onPPTFontChange: ((String) -> Void)?
 
     // MARK: - Lifecycle
 
@@ -183,12 +190,13 @@ final class OfficeEditorViewController: UIViewController {
         webView.evaluateJavaScript("window._insertTable(\(cols), \(rows));")
     }
 
-    /// Inserts a text box on the current PPT slide via window._insertTextBox.
-    /// That function uses StartAddShape('textRect') + mouse simulation to draw the box
-    /// at a centred position, then auto-double-clicks to enter text-edit mode immediately.
-    func insertTextBox() {
+    /// Inserts a text box on the current PPT slide with optional pre-filled text.
+    /// JS places the box at the centre of the slide via StartAddShape + mouse simulation,
+    /// then injects `text` via the PPT keyboard proxy if non-empty.
+    func insertTextBoxWithText(_ text: String) {
         guard scriptReady else { return }
-        webView.evaluateJavaScript("window._insertTextBox();")
+        let textJS = jsStringLiteral(text)
+        webView.evaluateJavaScript("window._insertTextBoxWithText(\(textJS));")
     }
 
     /// Inserts a Unicode symbol/special character at the current cursor position.
@@ -912,7 +920,8 @@ final class OfficeEditorViewController: UIViewController {
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
 
-        webView = WKWebView(frame: .zero, configuration: config)
+        webView = OOKeyboardWebView(frame: .zero, configuration: config)
+
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.scrollView.contentInsetAdjustmentBehavior = .never
@@ -935,6 +944,27 @@ final class OfficeEditorViewController: UIViewController {
             webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         ])
+
+        // Off-screen UITextField that intercepts iOS keyboard input for Word/Excel.
+        // area_id.focus() in the inner iframe is intercepted in JS; Swift makes this
+        // field first responder so RTI routes typed characters here instead of failing
+        // silently in the inner iframe. Characters arrive via shouldChangeCharactersIn.
+        let kbdProxy = OOKeyboardProxyTextField(frame: CGRect(x: -400, y: -100, width: 1, height: 1))
+        kbdProxy.autocorrectionType  = .no
+        kbdProxy.autocapitalizationType = .none
+        kbdProxy.spellCheckingType   = .no
+        kbdProxy.smartDashesType     = .no
+        kbdProxy.smartQuotesType     = .no
+        kbdProxy.keyboardType        = .default
+        kbdProxy.returnKeyType       = .default
+        kbdProxy.textContentType     = .none
+        kbdProxy.delegate = self
+        kbdProxy.onDeleteBackward = { [weak self] in
+            guard let wv = self?.webView else { return }
+            wv.evaluateJavaScript("window.ooInjectKeydown('Backspace',8)") { _, _ in }
+        }
+        view.addSubview(kbdProxy)
+        ooKeyboardProxy = kbdProxy
     }
 
     private func loadEditorHTML() {
@@ -1198,6 +1228,20 @@ extension OfficeEditorViewController: OfficeBridgeDelegate {
         case .wordFontChange(let fontName):
             onWordFontChange?(fontName)
 
+        case .pptFontChange(let fontName):
+            onPPTFontChange?(fontName)
+
+        case .focusKeyboard:
+            guard editorLoaded else { break }
+            DispatchQueue.main.async { [weak self] in
+                _ = self?.ooKeyboardProxy?.becomeFirstResponder()
+            }
+
+        case .blurKeyboard:
+            DispatchQueue.main.async { [weak self] in
+                self?.ooKeyboardProxy?.resignFirstResponder()
+            }
+
         case .slideThumbnail(let slideNum, let data):
             onSlideThumbnail?(slideNum, data)
 
@@ -1244,5 +1288,49 @@ extension OfficeEditorViewController: OfficeBridgeDelegate {
             })
         }
         present(ac, animated: true)
+    }
+}
+
+// MARK: - OOKeyboardProxyTextField
+
+/// UITextField subclass used as the off-screen keyboard proxy for Word/Excel/PPT.
+/// Overrides deleteBackward() so backspace is always delivered even when the field
+/// is empty — iOS does NOT call shouldChangeCharactersIn on an empty text field.
+private final class OOKeyboardProxyTextField: UITextField {
+    var onDeleteBackward: (() -> Void)?
+    override func deleteBackward() {
+        onDeleteBackward?()
+        // Do not call super: the proxy is always empty, actual deletion is irrelevant.
+    }
+}
+
+// MARK: - UITextFieldDelegate (keyboard proxy for Word/Excel)
+
+extension OfficeEditorViewController: UITextFieldDelegate {
+
+    func textField(
+        _ textField: UITextField,
+        shouldChangeCharactersIn range: NSRange,
+        replacementString string: String
+    ) -> Bool {
+        guard textField === ooKeyboardProxy, let wv = webView else { return false }
+        if string == "\n" || string == "\r" {
+            wv.evaluateJavaScript("window.ooInjectKeydown('Enter',13)") { _, _ in }
+        } else if string.isEmpty {
+            // Backspace on a non-empty proxy field (rare) — primary path is deleteBackward().
+            wv.evaluateJavaScript("window.ooInjectKeydown('Backspace',8)") { _, _ in }
+        } else {
+            let escaped = jsStringLiteral(string)
+            wv.evaluateJavaScript("window.ooInjectInput(\(escaped))") { _, _ in }
+        }
+        // Keep proxy field empty so Backspace always deletes one character at a time.
+        textField.text = ""
+        return false
+    }
+
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        guard textField === ooKeyboardProxy, let wv = webView else { return false }
+        wv.evaluateJavaScript("window.ooInjectKeydown('Enter',13)") { _, _ in }
+        return false
     }
 }

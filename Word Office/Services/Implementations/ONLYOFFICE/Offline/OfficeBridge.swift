@@ -61,6 +61,12 @@ enum OfficeBridgeMessage {
     case excelFontChange(fontName: String)
     /// Word selection changed; provides the font name at the cursor/selection.
     case wordFontChange(fontName: String)
+    /// PPT text selection changed; provides the font name of the selected text.
+    case pptFontChange(fontName: String)
+    /// JS requests that the native UITextField keyboard proxy become first responder.
+    case focusKeyboard
+    /// JS requests that the native UITextField keyboard proxy resign first responder (keyboard hide).
+    case blurKeyboard
     /// Unknown/unparseable message.
     case unknown(body: Any)
 }
@@ -190,6 +196,16 @@ final class OfficeBridge: NSObject, WKScriptMessageHandler {
         case "wordFont":
             let fontName = dict["font"] as? String ?? "Font"
             return .wordFontChange(fontName: fontName)
+
+        case "pptFont":
+            let fontName = dict["font"] as? String ?? "Font"
+            return .pptFontChange(fontName: fontName)
+
+        case "focusKeyboard":
+            return .focusKeyboard
+
+        case "blurKeyboard":
+            return .blurKeyboard
 
         case "debug":
             if let msg = dict["msg"] as? String {

@@ -34,6 +34,7 @@ struct RootView: View {
     @Environment(FeedbackTriggerService.self) private var feedbackTrigger
     @Environment(DSToastPresenter.self) private var toaster
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var libraryVM: LibraryViewModel?
     @State private var permissionVM: FolderPermissionViewModel?
     @State private var onboardingVM: OnboardingViewModel?
@@ -326,7 +327,7 @@ struct RootView: View {
                         showNotificationPermissionSheet = false
                     }
                 )
-                .presentationDetents([.large])
+                .presentationDetents([.height(520)])
                 .presentationDragIndicator(.visible)
             }
             // Tool ops post .documentsDidChange — use as first-action signal.
