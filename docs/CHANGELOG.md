@@ -6,6 +6,41 @@ Format tham khảo [Keep a Changelog](https://keepachangelog.com/). Entry mới 
 
 ---
 
+## [Unreleased] — 2026-09-26 (GoogleMobileAds build fix) — commit `950b2b0`
+
+### 🐛 Build failed: `No such module 'GoogleMobileAds'` / `Unable to resolve module dependency`
+**File:** `Word Office.xcodeproj/project.pbxproj`
+
+Package `swift-package-manager-google-mobile-ads` (13.10.0) was added to the project and resolved, but the **GoogleMobileAds product was never linked to the `Word Office` target** (missing from `packageProductDependencies` + Frameworks build phase). Added:
+- `PBXBuildFile` `AD0B1C2D3E4F506172839401` (GoogleMobileAds in Frameworks)
+- Frameworks phase entry for the app target
+- `XCSwiftPackageProductDependency` `AD0B1C2D3E4F506172839402` → package `8470FBB93066EB61002F44B8`
+
+**Root cause**: package added via *Add Package Dependencies* with "Add to Target" = None. Xcode 26 reports it as "Clang dependency scanning failure / Unable to resolve module dependency" instead of "No such module".
+
+---
+
+### 🐛 GoogleMobileAds 13.x API rename
+**File:** `Services/AppOpenAdService.swift`
+
+`AppOpenAd.load(withAdUnitID:request:)` → `AppOpenAd.load(with:request:)`.
+
+---
+
+### 🐛 PaywallView type mismatch
+**File:** `Views/Paywall/PaywallView.swift`
+
+`DSPrimaryButton.title` is `LocalizedStringKey`; ternary mixed `vm.ctaLabel` (`String`) with literals → wrapped as `LocalizedStringKey(vm.ctaLabel)`. Visible copy unchanged.
+
+---
+
+### ⚠️ Note
+At 02:34 an accidental Xcode "Discard All Changes" (`git reset` to HEAD) wiped these fixes once — reapplied and committed so they can't be lost again. The second machine (`/Users/admin/Desktop/Word Edit/...`) still has the unfixed copy — sync via `git push origin main` here + `git pull` there (remotes: `origin` = vanvu09/word-office, `upstream` = vanvn-cmyk/word-office).
+
+`xcodebuild` iOS Simulator: **BUILD SUCCEEDED** (not yet run on simulator).
+
+---
+
 ## [Unreleased] — 2026-09-25h (Keyboard lifecycle + PPT flicker + save toast + blank spreadsheet)
 
 ### 🐛 Keyboard shows at Library/home screen after closing editor
