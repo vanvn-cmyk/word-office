@@ -70,6 +70,7 @@ struct OfficeEditorView: View {
     @State private var showTextBoxSheet     = false
     @State private var pendingTextBox: String? = nil
     @State private var pptZoomReady = false
+    @State private var pptSlideshowMode = false
 
     private var fileKind: EditorTopToolbar.FileKind {
         EditorTopToolbar.FileKind(ext: ref.url.pathExtension)
@@ -85,14 +86,16 @@ struct OfficeEditorView: View {
                 )
             } else {
                 VStack(spacing: 0) {
-                    EditorTopToolbar(
-                        kind: fileKind,
-                        slideInfo: fileKind == .ppt ? slideProgress : nil,
-                        excelFontName: currentExcelFont,
-                        wordFontName: currentWordFont,
-                        pptFontName: currentPPTFont,
-                        onCommand: handleCommand
-                    )
+                    if !pptSlideshowMode {
+                        EditorTopToolbar(
+                            kind: fileKind,
+                            slideInfo: fileKind == .ppt ? slideProgress : nil,
+                            excelFontName: currentExcelFont,
+                            wordFontName: currentWordFont,
+                            pptFontName: currentPPTFont,
+                            onCommand: handleCommand
+                        )
+                    }
 
                     ZStack {
                         _OfficeWebView(
@@ -168,10 +171,16 @@ struct OfficeEditorView: View {
                                     }
                                 }
                         }
+                        if pptSlideshowMode {
+                            pptSlideshowOverlay
+                        }
                     }
                     .animation(.easeOut(duration: 0.35), value: pptZoomReady)
+                    .animation(.easeInOut(duration: 0.25), value: pptSlideshowMode)
 
-                    bottomStrip
+                    if !pptSlideshowMode {
+                        bottomStrip
+                    }
 
                 }
                 // Native photo picker — triggered by "insert-image" command
@@ -360,7 +369,7 @@ struct OfficeEditorView: View {
                     SlideTransitionSheet { type in
                         editorVC?.execEditorCommand("ppt-apply-transition:\(type)")
                     }
-                    .presentationDetents([.height(420)])
+                    .presentationDetents([.height(320)])
                     .presentationDragIndicator(.visible)
                     .presentationBackground(Color.dsBackgroundElevated)
                 }
@@ -370,6 +379,7 @@ struct OfficeEditorView: View {
         .navigationTitle(fileKind == .word ? "" : "")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { editorNavPill }
+        .toolbar(pptSlideshowMode ? .hidden : .visible, for: .navigationBar)
         .task { await checkNetworkOnFirstLaunch() }
         .onReceive(NotificationCenter.default.publisher(for: .editorSaveRequested)) { _ in
             editorVC?.execEditorCommand("save")
@@ -422,6 +432,8 @@ struct OfficeEditorView: View {
         case "word-find-replace":   showFindReplaceSheet   = true
         case "word-font-picker", "excel-font-picker", "ppt-font-picker": showFontPickerSheet = true
         case "ppt-transition-picker": showTransitionSheet = true
+        case "ppt-present":
+            withAnimation(.easeInOut(duration: 0.25)) { pptSlideshowMode.toggle() }
         case "print":               editorVC?.printDocument()
         default:                    editorVC?.execEditorCommand(cmd)
         }
@@ -499,6 +511,47 @@ struct OfficeEditorView: View {
         } else if fileKind == .excel {
             sheetStrip
         }
+    }
+
+    // MARK: - PPT slideshow overlay
+
+    private var pptSlideshowOverlay: some View {
+        ZStack {
+            // Left half → previous slide; right half → next slide
+            HStack(spacing: 0) {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { editorVC?.execEditorCommand("slide-prev") }
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { editorVC?.execEditorCommand("slide-next") }
+            }
+            // Exit button (top-right)
+            VStack {
+                HStack {
+                    Spacer()
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.25)) { pptSlideshowMode = false }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 30))
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(Color.white, Color.black.opacity(0.55))
+                    }
+                    .padding(14)
+                }
+                Spacer()
+                // Slide counter
+                Text("\(slideProgress.current) / \(slideProgress.total)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+                    .background(Color.black.opacity(0.45), in: Capsule())
+                    .padding(.bottom, 16)
+            }
+        }
+        .ignoresSafeArea()
     }
 
     // MARK: - PPT slide strip
@@ -924,8 +977,7 @@ private struct SlideTransitionSheet: View {
                 .font(DSFont.caption)
                 .foregroundStyle(Color.dsTextTertiary)
                 .padding(.top, DSSpacing.md)
-
-            Spacer(minLength: 0)
+                .padding(.bottom, DSSpacing.md)
         }
     }
 }

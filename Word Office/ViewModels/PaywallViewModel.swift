@@ -1,122 +1,133 @@
 import Foundation
 import Observation
+import StoreKit
 
-/// Owns paywall presentation state — offer catalogue, current selection,
-/// purchase / restore progress. StoreKit is intentionally NOT wired here
-/// yet; `PaywallView` calls into these stubs so the UI can be exercised
-/// while the real product IDs and receipt-validation service arrive
-/// later.
-///
-/// The catalogue is a static two-tier stub (Monthly / Yearly) matching
-/// the MVP paywall variant `iap_v1` in `product-strategy-master.md` — a
-/// single tier with a highlighted annual save. When the remote-config
-/// paywall engine ships (variants `iap_v1`…`iap_v7`), replace
-/// `Self.defaultOffers` with a call into the config service; the view
-/// binds to `offers` unchanged.
+private let kWeeklyID = "com.docx.officeeditor.pdfeditor.week"
+private let kYearlyID  = "com.docx.officeeditor.pdfeditor.year"
+
 @Observable
 @MainActor
 final class PaywallViewModel {
-    /// One purchasable product surfaced on the paywall. Kept intentionally
-    /// small — display-only fields plus a stable `id` that later maps to
-    /// the App Store `Product.id`. No `Product` reference so the model
-    /// stays free of StoreKit imports until wiring day.
+
     struct Offer: Identifiable, Hashable, Sendable {
-        let id: String
+        let id: String          // matches App Store product ID
         let title: String
-        let price: String
         let period: String
-        let secondaryLine: String?
-        let highlight: String?
-        let isRecommended: Bool
+        let trialLabel: String? // non-nil when offer has a free trial
     }
 
-    /// Terminal states of a purchase / restore attempt so the view can
-    /// switch between the CTA button, an in-flight spinner, and a
-    /// dismissable success / error state without owning the strings.
     enum Status: Sendable, Equatable {
         case idle
+        case loading
         case purchasing
         case restoring
         case succeeded
         case failed(String)
     }
 
-    let offers: [Offer]
-    var selectedOfferID: String
+    // MARK: State
+
+    let offers: [Offer] = [
+        Offer(id: kWeeklyID, title: "Weekly",  period: "Then billed weekly",    trialLabel: "3-DAY FREE"),
+        Offer(id: kYearlyID,  title: "Yearly",  period: "Billed once a year",    trialLabel: nil),
+    ]
+
+    var selectedOfferID: String = kYearlyID
     private(set) var status: Status = .idle
 
-    init(offers: [Offer]? = nil) {
-        // `Self.defaultOffers` can't be used as a default arg here —
-        // Swift disallows covariant `Self` in default expressions AND
-        // `defaultOffers` is `@MainActor`-isolated because the class
-        // is (Swift 6 strict-concurrency), so it can't be read from a
-        // nonisolated default expression. Fall back inside the body.
-        let resolved = offers ?? PaywallViewModel.defaultOffers
-        self.offers = resolved
-        // Recommended offer is preselected — matches the "yearly-first"
-        // conversion pattern the strategy doc calls out (Persona anchor
-        // 35–44 skews toward committed annual plans over weekly hooks).
-        self.selectedOfferID = resolved.first(where: { $0.isRecommended })?.id
-            ?? resolved.first?.id
-            ?? ""
-    }
+    /// Fetched StoreKit products keyed by product ID.
+    private var storeProducts: [String: Product] = [:]
 
-    /// Selected offer resolved back to the model — nil when the catalogue
-    /// is empty, which the view treats as "no offers available".
+    // MARK: - Derived
+
     var selectedOffer: Offer? {
         offers.first(where: { $0.id == selectedOfferID })
     }
 
-    /// CTA label switches on both `status` and whether the selected offer
-    /// carries a trial hint; keeping it in the VM stops the view from
-    /// duplicating the switch every time the CTA renders.
+    var isBusy: Bool {
+        status == .purchasing || status == .restoring || status == .loading
+    }
+
     var ctaLabel: String {
         switch status {
-        case .purchasing:   return "Processing…"
-        case .restoring:    return "Restoring…"
-        case .succeeded:    return "Welcome to Premium"
-        case .failed:       return "Try Again"
+        case .loading:    return "Loading…"
+        case .purchasing: return "Processing…"
+        case .restoring:  return "Restoring…"
+        case .succeeded:  return "Welcome to Premium 🎉"
+        case .failed:     return "Try Again"
         case .idle:
-            guard let offer = selectedOffer else { return "Continue" }
-            return offer.secondaryLine?.lowercased().contains("free") == true
-                ? "Start Free Trial"
-                : "Continue"
+            return selectedOffer?.trialLabel != nil ? "Start Free Trial" : "Get Yearly Access"
         }
     }
 
-    var isBusy: Bool {
-        if case .purchasing = status { return true }
-        if case .restoring = status { return true }
-        return false
+    /// Returns the localised display price for `offerID`, or "—" while loading.
+    func displayPrice(for offerID: String) -> String {
+        storeProducts[offerID]?.displayPrice ?? "—"
     }
 
-    // MARK: - Actions
+    // MARK: - Load products
 
-    /// Purchase the currently selected offer.
-    /// TODO(paywall): swap the stub delay + hardcoded success for a real
-    /// StoreKit 2 `product.purchase()` call once product IDs are
-    /// provisioned in App Store Connect.
+    func loadProducts() async {
+        guard storeProducts.isEmpty else { return }
+        status = .loading
+        do {
+            let products = try await Product.products(for: [kWeeklyID, kYearlyID])
+            for product in products { storeProducts[product.id] = product }
+        } catch {
+            print("[Paywall] Product fetch failed: \(error)")
+        }
+        status = .idle
+    }
+
+    // MARK: - Purchase
+
     func purchase() async {
-        guard let offer = selectedOffer, !isBusy else { return }
+        guard let offer = selectedOffer,
+              let product = storeProducts[offer.id],
+              !isBusy else { return }
+
         status = .purchasing
         do {
-            try await Task.sleep(for: .milliseconds(700))
-            _ = offer
-            status = .succeeded
+            let result = try await product.purchase()
+            switch result {
+            case .success(let verification):
+                switch verification {
+                case .verified(let transaction):
+                    await transaction.finish()
+                    UserDefaults.standard.set(true, forKey: "user.isPremium")
+                    status = .succeeded
+                case .unverified(_, let error):
+                    status = .failed("Verification failed: \(error.localizedDescription)")
+                }
+            case .pending:
+                status = .idle
+            case .userCancelled:
+                status = .idle
+            @unknown default:
+                status = .idle
+            }
         } catch {
             status = .failed(error.localizedDescription)
         }
     }
 
-    /// Restore previously purchased entitlements.
-    /// TODO(paywall): wire `AppStore.sync()` + a receipt-refresh pass
-    /// once the entitlement store lands.
+    // MARK: - Restore
+
     func restore() async {
         guard !isBusy else { return }
         status = .restoring
         do {
-            try await Task.sleep(for: .milliseconds(500))
-            status = .idle
+            try await AppStore.sync()
+            var hasPremium = false
+            for await result in Transaction.currentEntitlements {
+                if case .verified(let tx) = result,
+                   [kWeeklyID, kYearlyID].contains(tx.productID) {
+                    await tx.finish()
+                    hasPremium = true
+                }
+            }
+            UserDefaults.standard.set(hasPremium, forKey: "user.isPremium")
+            status = hasPremium ? .succeeded : .idle
         } catch {
             status = .failed(error.localizedDescription)
         }
@@ -125,22 +136,4 @@ final class PaywallViewModel {
     func clearError() {
         if case .failed = status { status = .idle }
     }
-
-    // MARK: - Catalogue stub
-
-    /// Placeholder offers rendered until the remote-config paywall
-    /// engine (strategy doc row 1 — seven `iap_v*` variants) ships.
-    /// TODO(paywall): replace with values pulled from `IKRemoteConfig`
-    /// (`iap_product_id_config`), keyed on the active variant.
-    static let defaultOffers: [Offer] = [
-        Offer(
-            id: "com.wordoffice.premium.monthly",
-            title: "Monthly",
-            price: "$4.99",
-            period: "per month",
-            secondaryLine: "Cancel anytime",
-            highlight: nil,
-            isRecommended: true
-        )
-    ]
 }

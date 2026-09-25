@@ -1,4 +1,5 @@
 import FirebaseCore
+import GoogleMobileAds
 import UIKit
 
 final class AppDelegate: NSObject, UIApplicationDelegate {
@@ -7,6 +8,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         FirebaseApp.configure()
+        MobileAds.shared.start(completionHandler: nil)
         CrashlyticsService.setCrashCollectionEnabled(true)
         Task { await RemoteConfigService.shared.fetchAndActivate() }
         return true

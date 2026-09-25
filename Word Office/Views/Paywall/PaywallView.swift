@@ -26,10 +26,9 @@ struct PaywallView: View {
     /// for the 3-second close button.
     var onContinueForFree: (() -> Void)? = nil
 
-    // Weekly (the trial-eligible plan) selected by default so the
-    // low-commitment, trial-led path is what most users land on first —
-    // matches the paywall pattern for trial-led products.
-    @State private var selectedPlan: Plan = .weekly
+    @State private var vm = PaywallViewModel()
+    // Yearly selected by default — higher value, most apps highlight the annual plan.
+    @State private var selectedPlan: Plan = .yearly
 
     /// Close X visibility. Starts `false` on every fresh present so the
     /// user reads the hero for a beat before an exit affordance appears
@@ -64,30 +63,24 @@ struct PaywallView: View {
 
     private enum Plan: String, CaseIterable, Identifiable {
         case weekly = "Weekly"
-        case monthly = "Monthly"
+        case yearly = "Yearly"
         var id: String { rawValue }
 
-        /// 3-day trial only applies to the weekly entry plan — monthly is
-        /// the no-trial, higher-commitment option. Shortened from
-        /// "3-DAY FREE TRIAL" — "TRIAL" was redundant with `periodCaption`
-        /// spelling out the same trial right below it in the row; the
-        /// badge only needs to flag the offer, not fully explain it.
+        var productID: String {
+            switch self {
+            case .weekly: "com.docx.officeeditor.pdfeditor.week"
+            case .yearly: "com.docx.officeeditor.pdfeditor.year"
+            }
+        }
+
         var trialBadgeText: String? {
             self == .weekly ? "3-DAY FREE" : nil
         }
 
-        /// Secondary line under the plan title — the price itself is a
-        /// skeleton (`PriceSkeleton`, no real StoreKit product yet), so
-        /// this is the only place the row states billing period at all.
-        /// Weekly's copy leads with "Then" (not "3-day trial, then...")
-        /// — the corner badge (`trialBadgeText`) already says there's a
-        /// trial; repeating "3-day trial" here just restated the badge
-        /// instead of adding the one new fact this line is for: what
-        /// happens after it ends.
         var periodCaption: String {
             switch self {
             case .weekly: "Then billed weekly"
-            case .monthly: "Billed monthly"
+            case .yearly: "Billed once a year"
             }
         }
     }
@@ -125,6 +118,12 @@ struct PaywallView: View {
             try? await Task.sleep(for: showCloseDelay)
             withAnimation(reduceMotion ? nil : .easeIn(duration: 0.3)) {
                 showCloseButton = true
+            }
+        }
+        .task { await vm.loadProducts() }
+        .onChange(of: vm.status) { _, newStatus in
+            if case .succeeded = newStatus {
+                if let onContinueForFree { onContinueForFree() } else { dismiss() }
             }
         }
     }
@@ -286,10 +285,11 @@ struct PaywallView: View {
             // CTA copy names the actual next action — Weekly has a
             // trial to start, Monthly doesn't, so "Continue" (generic)
             // only fits the no-trial path.
-            DSPrimaryButton(title: selectedPlan == .weekly ? "Start Trial Now" : "Continue") {
-                // TODO(paywall): no destination yet — wire once real
-                // StoreKit products exist for `selectedPlan`.
+            DSPrimaryButton(title: vm.isBusy ? vm.ctaLabel : (selectedPlan == .weekly ? "Start Trial Now" : "Get Yearly Access")) {
+                vm.selectedOfferID = selectedPlan.productID
+                Task { await vm.purchase() }
             }
+            .disabled(vm.isBusy)
             // Brand-tinted glow — the button reads as the "hero
             // action" surface below the plan picker. Radius intentionally
             // wide (18pt) so the glow feels like presence, not a
@@ -302,7 +302,7 @@ struct PaywallView: View {
                     .font(DSFont.caption)
                 // Weekly carries a trial, so the trust line leads with
                 // that promise; Monthly has no trial to mention.
-                Text(selectedPlan == .weekly ? "3-day free trial, cancel anytime" : "Cancel anytime")
+                Text(selectedPlan == .weekly ? "3-day free trial, cancel anytime" : "Cancel anytime · Renews annually")
                     .font(DSFont.caption)
             }
             .foregroundStyle(Color.dsTextTertiary)
@@ -362,6 +362,7 @@ struct PaywallView: View {
                 PaywallPlanRow(
                     title: plan.rawValue,
                     caption: plan.periodCaption,
+                    price: vm.displayPrice(for: plan.productID),
                     badgeText: plan.trialBadgeText,
                     isSelected: selectedPlan == plan
                 ) {
@@ -419,8 +420,7 @@ struct PaywallView: View {
     }
 
     private func restorePurchases() {
-        // TODO(paywall): no destination yet — wire to `AppStore.sync()`
-        // (StoreKit 2) once real products exist.
+        Task { await vm.restore() }
     }
 }
 
@@ -488,6 +488,7 @@ private struct HeroBenefitRow: View {
 private struct PaywallPlanRow: View {
     let title: String
     let caption: String
+    let price: String
     let badgeText: String?
     let isSelected: Bool
     let action: () -> Void
@@ -510,13 +511,13 @@ private struct PaywallPlanRow: View {
 
                 Spacer(minLength: DSSpacing.sm)
 
-                // No real price yet (no StoreKit product wired — see
-                // `restorePurchases` TODO) — a skeleton bar instead of a
-                // literal "$X.XX" placeholder, since that string reads
-                // as a real (if oddly formatted) price rather than
-                // "loading". Swap for `Text(product.displayPrice)` once
-                // real products exist.
-                PriceSkeleton()
+                if price == "—" {
+                    PriceSkeleton()
+                } else {
+                    Text(price)
+                        .font(DSFont.headline)
+                        .foregroundStyle(Color.dsTextPrimary)
+                }
             }
             .padding(DSSpacing.md)
             .background(isSelected ? Color.dsBrandPrimarySubtle : Color.dsSurfacePrimary)
@@ -551,7 +552,8 @@ private struct PaywallPlanRow: View {
     }
 
     private var accessibilityLabel: String {
-        var parts = [title, caption, "price loading"]
+        let priceLabel = price == "—" ? "price loading" : price
+        var parts = [title, caption, priceLabel]
         if let badgeText { parts.append(badgeText) }
         return parts.joined(separator: ", ")
     }

@@ -118,6 +118,8 @@
     let _innerWin = null;          // inner iframe contentWindow, saved in onAppReady()
     let _currentDocType = null;    // "word" | "cell" | "slide" — set in createEditor()
     let _userZoomOverride = false; // true after user manually zooms PPT — suppresses further zoomFitToPage calls
+    let _pptNotesVisible  = false; // tracks notes panel state for asc_ShowNotes(bool) toggle
+    let _pptInSorterMode  = false; // tracks whether slide sorter is active (mode 2 vs 0)
 
     // Show the "requires internet" hint after 5 s if the editor hasn't become
     // ready yet — the CDN sdkjs download is what takes time on first launch.
@@ -4662,20 +4664,13 @@
           if (cmd === 'zoom-in' || cmd === 'zoom-out') {
             var _zIn = cmd === 'zoom-in';
             // PPT: mark user-initiated zoom so zoomFitToPage() re-fits are suppressed.
-            // Use asc_setZoom(current ± 10) — more stable than zoomIn()/zoomOut() which can
-            // conflict with OO's fit-to-page mode and cause blank canvas on step back.
+            // SDK exports Zoom_In / Zoom_Out (capital, underscore); zoomIn/zoomOut don't exist.
             if (_currentDocType === 'slide') {
               _userZoomOverride = true;
-              var _zAPI = _ed.asc_setZoom || _ed.asc_SetZoom;
-              if (typeof _zAPI === 'function') {
-                var _curZ2 = (typeof _ed.asc_getZoom === 'function' ? _ed.asc_getZoom() : null)
-                           || (typeof _ed.asc_GetZoom === 'function' ? _ed.asc_GetZoom() : null)
-                           || 75;
-                var _newZ2 = Math.max(25, Math.min(400, _curZ2 + (_zIn ? 10 : -10)));
-                try { _zAPI.call(_ed, _newZ2); return; } catch(_) {}
-              }
-              if (_zIn && typeof _ed.zoomIn  === 'function') { try { _ed.zoomIn();  return; } catch(_) {} }
-              if (!_zIn && typeof _ed.zoomOut === 'function') { try { _ed.zoomOut(); return; } catch(_) {} }
+              if (_zIn  && typeof _ed.Zoom_In  === 'function') { try { _ed.Zoom_In();  return; } catch(_) {} }
+              if (!_zIn && typeof _ed.Zoom_Out === 'function') { try { _ed.Zoom_Out(); return; } catch(_) {} }
+              if (_zIn  && typeof _ed.zoomIn   === 'function') { try { _ed.zoomIn();   return; } catch(_) {} }
+              if (!_zIn && typeof _ed.zoomOut  === 'function') { try { _ed.zoomOut();  return; } catch(_) {} }
             }
             // Try OO's zoom buttons first (off-screen toolbar, always clickable)
             if (_clickOOBtn(_zIn
@@ -5884,13 +5879,13 @@
 
         // ppt-notes-toggle — show/hide OO's built-in speaker notes panel
         if (cmd === 'ppt-notes-toggle') {
+          _pptNotesVisible = !_pptNotesVisible;
           var _ntEd = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
           if (_ntEd) {
-            if      (typeof _ntEd.asc_toggleNotes        === 'function') { try { _ntEd.asc_toggleNotes();        return; } catch(_) {} }
-            else if (typeof _ntEd.asc_ShowNotes          === 'function') { try { _ntEd.asc_ShowNotes();          return; } catch(_) {} }
-            else if (typeof _ntEd.asc_showNotesPanel     === 'function') { try { _ntEd.asc_showNotesPanel();     return; } catch(_) {} }
-            else if (typeof _ntEd.asc_toggleNotesPanel   === 'function') { try { _ntEd.asc_toggleNotesPanel();   return; } catch(_) {} }
-            else if (typeof _ntEd.asc_SetNotesVisible    === 'function') { try { _ntEd.asc_SetNotesVisible(true); return; } catch(_) {} }
+            if      (typeof _ntEd.asc_toggleNotes     === 'function') { try { _ntEd.asc_toggleNotes();                    return; } catch(_) {} }
+            else if (typeof _ntEd.asc_ShowNotes       === 'function') { try { _ntEd.asc_ShowNotes(_pptNotesVisible);      return; } catch(_) {} }
+            else if (typeof _ntEd.asc_showNotesPanel  === 'function') { try { _ntEd.asc_showNotesPanel(_pptNotesVisible); return; } catch(_) {} }
+            else if (typeof _ntEd.asc_SetNotesVisible === 'function') { try { _ntEd.asc_SetNotesVisible(_pptNotesVisible); return; } catch(_) {} }
           }
           // Fallback: click OO's Notes button in bottom bar, View menu, or status bar
           if (_clickOOBtn(['notes','speaker notes','edit notes','show notes','notes panel','заметки'])) return;
@@ -5902,17 +5897,14 @@
           return;
         }
 
-        // ppt-view-sorter — switch to OO's slide sorter view.
-        // Uses asc_changePresentationViewMode with the sorter constant (c_oAscPresentationViewMode.sorter).
+        // ppt-view-sorter — toggle OO's slide sorter view (mode 2) vs normal edit (mode 0).
+        // c_oAscPresentationViewMode = {qCa:0 normal, gOe:1, vfj:2 sorter}
         if (cmd === 'ppt-view-sorter') {
+          _pptInSorterMode = !_pptInSorterMode;
           var _vsEd = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
           if (_vsEd && typeof _vsEd.asc_changePresentationViewMode === 'function') {
             try {
-              var _vsMode = _innerWin.Asc.c_oAscPresentationViewMode;
-              var _vsSorter = (_vsMode && _vsMode.sorter !== undefined) ? _vsMode.sorter
-                            : (_innerWin.Asc.eHc && _innerWin.Asc.eHc.vfj !== undefined) ? _innerWin.Asc.eHc.vfj
-                            : 2; // fallback enum value for sorter
-              _vsEd.asc_changePresentationViewMode(_vsSorter);
+              _vsEd.asc_changePresentationViewMode(_pptInSorterMode ? 2 : 0);
               return;
             } catch(_) {}
           }

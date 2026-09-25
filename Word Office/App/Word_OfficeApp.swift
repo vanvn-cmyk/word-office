@@ -26,6 +26,7 @@ struct Word_OfficeApp: App {
     @State private var toastPresenter = DSToastPresenter()
     @State private var usageTracker = AppUsageTracker()
     @State private var feedbackTrigger = FeedbackTriggerService()
+    @State private var adService = AppOpenAdService()
 
     @Environment(\.scenePhase) private var scenePhase
     @State private var isShowingSplash = true
@@ -64,8 +65,10 @@ struct Word_OfficeApp: App {
                 // `DependencyContainer`/`RootView`'s own permission check are fast
                 // enough that gating on them would make the splash flash by
                 // inconsistently). Purely a brand beat, per the "basic splash" ask.
+                adService.start()
                 try? await Task.sleep(for: .seconds(1.2))
                 withAnimation(.easeOut(duration: 0.3)) { isShowingSplash = false }
+                showAdIfPossible()
             }
         }
     }
@@ -93,9 +96,25 @@ struct Word_OfficeApp: App {
             usageTracker.didBecomeActive()
             // User opened the app — remove any pending re-engagement notifications.
             LocalNotificationScheduler.shared.cancelReEngagement()
+            // Show App Open Ad on resume (skip if splash is still visible — ad
+            // fires after splash via the .task block on first launch).
+            if !isShowingSplash { showAdIfPossible() }
 
         default:
             break
         }
+    }
+
+    /// Finds the top-most `rootViewController` and asks `adService` to show.
+    /// No-op if the editor is open, premium, within cooldown, or ad not loaded.
+    private func showAdIfPossible() {
+        guard sessionStore.currentDocument == nil else { return }
+        guard let root = UIApplication.shared
+            .connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .flatMap({ $0.windows })
+            .first(where: { $0.isKeyWindow })?.rootViewController
+        else { return }
+        adService.showIfReady(from: root)
     }
 }

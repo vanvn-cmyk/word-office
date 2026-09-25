@@ -586,8 +586,6 @@ struct EditorTopToolbar: View {
             }
             if pptTab == .home {
                 vDivider()
-                iconBtn("square.and.arrow.down", label: "Save", cmd: "save")
-                vDivider()
                 nativeColorBtn(icon: "character",        label: "Font color",
                                color: $pptFontColor, cmd: "font-color")
                 nativeColorBtn(icon: "paintbucket.fill", label: "Fill color",

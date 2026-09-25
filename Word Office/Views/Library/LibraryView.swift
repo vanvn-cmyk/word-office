@@ -1014,8 +1014,8 @@ struct LibraryView: View {
                 }
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets(top: DSSpacing.xs, leading: DSSpacing.md,
-                                          bottom: DSSpacing.xxs, trailing: DSSpacing.md))
+                .listRowInsets(EdgeInsets(top: DSSpacing.xs, leading: DSSpacing.xl,
+                                          bottom: DSSpacing.xxs, trailing: DSSpacing.xl))
             }
 
             Section {
@@ -1025,8 +1025,8 @@ struct LibraryView: View {
                 ) {
                     viewModeToggleButton
                 }
-                .listRowInsets(EdgeInsets(top: DSSpacing.xs, leading: DSSpacing.md,
-                                          bottom: DSSpacing.md, trailing: DSSpacing.md))
+                .listRowInsets(EdgeInsets(top: DSSpacing.xs, leading: DSSpacing.xl,
+                                          bottom: DSSpacing.md, trailing: DSSpacing.xl))
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
             }
@@ -1183,8 +1183,8 @@ struct LibraryView: View {
                 }
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets(top: DSSpacing.xs, leading: DSSpacing.md,
-                                          bottom: DSSpacing.xxs, trailing: DSSpacing.md))
+                .listRowInsets(EdgeInsets(top: DSSpacing.xs, leading: DSSpacing.xl,
+                                          bottom: DSSpacing.xxs, trailing: DSSpacing.xl))
             }
 
             // ── Row 2: search + view-mode toggle (no filter button) ──
@@ -1196,8 +1196,8 @@ struct LibraryView: View {
                 ) {
                     viewModeToggleButton
                 }
-                .listRowInsets(EdgeInsets(top: DSSpacing.xs, leading: DSSpacing.md,
-                                          bottom: DSSpacing.md, trailing: DSSpacing.md))
+                .listRowInsets(EdgeInsets(top: DSSpacing.xs, leading: DSSpacing.xl,
+                                          bottom: DSSpacing.md, trailing: DSSpacing.xl))
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
             }
@@ -3224,9 +3224,9 @@ private struct TimelineRailShimmer: View {
             if !reduceMotion {
                 LinearGradient(
                     stops: [
-                        .init(color: .clear,               location: max(0, phase - 0.12)),
+                        .init(color: .clear,               location: max(0, min(1, phase - 0.12))),
                         .init(color: .white.opacity(0.55),  location: max(0, min(1, phase))),
-                        .init(color: .clear,               location: min(1, phase + 0.12)),
+                        .init(color: .clear,               location: max(0, min(1, phase + 0.12))),
                     ],
                     startPoint: .top,
                     endPoint: .bottom

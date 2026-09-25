@@ -217,6 +217,7 @@
 				13BE982F304596A2007D11B1 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
 				FC438DB530412DCD00FC4CB1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
 				84909D5F3063988A006A9D3F /* XCRemoteSwiftPackageReference "lottie-spm" */,
+				8470FBB93066EB61002F44B8 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 84659568303D96BC00A6CAAC /* Products */;
@@ -570,6 +571,14 @@
 			requirement = {
 				kind = upToNextMajorVersion;
 				minimumVersion = 0.9.20;
+			};
+		};
+		8470FBB93066EB61002F44B8 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/googleads/swift-package-manager-google-mobile-ads";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 13.10.0;
 			};
 		};
 		84909D5F3063988A006A9D3F /* XCRemoteSwiftPackageReference "lottie-spm" */ = {
