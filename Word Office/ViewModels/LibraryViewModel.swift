@@ -315,6 +315,7 @@ final class LibraryViewModel {
         guard generation == loadGeneration else { return }
         store.folderPermissionState = .granted
         store.hasExternalFolder = hasExternalBookmark
+        store.watchedFolderName = hasExternalBookmark ? folderURL.lastPathComponent : nil
 
         // Two sources merged by documentID (Phase0-Implementation-Logic-v2.md §10.1):
         // the granted external folder, and files copied into the sandbox by
@@ -342,7 +343,13 @@ final class LibraryViewModel {
         do {
             let granted = try await joinWithMetadata(grantedScanned, folderURL: folderURL, now: now)
             let sandbox = try await joinWithMetadata(sandboxScanned, folderURL: documentsURL, now: now)
-            let merged = mergeSecondSource(sandbox, into: granted)
+            // When user has a real external folder, exclude seeded sample files from the
+            // sandbox list so they don't appear alongside the user's real documents.
+            let sampleNames = Set(SampleFileSeeder.sampleFiles.map(\.filename))
+            let sandboxFiltered = hasExternalBookmark
+                ? sandbox.filter { !sampleNames.contains($0.document.url.lastPathComponent) }
+                : sandbox
+            let merged = mergeSecondSource(sandboxFiltered, into: granted)
             let sorted = try await sortByDueReminders(merged, at: now)
             guard generation == loadGeneration else { return }
             store.replaceAll(sorted)
@@ -375,10 +382,24 @@ final class LibraryViewModel {
     }
 
     /// Change status manually (swipe / menu). Never auto-inferred from behaviour
-    /// (Library-Architecture.md §7 trap #2).
+    /// (Library-Architecture.md §7 trap #2). Clears `isContinueWorking` so the
+    /// file drops out of the "Continue Working" section when the user explicitly
+    /// re-tags it from the context menu / kebab.
     func setStatus(_ status: DocumentStatus, for entryID: String) async {
         guard var entry = store.entries.first(where: { $0.id == entryID }) else { return }
         entry.metadata.status = status
+        entry.metadata.isContinueWorking = false
+        entry.metadata.lastModifiedAt = Date()
+        await persist(entry)
+    }
+
+    /// Called from `RootView.onDone` when the user closes the editor.
+    /// Sets status AND conditionally raises `isContinueWorking` so the file
+    /// floats to the top "Continue Working" section on Home.
+    func setStatusFromEditor(_ status: DocumentStatus, for entryID: String) async {
+        guard var entry = store.entries.first(where: { $0.id == entryID }) else { return }
+        entry.metadata.status = status
+        entry.metadata.isContinueWorking = (status == .reviewed)
         entry.metadata.lastModifiedAt = Date()
         await persist(entry)
     }
@@ -453,6 +474,7 @@ final class LibraryViewModel {
     func recordOpen(_ entryID: String) async {
         guard var entry = store.entries.first(where: { $0.id == entryID }) else { return }
         entry.metadata.lastOpenedAt = Date()
+        entry.metadata.isContinueWorking = false
         switch entry.metadata.status {
         case .getStarted, .draft: entry.metadata.status = .reviewed
         default: break
@@ -785,7 +807,7 @@ final class LibraryViewModel {
         importBatchImportedCount = 0
         importBatchSkippedCount = 0
         importBatchFailureCount = 0
-        pendingImportQueue = urls
+        pendingImportQueue = urls.filter { $0.pathExtension.lowercased() != "zip" }
         await processNextPendingImport()
     }
 

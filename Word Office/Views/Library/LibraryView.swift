@@ -33,6 +33,7 @@ struct LibraryView: View {
     @Bindable var viewModel: LibraryViewModel
     @Environment(LibraryStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(DSToastPresenter.self) private var toaster
 
     // Search focus state moved into `LibrarySearchAndActionsBar` — see
@@ -55,6 +56,7 @@ struct LibraryView: View {
 
     @AppStorage("libraryViewMode") private var viewMode: LibraryViewMode = .list
     @AppStorage("library.openDocumentTipSeen") private var tipSeen: Bool = false
+    @AppStorage("library.foldersTipSeen") private var foldersTipSeen: Bool = false
     @State private var tipPresented: Bool = false
     /// Measured size of the rendered TipCallout. Height used to place the
     /// bubble above the section header; width used to center it over the card.
@@ -98,20 +100,14 @@ struct LibraryView: View {
     /// path. Same shape as `PreviewConfirmSheet.didCommit`.
     @State private var didPickImportResolution = false
 
-    /// Filter popover visibility — `.popover(isPresented:)
-    /// .presentationCompactAdaptation(.popover)` (iOS 16.4+) forces a
-    /// true anchored popover on iPhone instead of the default sheet
-    /// fallback, so the filter list appears directly below the icon
-    /// with an arrow pointing back to it (accepted trade-off: reads
-    /// slightly iPad-styled on iPhone, but avoids the Menu SwiftUI
-    /// heuristic that was covering the icon when the content grew).
-    @State private var isFilterPopoverPresented = false
     /// Presented from the crown `PremiumButton` in the `titleRow`.
     /// TODO(paywall): route through a shared `PaywallCoordinator` if the
     /// crown ever fires from more than these two screens.
     @State private var isPaywallPresented = false
     @State private var badgePulse = false
     @State private var navPath = NavigationPath()
+    /// Set by the mascot tap → scrolls to that section and shows a highlight ring.
+    @State private var highlightedStatus: DocumentStatus? = nil
     /// Per-session search text scoped to the "View all" destination —
     /// cleared automatically when the user pops back.
     @State private var allFilesSearchInput: String = ""
@@ -121,6 +117,19 @@ struct LibraryView: View {
     /// setting `isLoading = true`.
     @State private var hasInitialLoadStarted = false
     @State private var cardPreviewWidth: CGFloat = 320
+    // Files / Folders tab switcher
+    @State private var libraryTab: LibraryTab = .files
+    /// Non-nil while the Files tab is filtered to one folder's contents.
+    @State private var activeFolderID: UUID? = nil
+    /// Entry pending folder assignment — drives `AssignFolderSheet`.
+    @State private var folderAssignEntryID: String? = nil
+    @State private var folderSearchText: String = ""
+    @State private var folderSortOrder: FolderSortOrder = .nameAsc
+    @State private var isSearchExpanded: Bool = false
+    @State private var isFolderSearchExpanded: Bool = false
+    @State private var isTypeFilterSheetPresented: Bool = false
+    @State private var isFileFilterSheetPresented: Bool = false
+    private var folderManager: FolderManager { FolderManager.shared }
 
     var body: some View {
         NavigationStack(path: $navPath) {
@@ -175,6 +184,18 @@ struct LibraryView: View {
             // asked for as a bonus.
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(.hidden, for: .navigationBar)
+            // Registered on the root Group so it's always active regardless
+            // of which tab (Files/Folders) is currently shown. The old
+            // registration on libraryListContent's List was only active when
+            // libraryTab == .files, leaving .folder destinations unresolved
+            // when the user tapped a folder card from the Folders tab.
+            .navigationDestination(for: LibrarySectionID.self) { id in
+                switch id {
+                case .status(let s):    statusAllFilesDestination(status: s)
+                case .continueWorking:  continueWorkingAllFilesDestination
+                case .folder(let fid):  folderDetailDestination(folderID: fid)
+                }
+            }
             .task(id: store.folderPermissionState) {
                 hasInitialLoadStarted = true
                 await viewModel.loadLibrary()
@@ -204,6 +225,19 @@ struct LibraryView: View {
             // way App Store subscription screens themselves do.
             .fullScreenCover(isPresented: $isPaywallPresented) {
                 PaywallView()
+            }
+            // Folder assignment sheet — long-press context menu "Add to Folder".
+            .sheet(item: Binding(
+                get: { folderAssignEntryID.map { FolderAssignID(id: $0) } },
+                set: { folderAssignEntryID = $0?.id }
+            )) { item in
+                AssignFolderSheet(entryID: item.id, folderManager: folderManager) { folderName in
+                    let msg = folderName.map { "Added to \"\($0)\"" } ?? "Removed from folder"
+                    toaster.show(.success, title: msg)
+                }
+                .presentationDetents([.height(340)])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(DSRadius.large)
             }
             // Import name-collision resolver (Session 19). Fires once per
             // conflicted URL in a batch — matches iOS Files.app's
@@ -322,6 +356,7 @@ struct LibraryView: View {
     // MARK: - List
 
     private var dueEntries: [LibraryEntry] { viewModel.dueReminderEntries() }
+    private var continueEntries: [LibraryEntry] { viewModel.continueWorkingEntries() }
 
     /// Home's primary grouping (2026-09-13) — was `DateBucket` (Today/
     /// Previous 7 Days/...), now `DocumentStatus` (Draft/Reviewed/Done) so
@@ -332,8 +367,141 @@ struct LibraryView: View {
     /// sections rather than replacing them).
     private var groupedSections: [(status: DocumentStatus, entries: [LibraryEntry])] { viewModel.groupedByStatus() }
 
-    private var libraryList: some View {
-        libraryListContent
+    /// Sections filtered by active folder when one is selected.
+    private var filteredGroupedSections: [(status: DocumentStatus, entries: [LibraryEntry])] {
+        guard let folderID = activeFolderID else { return groupedSections }
+        let assignedIDs = Set(folderManager.assignments.compactMap { $0.value == folderID ? $0.key : nil })
+        return groupedSections.compactMap { group in
+            let filtered = group.entries.filter { assignedIDs.contains($0.id) }
+            return filtered.isEmpty ? nil : (status: group.status, entries: filtered)
+        }
+    }
+
+    // ZStack keeps both scroll hierarchies alive — avoids the UITableView
+    // create/destroy cost on every tab switch (which caused the visible flash).
+    // Opacity + allowsHitTesting swap which view receives interaction;
+    // suppressTabBarHiddenPreference prevents the inactive view's scroll
+    // auto-hide state from bleeding into the active tab's tab-bar visibility.
+    @ViewBuilder private var libraryList: some View {
+        ZStack {
+            libraryListContent
+                .opacity(libraryTab == .files ? 1 : 0)
+                .allowsHitTesting(libraryTab == .files)
+                .suppressTabBarHiddenPreference(unless: libraryTab == .files)
+            folderTabList
+                .opacity(libraryTab == .folders ? 1 : 0)
+                .allowsHitTesting(libraryTab == .folders)
+                .suppressTabBarHiddenPreference(unless: libraryTab == .folders)
+        }
+    }
+
+    /// Folders tab — `FolderGridView` with its entire header (title + banner +
+    /// tabs + sort row) scrolling inside the grid's own ScrollView.
+    private var folderTabList: some View {
+        FolderGridView(
+            folderManager: folderManager,
+            searchText: $folderSearchText,
+            sortOrder: $folderSortOrder,
+            onSelectFolder: { folderID in
+                navPath.append(LibrarySectionID.folder(folderID))
+            }
+        ) {
+            VStack(spacing: 0) {
+                titleRow
+                    .padding(.horizontal, DSSpacing.lg)
+                homeBannerView
+                    .padding(.top, DSSpacing.xs)
+                    .padding(.bottom, 4)
+                libTabRow
+                    .padding(.horizontal, DSSpacing.lg)
+                    .padding(.top, DSSpacing.sm)
+                foldersActionRow
+                    .padding(.horizontal, DSSpacing.lg)
+                    .padding(.top, DSSpacing.sm)
+                    .padding(.bottom, DSSpacing.md)
+                if !foldersTipSeen {
+                    FoldersTipBanner { foldersTipSeen = true }
+                        .padding(.horizontal, DSSpacing.lg)
+                        .padding(.bottom, DSSpacing.lg)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+            .animation(.smooth(duration: 0.3), value: foldersTipSeen)
+        }
+        .hidesTabBarVisually(isFolderSearchExpanded)
+    }
+
+    // [Sort▼] [🔍] — or inline search bar when expanded
+    private var foldersActionRow: some View {
+        Group {
+            if isFolderSearchExpanded {
+                LibrarySearchBar(
+                    placeholder: "Search folders",
+                    input: $folderSearchText,
+                    onCancel: {
+                        folderSearchText = ""
+                        withAnimation(.smooth(duration: 0.24)) { isFolderSearchExpanded = false }
+                    }
+                )
+            } else {
+                HStack(spacing: 0) {
+                    folderSortButton
+                    Spacer(minLength: 0)
+                    Button {
+                        withAnimation(.smooth(duration: 0.25)) { isFolderSearchExpanded = true }
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(Color.dsBrandPrimary)
+                            .frame(width: DSSize.minimumTouchTarget, height: DSSize.minimumTouchTarget)
+                            .roundIconButtonSurface()
+                    }
+                    .buttonStyle(LibraryIconButtonStyle())
+                    .accessibilityLabel("Search folders")
+                }
+                .frame(height: DSSize.minimumTouchTarget)
+            }
+        }
+        .animation(.smooth(duration: 0.24), value: isFolderSearchExpanded)
+    }
+
+    private var folderSortButton: some View {
+        let isActive = folderSortOrder != .nameAsc
+        return Menu {
+            Picker("Sort", selection: $folderSortOrder) {
+                ForEach(FolderSortOrder.allCases) { order in
+                    Label(order.rawValue, systemImage: order.systemImage).tag(order)
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.up.arrow.down")
+                    .font(.system(size: 14, weight: .semibold))
+                Text("Sort")
+                    .font(.system(size: 15, weight: .semibold))
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 11, weight: .bold))
+            }
+            .foregroundStyle(isActive ? Color.white : Color.dsBrandPrimary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(height: DSSize.minimumTouchTarget)
+            .background(
+                isActive ? Color.dsBrandPrimary : Color(UIColor.secondarySystemGroupedBackground),
+                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(isActive ? Color.clear : Color(UIColor.separator).opacity(0.25), lineWidth: 0.5)
+            )
+            .shadow(color: .black.opacity(isActive ? 0.12 : 0.07), radius: isActive ? 5 : 4, y: isActive ? 3 : 2)
+            .shadow(color: .black.opacity(isActive ? 0.05 : 0.03), radius: isActive ? 12 : 10, y: isActive ? 5 : 3)
+            .animation(reduceMotion ? nil : .smooth(duration: 0.22), value: isActive)
+        }
+        .accessibilityLabel("Sort folders: \(folderSortOrder.rawValue)")
     }
 
     @ViewBuilder private var tipOverlay: some View {
@@ -363,25 +531,43 @@ struct LibraryView: View {
     }
 
     private var libraryListContent: some View {
+        ScrollViewReader { proxy in
         // Single List for every state (default / filter-empty / search-
         // active / search-empty). Search results and no-result placeholders
         // render as list rows UNDER `listHeader`, never replace it — so the
         // search field + Cancel button stay reachable and the user is
         // never stuck on a screen with no way back.
         List {
+            // Full scrollable header: title + banner + tabs + filter row.
+            // No safeAreaInset — everything scrolls with list content.
+            Section {
+                VStack(spacing: 0) {
+                    titleRow
+                        .padding(.horizontal, DSSpacing.lg)
+                    homeBannerView
+                        .padding(.top, DSSpacing.xs)
+                        .padding(.bottom, 4)
+                    libTabRow
+                        .padding(.horizontal, DSSpacing.lg)
+                        .padding(.top, DSSpacing.sm)
+                    filesActionRow
+                        .padding(.leading, DSSpacing.lg + DSSpacing.xs + 3) // align with section-header leading edge
+                        .padding(.trailing, DSSpacing.lg)
+                        .padding(.top, DSSpacing.sm)
+                        .padding(.bottom, DSSpacing.md)
+                }
+                // Negative leading/trailing counteracts insetGrouped section-container
+                // margins (~20pt per side) so the header fills the full screen width,
+                // and items' own .padding(.horizontal, DSSpacing.lg) provides the
+                // correct 20pt screen-edge margins — matching the Folders tab.
+                .listRowInsets(EdgeInsets(top: 0, leading: -DSSpacing.lg, bottom: 0, trailing: -DSSpacing.lg))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            }
+
             Section {
                 listHeader
-                    // Zero horizontal — insetGrouped List's own 20pt
-                    // gutter is now the outer margin (matches Tools'
-                    // `lg = 20` padding standard); adding sm=12 on top
-                    // was double-indenting the title vs Tools.
-                    // `top: DSSpacing.sm` restores the visual gap between
-                    // the sticky `titleRow` (safeAreaInset above the List)
-                    // and the search field — the original VStack spacing
-                    // of `md = 16pt` is now split: `titleRow.padding(.bottom,
-                    // .xs)` = 8pt baked into the sticky header height + this
-                    // 12pt row inset = 20pt total, matching the original feel.
-                    .listRowInsets(EdgeInsets(top: DSSpacing.sm, leading: 0, bottom: DSSpacing.sm, trailing: 0))
+                    .listRowInsets(EdgeInsets(top: DSSpacing.xxs, leading: 0, bottom: 4, trailing: 0))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             }
@@ -393,7 +579,7 @@ struct LibraryView: View {
                 if viewModel.searchResults.isEmpty {
                     Section {
                         searchNoResultsContent
-                            .listRowInsets(EdgeInsets(top: DSSpacing.xl, leading: DSSpacing.md, bottom: DSSpacing.xl, trailing: DSSpacing.md))
+                            .listRowInsets(EdgeInsets())
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                     }
@@ -410,13 +596,13 @@ struct LibraryView: View {
                         sectionRows(viewModel.searchResults)
                     }
                 }
-            } else if viewModel.isFiltering && dueEntries.isEmpty && groupedSections.isEmpty {
+            } else if viewModel.isFiltering && dueEntries.isEmpty && filteredGroupedSections.isEmpty {
                 // Filter yields no results — render the empty state as
                 // a list row so the chip strip above stays tappable
                 // and the Show-all button gives an obvious way back.
                 Section {
                     filteredEmptyStateContent
-                        .listRowInsets(EdgeInsets(top: DSSpacing.xl, leading: DSSpacing.md, bottom: DSSpacing.xl, trailing: DSSpacing.md))
+                        .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                 }
@@ -432,6 +618,40 @@ struct LibraryView: View {
                             .frame(maxWidth: .infinity, minHeight: 220)
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
+                    }
+                }
+
+                if !continueEntries.isEmpty && viewMode == .list {
+                    Section {
+                        continueWorkingTabHeader(count: continueEntries.count)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(
+                                top: 0,
+                                leading: 3,
+                                bottom: 0,
+                                trailing: DSSpacing.xs))
+                            .listRowBackground(
+                                HStack(spacing: 0) {
+                                    Color.indigo.frame(width: 3)
+                                    Color.clear
+                                }
+                            )
+                        let _prefix = Array(continueEntries.prefix(4))
+                        ForEach(_prefix) { entry in
+                            cardContent(for: entry)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets(
+                                    top: 0,
+                                    leading: 3,
+                                    bottom: DSSpacing.xs,
+                                    trailing: DSSpacing.xs))
+                                .listRowBackground(
+                                    HStack(spacing: 0) {
+                                        Color.indigo.frame(width: 3)
+                                        Color.clear
+                                    }
+                                )
+                        }
                     }
                 }
 
@@ -452,36 +672,53 @@ struct LibraryView: View {
                     // Content offset (leading: 11pt) matches timelineGroupedContent's
                     // .padding(.leading, 3 + DSSpacing.xs) so the visual is identical.
                     Section {
-                        ForEach(groupedSections, id: \.status) { group in
-                            let isFirst = group.status == groupedSections.first?.status
+                        ForEach(filteredGroupedSections, id: \.status) { group in
+                            let isFirst = group.status == filteredGroupedSections.first?.status
+                            // Tip anchors to first section's first card (may be .getStarted,
+                            // .draft, or whatever comes first when samples are filtered out).
+                            let firstTipStatus = filteredGroupedSections.first?.status
 
-                            statusTabHeader(status: group.status, count: group.entries.count)
-                                // Capture the "Get Started" header's y so tipOverlay
+                            statusTabHeader(
+                                status: group.status,
+                                count: group.entries.count,
+                                highlighted: highlightedStatus == group.status
+                            )
+                                // Capture the first section header's y so tipOverlay
                                 // can anchor the bubble ABOVE it (not above the card,
                                 // which would put the bubble on top of this row).
                                 .onGeometryChange(for: CGRect.self) { geo in
                                     geo.frame(in: .named("libraryTipSpace"))
                                 } action: { newValue in
-                                    guard dueEntries.isEmpty && group.status == .getStarted else { return }
+                                    guard dueEntries.isEmpty && group.status == firstTipStatus else { return }
                                     tipSectionHeaderFrame = newValue
                                 }
+                                // Section-spanning border — top + leading on header row (trailing omitted: 16pt inset puts it too close to screen edge).
+                                .overlay(alignment: .top)      { group.status.tintColor.opacity(highlightedStatus == group.status ? 0.85 : 0).frame(height: 2.5) }
+                                .overlay(alignment: .leading)  { group.status.tintColor.opacity(highlightedStatus == group.status ? 0.85 : 0).frame(width:  2.5) }
+                                .animation(.spring(response: 0.35, dampingFraction: 0.7), value: highlightedStatus == group.status)
                                 .listRowSeparator(.hidden)
                                 .listRowInsets(EdgeInsets(
                                     top: isFirst ? 0 : DSSpacing.xs,
-                                    leading: 3 + DSSpacing.xs,
+                                    leading: 3,
                                     bottom: 0,
                                     trailing: DSSpacing.xs))
                                 .listRowBackground(
                                     HStack(spacing: 0) {
                                         group.status.tintColor.frame(width: 3)
-                                        Color.clear
+                                        group.status.tintColor
+                                            .opacity(highlightedStatus == group.status ? 0.05 : 0)
                                     }
+                                    .animation(.spring(response: 0.35, dampingFraction: 0.7), value: highlightedStatus == group.status)
                                 )
+                                .id("lib-\(group.status.rawValue)")
 
-                            ForEach(Array(group.entries.prefix(4))) { entry in
+                            let _prefixEntries = Array(group.entries.prefix(4))
+                            let _lastEntryID   = _prefixEntries.last?.id
+                            ForEach(_prefixEntries) { entry in
                                 let attachTip = dueEntries.isEmpty &&
-                                    group.status == .getStarted &&
+                                    group.status == firstTipStatus &&
                                     entry.id == group.entries.first?.id
+                                let isLastEntry = entry.id == _lastEntryID
                                 Group {
                                     cardContent(for: entry)
                                         // Reports this card's real on-screen frame (in the
@@ -514,17 +751,23 @@ struct LibraryView: View {
                                             }
                                         }
                                 }
+                                // Section-spanning border — leading + bottom on file rows (trailing omitted: near screen edge).
+                                .overlay(alignment: .leading)  { group.status.tintColor.opacity(highlightedStatus == group.status ? 0.85 : 0).frame(width:  2.5) }
+                                .overlay(alignment: .bottom)   { group.status.tintColor.opacity(highlightedStatus == group.status && isLastEntry ? 0.85 : 0).frame(height: 2.5) }
+                                .animation(.spring(response: 0.35, dampingFraction: 0.7), value: highlightedStatus == group.status)
                                 .listRowSeparator(.hidden)
                                 .listRowInsets(EdgeInsets(
                                     top: 0,
-                                    leading: 3 + DSSpacing.xs,
+                                    leading: 3,
                                     bottom: DSSpacing.xs,
                                     trailing: DSSpacing.xs))
                                 .listRowBackground(
                                     HStack(spacing: 0) {
                                         group.status.tintColor.frame(width: 3)
-                                        Color.clear
+                                        group.status.tintColor
+                                            .opacity(highlightedStatus == group.status ? 0.05 : 0)
                                     }
+                                    .animation(.spring(response: 0.35, dampingFraction: 0.7), value: highlightedStatus == group.status)
                                 )
                             }
                         }
@@ -556,32 +799,22 @@ struct LibraryView: View {
             }
         }
         .listStyle(.insetGrouped)
-        // Zeroes the top scroll margin — insetGrouped's default is
-        // ~30pt above the first section which, combined with the
-        // now-hidden navbar, left an obvious gap between the status
-        // bar and the "Your Cabinet" title. `Tools` avoids this via
-        // `.prominentInlineTitle` (title lives in the navbar so the
-        // scroll content starts flush); Library uses a custom large
-        // title in-content, so we tighten manually here.
         .contentMargins(.top, 0, for: .scrollContent)
-        .listSectionSpacing(DSSpacing.sm)
+        .listSectionSpacing(6)
+        // Smooth list-content transitions: rows fade in when the initial
+        // scan finishes (isLoading → entries appear) and when filter/search
+        // changes the visible set. The `value` pair covers both directions.
+        .animation(.smooth(duration: 0.28), value: viewModel.isLoading)
+        .animation(.smooth(duration: 0.22), value: viewModel.typeFilter)
         .autoHidesTabBarOnScroll()
-        .navigationDestination(for: DocumentStatus.self) { status in
-            statusAllFilesDestination(status: status)
-        }
-        // `titleRow` (large title + premium crown) lives outside the
-        // scrollable List so it stays pinned while content scrolls —
-        // fixes the "Your Cabinet" jarring scroll bug (Image #18).
-        // `.safeAreaInset` shrinks the List's layout safe area by the
-        // header's height, so the first real list row starts exactly
-        // below it with no overlap. `spacing: 0` — the spacing between
-        // the inset view and List content comes from the listRowInsets.top
-        // on the header section instead (more predictable than the
-        // system-provided gap here, which varies with content context).
-        .safeAreaInset(edge: .top, spacing: 0) {
-            titleRow
-                .padding(.horizontal, DSSpacing.lg)
-                .background(Color(UIColor.systemGroupedBackground))
+        .onChange(of: libraryTab) { _, newTab in
+            if newTab == .folders {
+                withAnimation(.smooth(duration: 0.2)) { isSearchExpanded = false }
+                viewModel.clearSearch()
+            } else {
+                withAnimation(.smooth(duration: 0.2)) { isFolderSearchExpanded = false }
+                folderSearchText = ""
+            }
         }
         // Coordinate space + overlay live here (not on NavigationStack) so
         // geo.frame(in: .named("libraryTipSpace")) and the overlay share the
@@ -591,6 +824,34 @@ struct LibraryView: View {
         // origin was above the titleRow but card frames were measured below it.
         .coordinateSpace(name: "libraryTipSpace")
         .overlay(alignment: .topLeading) { tipOverlay }
+        .onReceive(NotificationCenter.default.publisher(for: .mascotScrollToReviewed)) { _ in
+            let scrollID = viewMode == .list ? "lib-reviewed" : "grid-reviewed"
+            proxy.scrollTo(scrollID, anchor: .top)
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
+                highlightedStatus = .reviewed
+            }
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
+                    highlightedStatus = nil
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .mascotScrollToDraft)) { _ in
+            let scrollID = viewMode == .list ? "lib-draft" : "grid-draft"
+            proxy.scrollTo(scrollID, anchor: .top)
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
+                highlightedStatus = .draft
+            }
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
+                    highlightedStatus = nil
+                }
+            }
+        }
+        } // ScrollViewReader
+        .hidesTabBarVisually(isSearchExpanded)
     }
 
     /// One section's items, rendered as native `List` rows in `.list` mode or as
@@ -642,6 +903,226 @@ struct LibraryView: View {
                 row(for: entry)
             }
         }
+    }
+
+    // MARK: - Continue Working header + View All
+
+    /// Section header for the "Continue Working" group — mirrors `statusTabHeader`
+    /// visual language (pill + count/View-all button) but uses orange and a
+    /// distinct label since this is a cross-cutting feature, not a status bucket.
+    @ViewBuilder
+    private func continueWorkingTabHeader(count: Int) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: DSSpacing.sm) {
+                HStack(spacing: 6) {
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                    Text("Continue Working")
+                        .font(.system(size: 15, weight: .semibold))
+                }
+                .foregroundStyle(Color.indigo)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color.indigo.opacity(0.10), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                Spacer(minLength: 0)
+
+                if count > 4 {
+                    Button {
+                        navPath.append(LibrarySectionID.continueWorking)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(Color.indigo)
+                                .frame(width: 7, height: 7)
+                                .scaleEffect(badgePulse ? 1.35 : 1.0)
+                                .opacity(badgePulse ? 0.5 : 1.0)
+                                .animation(
+                                    .easeInOut(duration: 1.2).repeatForever(autoreverses: true),
+                                    value: badgePulse
+                                )
+                            Text("View all")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                        .foregroundStyle(Color.indigo)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(Color.indigo)
+                            .frame(width: 7, height: 7)
+                            .scaleEffect(badgePulse ? 1.35 : 1.0)
+                            .opacity(badgePulse ? 0.5 : 1.0)
+                            .animation(
+                                .easeInOut(duration: 1.2).repeatForever(autoreverses: true),
+                                value: badgePulse
+                            )
+                        Text("\(count)")
+                            .font(.system(size: 13, weight: .medium))
+                            .monospacedDigit()
+                            .foregroundStyle(Color.indigo.opacity(0.6))
+                    }
+                }
+            }
+            .padding(.bottom, DSSpacing.sm)
+            .onAppear { badgePulse = true }
+        }
+    }
+
+    /// "View all" destination for the Continue Working section.
+    /// Same layout as `statusAllFilesDestination` — back button + title +
+    /// search + content. Entries come from `continueWorkingEntries()` which
+    /// respects active type/date filters.
+    @ViewBuilder
+    private var continueWorkingAllFilesDestination: some View {
+        let allEntries = viewModel.continueWorkingEntries()
+        let query = allFilesSearchInput.trimmingCharacters(in: .whitespaces)
+        let entries: [LibraryEntry] = query.isEmpty
+            ? allEntries
+            : allEntries.filter { $0.document.name.localizedCaseInsensitiveContains(query) }
+
+        List {
+            Section {
+                ZStack {
+                    Text("Continue Working")
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundStyle(Color.primary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                    HStack {
+                        Button { navPath.removeLast() } label: {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(Color.dsTextPrimary)
+                                .frame(width: DSSize.minimumTouchTarget, height: DSSize.minimumTouchTarget)
+                                .roundIconButtonSurface()
+                        }
+                        .buttonStyle(.plain)
+                        Spacer()
+                    }
+                }
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: DSSpacing.xs, leading: DSSpacing.md,
+                                          bottom: DSSpacing.xxs, trailing: DSSpacing.md))
+            }
+
+            Section {
+                LibrarySearchAndActionsBar(
+                    input: $allFilesSearchInput,
+                    onClear: { allFilesSearchInput = "" }
+                ) {
+                    viewModeToggleButton
+                }
+                .listRowInsets(EdgeInsets(top: DSSpacing.xs, leading: DSSpacing.md,
+                                          bottom: DSSpacing.md, trailing: DSSpacing.md))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            }
+
+            if viewMode == .list {
+                Section {
+                    ForEach(entries) { entry in
+                        cardContent(for: entry)
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: DSSpacing.xs, leading: DSSpacing.md,
+                                                      bottom: DSSpacing.xs, trailing: DSSpacing.xs))
+                    }
+                }
+            } else {
+                Section {
+                    DocumentGrid(
+                        entries: entries,
+                        onTap: { entry in
+                            Task { await viewModel.recordOpen(entry.id) }
+                            onOpenEditor(entry.document)
+                        },
+                        onSaveExport: { entry in exportingRef = entry.document },
+                        onToggleFavourite: { entry in Task { await performToggleFavourite(entry: entry) } },
+                        onRename: { entry, newStem in await performRename(entryID: entry.id, to: newStem) },
+                        onConvertToZip: { entry in performConvertToZip(entryID: entry.id, name: entry.document.name) },
+                        onMarkDone: { entry in Task { await performMarkDone(entry: entry) } },
+                        onDeleteFile: { entry in Task { await performDeleteFile(entryID: entry.id, name: entry.document.name) } },
+                        onChangeStatus: { entry, status in
+                            Task {
+                                await viewModel.setStatus(status, for: entry.id)
+                                toaster.show(
+                                    (status == .draft || status == .getStarted) ? .info : .success,
+                                    title: "Marked as \(status.displayName)",
+                                    filename: entry.document.name
+                                )
+                            }
+                        },
+                        leadingPadding: DSSpacing.md
+                    )
+                    .listRowInsets(EdgeInsets(top: DSSpacing.sm, leading: 0, bottom: 0, trailing: DSSpacing.xs))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                }
+            }
+
+            Section {
+                Color.clear
+                    .frame(height: DSTabBarMetrics.listContentTrailingSpacer)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Color.dsBackgroundPrimary)
+        .contentMargins(.top, 0, for: .scrollContent)
+        .toolbar(.hidden, for: .navigationBar)
+        .onDisappear { allFilesSearchInput = "" }
+        .overlay {
+            if entries.isEmpty {
+                ContentUnavailableView(
+                    query.isEmpty ? "No documents to continue" : "No results",
+                    systemImage: "arrow.clockwise.circle",
+                    description: Text(query.isEmpty
+                        ? "Files you want to keep editing will appear here"
+                        : "No documents match \"\(query)\"")
+                )
+            }
+        }
+    }
+
+    /// Dedicated folder-scoped view: shows Continue Working + status sections
+    /// filtered to files assigned to `folderID`. Delegates to `FolderDetailContent`
+    /// (a proper View struct) so that `store.entries` is read reactively inside
+    /// that struct's `body` — fixes the "No files" blank that appeared when
+    /// entries hadn't loaded at navigation-push time.
+    private func folderDetailDestination(folderID: UUID) -> some View {
+        let folder = folderManager.folders.first(where: { $0.id == folderID })
+        return FolderDetailContent(
+            folderID: folderID,
+            folderName: folder?.name ?? "Folder",
+            folderColor: folder?.color ?? Color.dsBrandPrimary,
+            store: store,
+            onBack: { navPath.removeLast() },
+            onTap: { entry in
+                Task { await viewModel.recordOpen(entry.id) }
+                onOpenEditor(entry.document)
+            },
+            onSaveExport: { entry in exportingRef = entry.document },
+            onToggleFavourite: { entry in Task { await performToggleFavourite(entry: entry) } },
+            onRename: { entry, stem in await performRename(entryID: entry.id, to: stem) },
+            onConvertToZip: { entry in performConvertToZip(entryID: entry.id, name: entry.document.name) },
+            onMarkDone: { entry in Task { await performMarkDone(entry: entry) } },
+            onDeleteFile: { entry in Task { await performDeleteFile(entryID: entry.id, name: entry.document.name) } },
+            onChangeStatus: { [toaster] entry, status in
+                Task {
+                    await viewModel.setStatus(status, for: entry.id)
+                    toaster.show(
+                        (status == .draft || status == .getStarted) ? .info : .success,
+                        title: "Marked as \(status.displayName)",
+                        filename: entry.document.name
+                    )
+                }
+            }
+        )
     }
 
     /// Full-screen "View all" destination for one status bucket.
@@ -719,7 +1200,7 @@ struct LibraryView: View {
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                             .listRowInsets(EdgeInsets(top: DSSpacing.xs, leading: DSSpacing.md,
-                                                      bottom: DSSpacing.xs, trailing: DSSpacing.md))
+                                                      bottom: DSSpacing.xs, trailing: DSSpacing.xs))
                     }
                 }
             } else {
@@ -765,6 +1246,7 @@ struct LibraryView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
+        .background(Color.dsBackgroundPrimary)
         .contentMargins(.top, 0, for: .scrollContent)
         // Hide system nav bar — back + title live in content above (same
         // rationale as the root LibraryView: iOS 26 Liquid Glass wraps
@@ -813,10 +1295,18 @@ struct LibraryView: View {
             },
             onDeleteFile: {
                 Task { await performDeleteFile(entryID: entry.id, name: entry.document.name) }
+            },
+            onAddToFolder: {
+                // Delay until the FileActionsMenu fullScreenCover has
+                // fully dismissed (~340ms) before presenting AssignFolderSheet.
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(420))
+                    folderAssignEntryID = entry.id
+                }
             }
         )
         .padding(.horizontal, DSSpacing.sm)
-        .padding(.vertical, DSSpacing.sm)
+        .padding(.vertical, 10)
         .background(Color.dsBackgroundElevated,
                     in: RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous)
@@ -858,7 +1348,7 @@ struct LibraryView: View {
         }
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
-        .listRowInsets(EdgeInsets(top: DSSpacing.xxs, leading: DSSpacing.lg, bottom: DSSpacing.xxs, trailing: DSSpacing.xs))
+        .listRowInsets(EdgeInsets(top: DSSpacing.xxs, leading: DSSpacing.lg, bottom: DSSpacing.xxs, trailing: DSSpacing.md))
     }
 
     /// Grouped list rendered as a continuous timeline spine.
@@ -870,7 +1360,7 @@ struct LibraryView: View {
     /// No icon, no nested badges, small corner radius so it reads as
     /// a label rather than a UI pill.
     @ViewBuilder
-    private func statusTabHeader(status: DocumentStatus, count: Int) -> some View {
+    private func statusTabHeader(status: DocumentStatus, count: Int, highlighted: Bool = false) -> some View {
         let bg: Color = switch status {
         case .getStarted: Color.dsBrandPrimary.opacity(0.08)
         case .draft:      .dsStatusWarningBackground
@@ -882,23 +1372,23 @@ struct LibraryView: View {
         return VStack(spacing: 0) {
         HStack(spacing: DSSpacing.sm) {
             // Left: status pill — icon + name only
-            HStack(spacing: 7) {
+            HStack(spacing: 6) {
                 Image(systemName: status.systemImage)
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                 Text(status.displayName)
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
             }
             .foregroundStyle(status.tintColor)
-            .padding(.horizontal, DSSpacing.sm)
-            .padding(.vertical, 7)
-            .background(bg, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(bg, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
             Spacer(minLength: 0)
 
             // Right: ● View all › (overflow) or ● count (normal)
             if count > 4 {
                 Button {
-                    navPath.append(status)
+                    navPath.append(LibrarySectionID.status(status))
                 } label: {
                     HStack(spacing: 4) {
                         if needsAttention && !reduceMotion {
@@ -949,6 +1439,13 @@ struct LibraryView: View {
         .padding(.bottom, DSSpacing.sm)
         .onAppear { badgePulse = true }
         }
+        // Highlight tint fill + scale — border is drawn section-spanning in listRowBackground.
+        .background(
+            status.tintColor.opacity(highlighted ? 0.08 : 0),
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+        )
+        .scaleEffect(highlighted ? 1.02 : 1.0, anchor: .leading)
+        .animation(.spring(response: 0.35, dampingFraction: 0.7), value: highlighted)
     }
 
     /// equals the content's height automatically (background fills parent frame).
@@ -958,15 +1455,15 @@ struct LibraryView: View {
     /// driving LibraryView body at 60 fps.
     private var timelineGroupedContent: some View {
         VStack(spacing: 0) {
-            ForEach(groupedSections, id: \.status) { group in
-
+            ForEach(filteredGroupedSections, id: \.status) { group in
+                let firstTipStatus = filteredGroupedSections.first?.status
                 VStack(alignment: .leading, spacing: 0) {
                     statusTabHeader(status: group.status, count: group.entries.count)
 
                     VStack(spacing: DSSpacing.xs) {
                         ForEach(group.entries.prefix(4)) { entry in
                             let attachTip = dueEntries.isEmpty &&
-                                group.status == .getStarted &&
+                                group.status == firstTipStatus &&
                                 entry.id == group.entries.first?.id
                             cardContent(for: entry)
                                 .onGeometryChange(for: CGRect.self) { geo in
@@ -998,28 +1495,65 @@ struct LibraryView: View {
             }
         }
         .padding(.trailing, DSSpacing.xs)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.5), value: groupedSections.map(\.status))
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.5), value: filteredGroupedSections.map(\.status))
     }
 
     /// Grouped grid rendered as a continuous timeline spine — same rail pattern
     /// as `timelineGroupedContent` but uses `DocumentGrid` (LazyVGrid) per section.
     private var timelineGroupedGrid: some View {
         VStack(spacing: 0) {
-            ForEach(groupedSections, id: \.status) { group in
-                // Attach coachmark to the first tile of the first .getStarted or
-                // .draft section (mirrors list-mode logic in the ForEach below).
-                let firstTipStatus = groupedSections.first(where: { $0.status == .getStarted })?.status
+            if !continueEntries.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    continueWorkingTabHeader(count: continueEntries.count)
+                        .padding(.trailing, DSSpacing.xs)
+                    DocumentGrid(
+                        entries: Array(continueEntries.prefix(4)),
+                        onTap: { entry in
+                            Task { await viewModel.recordOpen(entry.id) }
+                            onOpenEditor(entry.document)
+                        },
+                        onSaveExport: { entry in exportingRef = entry.document },
+                        onToggleFavourite: { entry in Task { await performToggleFavourite(entry: entry) } },
+                        onRename: { entry, newStem in await performRename(entryID: entry.id, to: newStem) },
+                        onConvertToZip: { entry in performConvertToZip(entryID: entry.id, name: entry.document.name) },
+                        onMarkDone: { entry in Task { await performMarkDone(entry: entry) } },
+                        onDeleteFile: { entry in Task { await performDeleteFile(entryID: entry.id, name: entry.document.name) } },
+                        onChangeStatus: { entry, status in
+                            Task {
+                                await viewModel.setStatus(status, for: entry.id)
+                                toaster.show(
+                                    (status == .draft || status == .getStarted) ? .info : .success,
+                                    title: "Marked as \(status.displayName)",
+                                    filename: entry.document.name
+                                )
+                            }
+                        },
+                        leadingPadding: 0
+                    )
+                    Color.clear.frame(height: DSSpacing.xxs)
+                }
+                .padding(.leading, 3 + DSSpacing.xs)
+                .background(alignment: .leading) {
+                    TimelineRailShimmer(color: .indigo)
+                }
+            }
+
+            ForEach(filteredGroupedSections, id: \.status) { group in
+                // Attach coachmark to the first tile of the first section
+                // (may be .draft or .done when samples are filtered out).
+                let firstTipStatus = filteredGroupedSections.first?.status
                 let attachTip = dueEntries.isEmpty && group.status == firstTipStatus
 
                 VStack(alignment: .leading, spacing: 0) {
                     // DocumentGrid adds its own .padding(.trailing, DSSpacing.xs) internally,
                     // so the header needs the same extra offset to keep "View all" flush.
-                    statusTabHeader(status: group.status, count: group.entries.count)
+                    statusTabHeader(status: group.status, count: group.entries.count,
+                                    highlighted: highlightedStatus == group.status)
                         .padding(.trailing, DSSpacing.xs)
                         .onGeometryChange(for: CGRect.self) { geo in
                             geo.frame(in: .named("libraryTipSpace"))
                         } action: { newValue in
-                            guard dueEntries.isEmpty && group.status == .getStarted else { return }
+                            guard dueEntries.isEmpty && group.status == firstTipStatus else { return }
                             tipSectionHeaderFrame = newValue
                         }
 
@@ -1066,10 +1600,22 @@ struct LibraryView: View {
                 .background(alignment: .leading) {
                     TimelineRailShimmer(color: group.status.tintColor)
                 }
+                .background(
+                    group.status.tintColor
+                        .opacity(highlightedStatus == group.status ? 0.05 : 0)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(
+                            group.status.tintColor.opacity(highlightedStatus == group.status ? 0.8 : 0),
+                            lineWidth: 1.5
+                        )
+                )
+                .id("grid-\(group.status.rawValue)")
             }
         }
         .padding(.trailing, DSSpacing.xs)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.5), value: groupedSections.map(\.status))
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.5), value: filteredGroupedSections.map(\.status))
     }
 
     /// Inline no-result content for search (dropped into the main list
@@ -1079,24 +1625,28 @@ struct LibraryView: View {
     /// pane, which would hide the search field + Cancel above it and
     /// leave the user unable to try a different query or back out.
     private var searchNoResultsContent: some View {
-        VStack(spacing: DSSpacing.sm) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 40, weight: .regular))
-                .foregroundStyle(Color.dsTextTertiary)
-                .padding(.bottom, DSSpacing.xxs)
+        VStack(spacing: 0) {
+            Spacer(minLength: 40)
+            VStack(spacing: DSSpacing.sm) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 40, weight: .regular))
+                    .foregroundStyle(Color.dsTextTertiary)
+                    .padding(.bottom, DSSpacing.xxs)
 
-            Text("No Results for \u{201C}\(viewModel.searchText)\u{201D}")
-                .font(DSFont.headline)
-                .foregroundStyle(Color.dsTextPrimary)
-                .multilineTextAlignment(.center)
+                Text("No Results for \u{201C}\(viewModel.searchText)\u{201D}")
+                    .font(DSFont.headline)
+                    .foregroundStyle(Color.dsTextPrimary)
+                    .multilineTextAlignment(.center)
 
-            Text("Check the spelling or try a new search")
-                .font(DSFont.subheadline)
-                .foregroundStyle(Color.dsTextSecondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
+                Text("Check the spelling or try a new search")
+                    .font(DSFont.subheadline)
+                    .foregroundStyle(Color.dsTextSecondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 40)
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, minHeight: 320)
         .accessibilityElement(children: .combine)
     }
 
@@ -1109,35 +1659,39 @@ struct LibraryView: View {
     /// case is what users hit most often (tapping `Word`/`Excel` on an
     /// empty library), so `Show all types` leads the button stack.
     private var filteredEmptyStateContent: some View {
-        VStack(spacing: DSSpacing.sm) {
-            Image(systemName: "line.3.horizontal.decrease.circle")
-                .font(.system(size: 40, weight: .regular))
-                .foregroundStyle(Color.dsTextTertiary)
-                .padding(.bottom, DSSpacing.xxs)
+        VStack(spacing: 0) {
+            Spacer(minLength: 40)
+            VStack(spacing: DSSpacing.sm) {
+                Image(systemName: "line.3.horizontal.decrease.circle")
+                    .font(.system(size: 40, weight: .regular))
+                    .foregroundStyle(Color.dsTextTertiary)
+                    .padding(.bottom, DSSpacing.xxs)
 
-            Text("No results")
-                .font(DSFont.headline)
-                .foregroundStyle(Color.dsTextPrimary)
+                Text("No results")
+                    .font(DSFont.headline)
+                    .foregroundStyle(Color.dsTextPrimary)
 
-            Text("No documents match the current filter. Try a different tab or clear the date filter")
-                .font(DSFont.subheadline)
-                .foregroundStyle(Color.dsTextSecondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
+                Text("No documents match the current filter. Try a different tab or clear the date filter")
+                    .font(DSFont.subheadline)
+                    .foregroundStyle(Color.dsTextSecondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
 
-            VStack(spacing: DSSpacing.xs) {
-                if viewModel.typeFilter != .all {
-                    Button("Show all types") { viewModel.typeFilter = .all }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.regular)
+                VStack(spacing: DSSpacing.xs) {
+                    if viewModel.typeFilter != .all {
+                        Button("Show all types") { viewModel.typeFilter = .all }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.regular)
+                    }
+                    if viewModel.dateFilter != nil {
+                        Button("Clear date filter") { viewModel.dateFilter = nil }
+                    }
                 }
-                if viewModel.dateFilter != nil {
-                    Button("Clear date filter") { viewModel.dateFilter = nil }
-                }
+                .padding(.top, DSSpacing.xs)
             }
-            .padding(.top, DSSpacing.xs)
+            Spacer(minLength: 40)
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, minHeight: 320)
         .accessibilityElement(children: .combine)
     }
 
@@ -1184,169 +1738,229 @@ struct LibraryView: View {
         .accessibilityElement(children: .combine)
     }
 
+    @ViewBuilder
+    private var homeBannerView: some View {
+        let isIPad = horizontalSizeClass == .regular
+        return Image("HomeBanner")
+            .resizable()
+            .aspectRatio(contentMode: .fill)
+            .frame(maxWidth: .infinity)
+            .frame(height: isIPad ? 200 : 130)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: isIPad ? 18 : 14, style: .continuous))
+            .shadow(color: .black.opacity(0.08), radius: 8, x: 0, y: 3)
+            .padding(.horizontal, DSSpacing.lg)
+    }
+
+    // Only the active-folder chip remains here; action row is in safeAreaInset.
+    @ViewBuilder
     private var listHeader: some View {
-        // `md = 16`, not `sm = 12` — the search pill (`.roundIconButtonSurface`
-        // / its own capsule) and `LibraryHeroCard` each carry the shared
-        // "2-layer ambient shadow" recipe (`radius: 14, y: 6`, same values
-        // as `ToolCardSurface`), which reaches ~20pt below the element it's
-        // on. At `sm = 12` that shadow from the search row bled into the
-        // hero card's top edge right below it — read as a dark seam between
-        // the two, same failure class as the "odd dark bands" the user
-        // flagged in `typeTabs` (see that comment), just from stacked
-        // per-view shadows overlapping instead of a shared Liquid Glass
-        // sampling region. `md` gives the shadow room to fall off before
-        // the next element starts, without touching the shared shadow
-        // recipe other screens rely on.
-        //
-        // `titleRow` is no longer here — it lives in the `.safeAreaInset`
-        // above the List so it stays pinned while content scrolls.
-        VStack(alignment: .leading, spacing: DSSpacing.md) {
-            searchAndActionsRow
-            // `LibraryHeroCard` ("Documents tracked") and `sampleLibraryBanner`
-            // stay paused (2026-09-13). The Draft→Reviewed→Done timeline is now
-            // woven into the real section headers below (`groupedSections`), not
-            // a separate floating widget. See `StatusSectionHeader`.
-            typeTabs
-        }
-        .padding(.vertical, DSSpacing.xs)
-    }
-
-    private var typeTabs: some View {
-        // `GlassEffectContainer` groups every chip's Liquid Glass surface
-        // into one shared sampling region — without it, adjacent chips
-        // sample independently and can visibly disagree on tone, breaking
-        // the "one continuous control strip" read (Apple's own toolbar
-        // pattern — see `references/liquid-glass.md`).
-        //
-        // Chip strip's ScrollView respects the enclosing List row's
-        // insetGrouped gutter, but the hero card's rounded rect
-        // (`DSRadius.card` corners) reads visually pinched INWARD at
-        // the corners while the first chip's Capsule starts flush at
-        // the row edge — that mismatched by a few pt, which the user
-        // flagged. `.padding(.horizontal, xs)` (8pt) shifts the strip
-        // right so its leading pill edge aligns with the hero card's
-        // straight outline segment above.
-        // No `GlassEffectContainer` wrap — its shared sampling region
-        // bled a subtle ambient shadow into the gaps BETWEEN chips
-        // (the odd dark bands the user flagged in the strip). Each chip
-        // now renders its own Liquid Glass independently; the small
-        // tone variance between adjacent chips is invisible in
-        // practice, and the gaps stay clean white.
-        ScrollView(.horizontal, showsIndicators: false) {
+        if libraryTab == .files, let folderID = activeFolderID,
+           let folder = folderManager.folders.first(where: { $0.id == folderID }) {
             HStack(spacing: DSSpacing.xs) {
-                ForEach(sortedTypeFilters) { filter in
-                    TypeTabButton(
-                        filter: filter,
-                        count: viewModel.count(for: filter),
-                        isSelected: viewModel.typeFilter == filter,
-                        reduceMotion: reduceMotion
-                    ) {
-                        viewModel.typeFilter = filter
-                    }
+                Label(folder.name, systemImage: "folder.fill")
+                    .font(DSFont.caption.weight(.medium))
+                    .foregroundStyle(folder.color)
+                Spacer(minLength: 0)
+                Button {
+                    activeFolderID = nil
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(Color.dsTextTertiary)
                 }
+                .buttonStyle(.plain)
             }
-            .animation(reduceMotion ? nil : .smooth(duration: 0.28), value: sortedTypeFilters)
+            .padding(.horizontal, DSSpacing.sm)
+            .padding(.vertical, 5)
+            .background(folder.color.opacity(0.10), in: Capsule())
+            .transition(.opacity.combined(with: .scale(scale: 0.9)))
         }
-        .textCase(nil)
     }
 
-    /// Order the type-tab chips so the four document-type chips with the
-    /// most matching files sit next to `● All`, pushing empty types to
-    /// the trailing edge. `.all` always leads so the user has one stable
-    /// tap-back target regardless of the library composition. Ties keep
-    /// `DocumentTypeFilter.allCases` order (Word → Excel → PowerPoint →
-    /// PDF) so a fresh library with zero of everything still reads in a
-    /// predictable order.
-    private var sortedTypeFilters: [DocumentTypeFilter] {
-        let indexed = DocumentTypeFilter.allCases.enumerated()
-        let typed = indexed.filter { $0.element != .all }
-        let sorted = typed.sorted { lhs, rhs in
-            let lc = viewModel.count(for: lhs.element)
-            let rc = viewModel.count(for: rhs.element)
-            if lc != rc { return lc > rc }
-            return lhs.offset < rhs.offset
+    // [Type▼] [Spacer] [🔍] [Filter▼] [⊞] — or inline search bar when expanded
+    private var filesActionRow: some View {
+        Group {
+            if isSearchExpanded {
+                LibrarySearchBar(
+                    placeholder: "Search documents",
+                    input: $viewModel.searchInput,
+                    onCancel: {
+                        viewModel.clearSearch()
+                        withAnimation(.smooth(duration: 0.24)) { isSearchExpanded = false }
+                    }
+                )
+            } else {
+                HStack(spacing: DSSpacing.sm) {
+                    typeFilterButton
+                    Spacer(minLength: 0)
+                    Button {
+                        withAnimation(.smooth(duration: 0.25)) { isSearchExpanded = true }
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(Color.dsBrandPrimary)
+                            .frame(width: DSSize.minimumTouchTarget, height: DSSize.minimumTouchTarget)
+                            .roundIconButtonSurface()
+                    }
+                    .buttonStyle(LibraryIconButtonStyle())
+                    .accessibilityLabel("Search documents")
+                    fileFilterButton
+                    viewModeToggleButton
+                }
+                .frame(height: DSSize.minimumTouchTarget)
+            }
         }
-        return [.all] + sorted.map(\.element)
+        .animation(.smooth(duration: 0.24), value: isSearchExpanded)
+    }
+
+    // [Type▼] — secondary chip when All; brand-filled only when a type is selected
+    private var typeFilterButton: some View {
+        Button {
+            isTypeFilterSheetPresented = true
+        } label: {
+            HStack(spacing: 5) {
+                if let assetName = viewModel.typeFilter.assetName {
+                    Image(assetName)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 18, height: 18)
+                } else {
+                    Image(systemName: viewModel.typeFilter.systemImage)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.dsBrandPrimary)
+                }
+                Text(viewModel.typeFilter.displayName)
+                    .font(.system(size: 15, weight: .semibold))
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 11, weight: .bold))
+                    .rotationEffect(isTypeFilterSheetPresented ? .degrees(180) : .zero)
+                    .animation(.smooth(duration: 0.2), value: isTypeFilterSheetPresented)
+            }
+            .foregroundStyle(Color.dsTextPrimary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(height: DSSize.minimumTouchTarget)
+            .background(
+                Color(UIColor.secondarySystemGroupedBackground),
+                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color(UIColor.separator).opacity(0.3), lineWidth: 0.5)
+            )
+            .shadow(color: .black.opacity(0.07), radius: 5, y: 2)
+        }
+        .buttonStyle(LibraryIconButtonStyle())
+        .popover(isPresented: $isTypeFilterSheetPresented, attachmentAnchor: .point(.bottom), arrowEdge: .top) {
+            TypeFilterSheet(selection: $viewModel.typeFilter)
+                .frame(width: 300)
+                .presentationCompactAdaptation(.none)
+        }
+        .accessibilityLabel(viewModel.typeFilter == .all ? "Filter by type" : "Type: \(viewModel.typeFilter.displayName)")
+    }
+
+    // [Filter] — funnel icon (not circle variant) avoids confusion with List-view toggle
+    private var fileFilterButton: some View {
+        let isActive = viewModel.dateFilter != nil || viewModel.favouritesOnly
+        return Button {
+            isFileFilterSheetPresented = true
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+                .font(.system(size: 17, weight: isActive ? .bold : .semibold))
+                .foregroundStyle(Color.dsBrandPrimary)
+                .frame(width: DSSize.minimumTouchTarget, height: DSSize.minimumTouchTarget)
+                .roundIconButtonSurface(isActive: isActive)
+        }
+        .buttonStyle(LibraryIconButtonStyle())
+        .popover(isPresented: $isFileFilterSheetPresented, attachmentAnchor: .point(.bottom), arrowEdge: .top) {
+            FileFilterSheet(
+                favouritesOnly: $viewModel.favouritesOnly,
+                dateFilter: Binding(
+                    get: { viewModel.dateFilter },
+                    set: { viewModel.dateFilter = $0 }
+                )
+            )
+            .frame(width: 300)
+            .presentationCompactAdaptation(.none)
+        }
+        .accessibilityLabel(isActive ? "Filters active" : "Filter documents")
     }
 
     // MARK: - Title + premium
 
-    /// Big page title on the leading edge, premium crown badge on the
-    /// trailing edge, same baseline. Rendered inline in list content so
-    /// the crown escapes iOS 26's toolbar auto-Liquid-Glass wrap (which
-    /// forces an ovoid capsule shape we can't override reliably).
-    ///
-    /// The `.padding(.top, DSSpacing.sm)` compensates the zero
-    /// `listRowInsets.top` on the section: without it, the title butted
-    /// right against the status bar / Dynamic Island. 12pt gives a
-    /// comfortable gap that still reads as "close, not floating".
     private var titleRow: some View {
-        HStack(alignment: .center, spacing: DSSpacing.sm) {
-            Text("Your Cabinet")
+        HStack(alignment: .center, spacing: DSSpacing.xs) {
+            Text("Cabinet")
                 .font(.largeTitle.bold())
                 .foregroundStyle(Color.dsTextPrimary)
                 .accessibilityAddTraits(.isHeader)
-
-            Spacer(minLength: DSSpacing.sm)
-
-            PremiumButton {
-                isPaywallPresented = true
-            }
+                .layoutPriority(1)
+            Spacer(minLength: 4)
+            PremiumButton { isPaywallPresented = true }
         }
         .padding(.top, DSSpacing.sm)
-        // Extra bottom padding — the search row needs visual separation
-        // from the large title above it; the default listHeader VStack
-        // gap (`DSSpacing.sm` = 12pt) alone felt tight next to a 34pt
-        // large title. Adds another 8pt for a total ~20pt breathing
-        // gap between "Your Cabinet" baseline and the search capsule.
-        .padding(.bottom, DSSpacing.xs)
+        .padding(.bottom, DSSpacing.xxs)
     }
 
-    // MARK: - Search + actions row
+    // MARK: - Files/Folders custom tab switcher
 
-    /// Single-row header that combines the search field with view-mode
-    /// toggle + filter menu. Lives inline at the top of `listHeader` rather
-    /// than in `.searchable` / `.toolbar`, so the three list-management
-    /// controls share one visual line and there is exactly one clear button
-    /// (the ⊗ inside the field) instead of `.searchable`'s clear + Cancel
-    /// duo. The premium crown stays in the navbar trailing (screen-level
-    /// action, not a list-management control).
-    ///
-    /// Flat elevated surfaces (not `.glassEffect(...)`) — glass on the
-    /// screen's light gray background renders as milky white bloom that
-    /// reads heavy/puffy at small sizes (search capsule + 44pt icon
-    /// circles). `Color.dsBackgroundElevated` + hairline stroke gives the
-    /// controls definition without the glass overload; glass stays for
-    /// the larger chip / hero surfaces below where the material has
-    /// enough real estate to look right.
-    private var searchAndActionsRow: some View {
-        // Owns its own `@FocusState` so tapping the field no longer
-        // re-runs `LibraryView.body` — see `LibrarySearchAndActionsBar`'s
-        // docstring. `trailing:` is the collapsed-state neighbours
-        // (view-mode toggle + filter menu); the subview swaps them for
-        // Cancel when the field is engaged.
-        LibrarySearchAndActionsBar(
-            input: $viewModel.searchInput,
-            onClear: { viewModel.clearSearch() }
-        ) {
-            HStack(spacing: DSSpacing.xs) {
-                viewModeToggleButton
-                filterMenu
+    private var libTabRow: some View {
+        HStack(spacing: 2) {
+            libTabSegment(.files, "Files")
+            libTabSegment(.folders, "Folders")
+        }
+        .padding(4)
+        .background {
+            ZStack {
+                // Outer shell
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color(UIColor.systemBackground))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(Color(UIColor.separator).opacity(0.2), lineWidth: 0.5)
+                    )
+                // Single sliding indicator — offset-based, no matchedGeometryEffect.
+                // Works correctly even when two libTabRow instances exist simultaneously
+                // (cross-fade transition), because each instance animates its own offset
+                // independently rather than competing for a shared namespace.
+                GeometryReader { geo in
+                    let pad: CGFloat = 4
+                    let gap: CGFloat = 2
+                    let w = (geo.size.width - pad * 2 - gap) / 2
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.dsBrandPrimary)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Color.white.opacity(0.18), lineWidth: 0.5)
+                        )
+                        .shadow(color: Color.dsBrandPrimary.opacity(0.25), radius: 6, y: 2)
+                        .frame(width: w, height: 46)
+                        .offset(x: libraryTab == .files ? pad : (pad + w + gap), y: pad)
+                        .animation(.smooth(duration: 0.22), value: libraryTab)
+                }
             }
         }
+        .sensoryFeedback(.selection, trigger: libraryTab)
+    }
+
+    private func libTabSegment(_ tab: LibraryTab, _ title: String) -> some View {
+        let isSelected = libraryTab == tab
+        return Button {
+            withAnimation(.smooth(duration: 0.22)) { libraryTab = tab }
+        } label: {
+            Text(title)
+                .font(.system(size: 15, weight: isSelected ? .semibold : .regular))
+                .foregroundStyle(isSelected ? Color.white : Color.dsTextSecondary)
+                .frame(maxWidth: .infinity)
+                .frame(height: 46)
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 
     // MARK: - Trailing actions
 
-    /// Grid ↔ list view mode toggle. Moved from the previous `viewControlsRow`
-    /// (below type tabs) to `searchAndActionsRow` (top of list, alongside
-    /// search + filter) — one horizontal band of controls instead of split
-    /// navbar + drawer + row-below-tabs.
-    ///
-    /// Uses shared `.roundIconButtonSurface()` modifier — subtle gradient
-    /// fill + top-only highlight ring + tight ambient shadow. Reads as
-    /// "small dimensional chip" instead of flat outline circle, matching
-    /// the visual weight of the search capsule beside it.
     private var viewModeToggleButton: some View {
         Button {
             viewMode = viewMode == .list ? .grid : .list
@@ -1363,107 +1977,11 @@ struct LibraryView: View {
                 .frame(width: DSSize.minimumTouchTarget, height: DSSize.minimumTouchTarget)
                 .roundIconButtonSurface()
         }
+        .buttonStyle(LibraryIconButtonStyle())
         .sensoryFeedback(.selection, trigger: viewMode)
         .accessibilityLabel(viewMode == .list ? "Switch to grid view" : "Switch to list view")
     }
 
-
-    private var filterMenu: some View {
-        Button {
-            isFilterPopoverPresented = true
-        } label: {
-            Image(systemName: isAnyFilterActive
-                  ? "line.3.horizontal.decrease.circle.fill"
-                  : "line.3.horizontal.decrease.circle")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(Color.dsBrandPrimary)
-                .contentTransition(.symbolEffect(.replace.magic(fallback: .replace.downUp)))
-                .frame(width: DSSize.minimumTouchTarget, height: DSSize.minimumTouchTarget)
-                .roundIconButtonSurface(isActive: activeFilterCount > 0)
-                .animation(reduceMotion ? nil : .smooth(duration: 0.28), value: isAnyFilterActive)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(activeFilterCount == 0
-            ? "Filter documents"
-            : "Filter documents, \(activeFilterCount) filter\(activeFilterCount == 1 ? "" : "s") active")
-        .popover(isPresented: $isFilterPopoverPresented, arrowEdge: .top) {
-            filterPopoverContent
-                .presentationCompactAdaptation(.popover)
-        }
-    }
-
-    /// Popover body — anchored via `.presentationCompactAdaptation
-    /// (.popover)` so it drops down directly below the filter icon
-    /// with an arrow pointing back to the icon.
-    private var filterPopoverContent: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            popoverSectionHeader("Favourites")
-            // Star is always `star` outline; the trailing checkmark is the
-            // only "is active" signal. `star.fill` while OFF was ambiguous
-            // (looked already on). Mirrors the Status rows' pattern below.
-            popoverActionRow(
-                title: "Show favourites only",
-                systemImage: "star",
-                iconColor: Color.dsBrandPrimary,
-                isTrailingCheck: viewModel.favouritesOnly
-            ) {
-                viewModel.favouritesOnly.toggle()
-            }
-
-            Divider().padding(.vertical, DSSpacing.xxs)
-
-            // Status used to live here as a filter, but the Home list is
-            // now grouped BY status (`groupedByStatus`) — a status filter
-            // on top of status sections would just hide 2 of the 3 section
-            // headers, so it was removed. Date narrows WITHIN whichever
-            // sections are showing instead.
-            popoverSectionHeader("Date")
-            // `list.bullet` (not `checkmark`) — the trailing checkmark on
-            // the right is already SwiftUI's "selected" indicator, so a
-            // second checkmark on the left read as a duplicate. A neutral
-            // "all items" glyph disambiguates.
-            popoverActionRow(
-                title: "All time",
-                systemImage: "list.bullet",
-                iconColor: Color.dsTextSecondary,
-                isTrailingCheck: viewModel.dateFilter == nil
-            ) {
-                viewModel.dateFilter = nil
-            }
-            ForEach(DateBucket.allCases, id: \.self) { bucket in
-                popoverActionRow(
-                    title: bucket.displayName,
-                    systemImage: "calendar",
-                    iconColor: Color.dsBrandPrimary,
-                    isTrailingCheck: viewModel.dateFilter == bucket
-                ) {
-                    viewModel.dateFilter = bucket
-                }
-            }
-
-            if viewModel.dateFilter != nil || viewModel.favouritesOnly {
-                Divider().padding(.vertical, DSSpacing.xxs)
-                popoverActionRow(
-                    title: "Clear all filters",
-                    systemImage: "xmark.circle",
-                    iconColor: Color.dsStatusError,
-                    tint: Color.dsStatusError
-                ) {
-                    viewModel.dateFilter = nil
-                    viewModel.favouritesOnly = false
-                }
-            }
-        }
-        // Extra top padding so "FAVOURITES" header breathes against the
-        // popover chrome (was `xs = 8` → felt cramped in the screenshot).
-        .padding(.top, DSSpacing.sm)
-        .padding(.bottom, DSSpacing.xs)
-        // S15 shift-left trick — leading padding widens the natural
-        // content box so iOS's popover positioner shifts it leftward.
-        // Kept at `xs = 8` (S15 final): larger values ended up affecting
-        // internal row layout too, not just the popover offset.
-        .padding(.leading, DSSpacing.xs)
-    }
 
     // MARK: - Rename + ZIP action handlers (kebab menu)
 
@@ -1587,64 +2105,6 @@ struct LibraryView: View {
         }
     }
 
-    private func popoverSectionHeader(_ title: String) -> some View {
-        Text(title.uppercased())
-            .font(DSFont.caption.weight(.semibold))
-            .foregroundStyle(Color.dsTextTertiary)
-            .padding(.horizontal, DSSpacing.md)
-            .padding(.top, DSSpacing.sm)
-            .padding(.bottom, DSSpacing.xxs)
-            .accessibilityAddTraits(.isHeader)
-    }
-
-    private func popoverActionRow(
-        title: String,
-        systemImage: String,
-        iconColor: Color = Color.dsBrandPrimary,
-        isTrailingCheck: Bool = false,
-        tint: Color? = nil,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button {
-            action()
-            isFilterPopoverPresented = false
-        } label: {
-            HStack(spacing: DSSpacing.sm) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 17, weight: .regular))
-                    .foregroundStyle(tint ?? iconColor)
-                    .frame(width: 22)
-                Text(title)
-                    .font(DSFont.body)
-                    .foregroundStyle(tint ?? Color.dsTextPrimary)
-                Spacer()
-                if isTrailingCheck {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Color.dsBrandPrimary)
-                }
-            }
-            .padding(.horizontal, DSSpacing.md)
-            // md (16) vertical (was sm=12) so rows read as ~52pt tall
-            // instead of ~44pt — the "too tight" spacing the user flagged. Matches
-            // the touch-target-generous rhythm of Mail's filter menu.
-            .padding(.vertical, DSSpacing.md)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var isAnyFilterActive: Bool {
-        activeFilterCount > 0
-    }
-
-    private var activeFilterCount: Int {
-        var count = 0
-        if viewModel.dateFilter != nil { count += 1 }
-        if viewModel.favouritesOnly { count += 1 }
-        return count
-    }
-
     // MARK: - Context menu (unchanged — long-press to change status)
 
     @ViewBuilder
@@ -1666,14 +2126,52 @@ struct LibraryView: View {
                 .disabled(status == entry.metadata.status)
             }
         }
+
+        if !folderManager.folders.isEmpty {
+            Section("Folders") {
+                Button {
+                    folderAssignEntryID = entry.id
+                } label: {
+                    let currentFolder = folderManager.folder(for: entry.id)
+                    Label(
+                        currentFolder != nil ? "Move to Folder…" : "Add to Folder…",
+                        systemImage: "folder.badge.plus"
+                    )
+                }
+            }
+        }
     }
 }
+
 
 // MARK: - View mode
 
 enum LibraryViewMode: String {
     case list
     case grid
+}
+
+// MARK: - Library tab
+
+enum LibraryTab: String, Hashable {
+    case files
+    case folders
+}
+
+// MARK: - Section navigation
+
+/// Typed navigation key for `NavigationStack.navigationDestination(for:)`.
+/// Replaces bare `DocumentStatus` appends so the "Continue Working" section
+/// can share the same `navPath` without a separate destination registration.
+enum LibrarySectionID: Hashable {
+    case status(DocumentStatus)
+    case continueWorking
+    case folder(UUID)
+}
+
+/// Wraps a String entry ID so it can be used with `sheet(item:)`.
+private struct FolderAssignID: Identifiable {
+    let id: String
 }
 
 private struct LibraryHeroCard: View {
@@ -1830,85 +2328,6 @@ private extension AnyTransition {
     }
 }
 
-private struct TypeTabButton: View {
-    let filter: DocumentTypeFilter
-    let count: Int
-    let isSelected: Bool
-    let reduceMotion: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: DSSpacing.xxs) {
-                leadingMarker
-                Text(filter.displayName)
-                    .font(DSFont.subheadline.weight(.semibold))
-                Text("\(count)")
-                    .font(DSFont.caption)
-                    .foregroundStyle(isSelected ? Color.dsTextOnBrand.opacity(0.85) : Color.dsTextTertiary)
-            }
-            .padding(.horizontal, DSSpacing.sm)
-            .padding(.vertical, DSSpacing.xs)
-            .foregroundStyle(isSelected ? Color.dsTextOnBrand : Color.dsTextPrimary)
-        }
-        // Flat solid fill, no Liquid Glass (2026-09-14 — glass dropped
-        // entirely here). Two earlier fixes already tried and failed to
-        // fully clear a dark smudge at the seam between the selected chip
-        // and its neighbour: removing an explicit `.shadow`, then removing
-        // a shared `GlassEffectContainer` — both left comments claiming
-        // the smudge was gone, but the user's actual screenshot still
-        // showed it. The material's own built-in ambient occlusion turned
-        // out to be the real source, so the fix is to not use glass on this
-        // strip at all. CLAUDE.md's own "glassmorphism as a default" caution
-        // agrees: reach for it deliberately, not by default.
-        .background {
-            Capsule().fill(isSelected ? Color.dsBrandPrimary : Color.dsBackgroundElevated)
-        }
-        .buttonStyle(.plain)
-        // Closure filter — fire haptic ONLY on the false→true transition.
-        // Without it, tapping a chip while another is selected produces
-        // a double bump (old chip deselect + new chip select), which
-        // reads as a stuttering vibration on every chip change. Same
-        // guard pattern as `PressableCardButtonStyle` in ToolsTabView.
-        .sensoryFeedback(.selection, trigger: isSelected) { _, newValue in
-            newValue
-        }
-        .animation(reduceMotion ? nil : .smooth(duration: 0.22), value: isSelected)
-        .accessibilityLabel("\(filter.displayName), \(count) documents")
-        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
-    }
-
-    // Chip All keeps the abstract brand dot; the four document-type chips
-    // swap the dot for the app icon so users read them as "Word / Excel /
-    // PowerPoint / PDF" at a glance instead of a color code.
-    @ViewBuilder
-    private var leadingMarker: some View {
-        switch filter {
-        case .all:
-            Circle()
-                .fill(isSelected ? Color.dsTextOnBrand : Color.dsBrandPrimary)
-                .frame(width: 7, height: 7)
-        case .word:
-            typeIcon("DocumentIconWord")
-        case .excel:
-            typeIcon("DocumentIconSpreadsheet")
-        case .powerPoint:
-            typeIcon("DocumentIconPresentation")
-        case .pdf:
-            typeIcon("DocumentIconPDF")
-        }
-    }
-
-    private func typeIcon(_ name: String) -> some View {
-        Image(name)
-            .resizable()
-            .renderingMode(.original)
-            .interpolation(.high)
-            .antialiased(true)
-            .frame(width: 18, height: 18)
-    }
-}
-
 // MARK: - Shared modifiers
 
 /// "Ghost" surface for the round icon buttons — same flat white fill
@@ -1938,7 +2357,8 @@ private struct RoundIconButtonSurface: ViewModifier {
                     lineWidth: isActive ? 1 : 0.5
                 )
             )
-            .shadow(color: .black.opacity(0.09), radius: 6, y: 4)
+            .shadow(color: .black.opacity(0.07), radius: 4, y: 1.5)
+            .shadow(color: .black.opacity(0.04), radius: 10, y: 3)
     }
 }
 
@@ -1950,20 +2370,244 @@ private extension View {
 
 // MARK: - Search bar (extracted for focus-state isolation)
 
-/// The search field + collapse-to-Cancel switcher, extracted from
-/// `LibraryView` **specifically** to own `@FocusState` inside this
-/// struct rather than on the parent. When `@FocusState` sat on
-/// `LibraryView`, every tap on the field re-ran the whole
-/// `LibraryView.body` — which re-diffed `titleRow` (the PremiumButton's
-/// gradient / shine / shadow recipe), the horizontal `typeTabs` strip
-/// of Liquid Glass chips, and the hero card. That was the click-lag
-/// the user flagged even after row-height, animation-consolidation,
-/// and search-input debounce fixes had all landed.
-///
-/// The trailing icons (view-mode + filter) are passed in via a
-/// `@ViewBuilder` closure so they can keep their own bindings in
-/// `LibraryView` (view mode is `@AppStorage`, filter popover state is
-/// `@State`) — this subview stays focused on the search-bar mechanics.
+/// Popover type filter — shown anchored below the Type pill; avoids covering action-row icons.
+private struct TypeFilterSheet: View {
+    @Binding var selection: DocumentTypeFilter
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Filter by Type")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Color.dsTextPrimary)
+                .padding(.horizontal, DSSpacing.lg)
+                .padding(.top, DSSpacing.md)
+                .padding(.bottom, DSSpacing.xs)
+
+            ForEach(DocumentTypeFilter.allCases) { filter in
+                Button {
+                    selection = filter
+                    dismiss()
+                } label: {
+                    HStack(spacing: DSSpacing.sm) {
+                        Group {
+                            if let assetName = filter.assetName {
+                                Image(assetName)
+                                    .resizable()
+                                    .scaledToFit()
+                            } else {
+                                Image(systemName: filter.systemImage)
+                                    .font(.system(size: 20))
+                                    .foregroundStyle(Color.dsBrandPrimary)
+                            }
+                        }
+                        .frame(width: 34, height: 34)
+
+                        Text(filter.displayName)
+                            .font(DSFont.body)
+                            .foregroundStyle(Color.dsTextPrimary)
+
+                        Spacer(minLength: 0)
+
+                        if filter == selection {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Color.dsBrandPrimary)
+                        }
+                    }
+                    .padding(.horizontal, DSSpacing.lg)
+                    .padding(.vertical, DSSpacing.sm)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if filter != DocumentTypeFilter.allCases.last {
+                    Divider()
+                        .padding(.leading, DSSpacing.lg + 34 + DSSpacing.sm)
+                }
+            }
+
+            Color.clear.frame(height: DSSpacing.md)
+        }
+    }
+}
+
+/// Popover file filter — Favourites toggle + date modified picker.
+private struct FileFilterSheet: View {
+    @Binding var favouritesOnly: Bool
+    @Binding var dateFilter: DateBucket?
+    @Environment(\.dismiss) private var dismiss
+
+    private var isActive: Bool { favouritesOnly || dateFilter != nil }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 0) {
+                Text("Filters")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Color.dsTextPrimary)
+                Spacer(minLength: 0)
+                if isActive {
+                    Button {
+                        favouritesOnly = false
+                        dateFilter = nil
+                    } label: {
+                        Text("Clear All")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(Color.dsBrandPrimary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, DSSpacing.lg)
+            .padding(.top, DSSpacing.md)
+            .padding(.bottom, DSSpacing.xs)
+
+            Toggle(isOn: $favouritesOnly) {
+                HStack(spacing: DSSpacing.sm) {
+                    Image(systemName: favouritesOnly ? "star.fill" : "star")
+                        .font(.system(size: 20))
+                        .foregroundStyle(favouritesOnly ? Color.yellow : Color.dsBrandPrimary)
+                        .frame(width: 34, height: 34)
+                    Text("Favourites Only")
+                        .font(DSFont.body)
+                        .foregroundStyle(Color.dsTextPrimary)
+                }
+            }
+            .toggleStyle(.switch)
+            .padding(.horizontal, DSSpacing.lg)
+            .padding(.vertical, DSSpacing.sm)
+
+            Divider()
+                .padding(.horizontal, DSSpacing.lg)
+                .padding(.vertical, DSSpacing.xs)
+
+            Text("Date Modified")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Color.dsTextSecondary)
+                .padding(.horizontal, DSSpacing.lg)
+                .padding(.bottom, DSSpacing.xxs)
+
+            dateRow("All Time", icon: "calendar", value: nil)
+
+            Divider().padding(.leading, DSSpacing.lg + 34 + DSSpacing.sm)
+
+            ForEach(DateBucket.allCases, id: \.self) { bucket in
+                dateRow(bucket.displayName, icon: "calendar.badge.clock", value: bucket)
+                if bucket != DateBucket.allCases.last {
+                    Divider().padding(.leading, DSSpacing.lg + 34 + DSSpacing.sm)
+                }
+            }
+
+            Color.clear.frame(height: DSSpacing.lg)
+        }
+    }
+
+    private func dateRow(_ label: String, icon: String, value: DateBucket?) -> some View {
+        Button {
+            dateFilter = value
+            dismiss()
+        } label: {
+            HStack(spacing: DSSpacing.sm) {
+                Image(systemName: icon)
+                    .font(.system(size: 20))
+                    .foregroundStyle(Color.dsBrandPrimary)
+                    .frame(width: 34, height: 34)
+                Text(label)
+                    .font(DSFont.body)
+                    .foregroundStyle(Color.dsTextPrimary)
+                Spacer(minLength: 0)
+                if dateFilter == value {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.dsBrandPrimary)
+                }
+            }
+            .padding(.horizontal, DSSpacing.lg)
+            .padding(.vertical, DSSpacing.sm)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Spring press animation for round icon buttons (search, filter, view-mode).
+private struct LibraryIconButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.88 : 1.0)
+            .animation(.spring(response: 0.25, dampingFraction: 0.55), value: configuration.isPressed)
+    }
+}
+
+/// Inline search bar for sticky `safeAreaInset` headers.
+/// Always shows Cancel + auto-focuses on appear.
+/// Does NOT call `hidesTabBarVisually` — safe inside safeAreaInset.
+private struct LibrarySearchBar: View {
+    var placeholder: String = "Search"
+    @Binding var input: String
+    let onCancel: () -> Void
+
+    @FocusState private var isFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        HStack(spacing: DSSpacing.xs) {
+            searchPill
+            cancelButton
+        }
+        .frame(height: DSSize.minimumTouchTarget)
+        .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: isFocused)
+        .task { isFocused = true }
+    }
+
+    private var searchPill: some View {
+        HStack(spacing: DSSpacing.xs) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(isFocused ? Color.dsBrandPrimary : Color.dsTextSecondary)
+                .font(.system(size: 15, weight: .medium))
+            TextField(placeholder, text: $input)
+                .textFieldStyle(.plain)
+                .submitLabel(.search)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .focused($isFocused)
+            if !input.isEmpty {
+                Button { input = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(Color.dsTextTertiary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, DSSpacing.md)
+        .frame(height: DSSize.minimumTouchTarget)
+        .background(Color.dsBackgroundElevated, in: Capsule())
+        .overlay(
+            Capsule().stroke(
+                isFocused ? Color.dsBrandPrimary.opacity(0.4) : Color.dsBorderSubtle.opacity(0.5),
+                lineWidth: isFocused ? 1.2 : 0.5
+            )
+        )
+        .shadow(color: .black.opacity(0.09), radius: 6, y: 4)
+    }
+
+    private var cancelButton: some View {
+        Button {
+            isFocused = false
+            input = ""
+            onCancel()
+        } label: {
+            Text("Cancel")
+                .font(DSFont.body)
+                .foregroundStyle(Color.dsBrandPrimary)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Close search")
+    }
+}
+
 private struct LibrarySearchAndActionsBar<Trailing: View>: View {
     @Binding var input: String
     let onClear: () -> Void
@@ -2011,8 +2655,11 @@ private struct LibrarySearchAndActionsBar<Trailing: View>: View {
 
     private var searchFieldPill: some View {
         HStack(spacing: DSSpacing.xs) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(Color.dsTextSecondary)
+            Button { isFocused = true } label: {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(Color.dsTextSecondary)
+            }
+            .buttonStyle(.plain)
             TextField("Search documents", text: $input)
                 .textFieldStyle(.plain)
                 .submitLabel(.search)
@@ -2053,6 +2700,47 @@ private struct LibrarySearchAndActionsBar<Trailing: View>: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Close search")
+    }
+}
+
+// MARK: - Folders first-launch tip
+
+private struct FoldersTipBanner: View {
+    var onDismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: DSSpacing.sm) {
+            Image(systemName: "folder.badge.plus")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(Color.dsBrandPrimary)
+                .frame(width: 32)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Organise with folders")
+                    .font(DSFont.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.dsTextPrimary)
+                Text("Long-press any file and tap \u{201C}Add to Folder\u{201D} to keep your documents organised")
+                    .font(DSFont.caption)
+                    .foregroundStyle(Color.dsTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+            Button {
+                withAnimation(.smooth(duration: 0.25)) { onDismiss() }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(Color.dsTextTertiary)
+                    .frame(width: 28, height: 28)
+                    .background(Color(UIColor.systemFill), in: Circle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(DSSpacing.sm)
+        .background(Color.dsBrandPrimary.opacity(0.07), in: RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous)
+                .stroke(Color.dsBrandPrimary.opacity(0.15), lineWidth: 0.5)
+        )
     }
 }
 
@@ -2161,6 +2849,350 @@ private struct DialogButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .background(configuration.isPressed ? Color.dsSurfacePressed : Color.clear)
+    }
+}
+
+// MARK: - Folder detail (reactive)
+
+/// Reactive folder-detail screen. Because `store.entries` is read inside this
+/// struct's `body`, `@Observable` tracks the dependency and re-renders whenever
+/// entries load or change — fixing the blank "No files" state that occurred when
+/// `navigationDestination` built the view before the store had finished loading.
+private struct FolderDetailContent: View {
+    let folderID: UUID
+    let folderName: String
+    let folderColor: Color
+    let store: LibraryStore
+
+    var onBack: () -> Void
+    var onTap: (LibraryEntry) -> Void
+    var onSaveExport: (LibraryEntry) -> Void
+    var onToggleFavourite: (LibraryEntry) -> Void
+    var onRename: (LibraryEntry, String) async -> Bool
+    var onConvertToZip: (LibraryEntry) -> Void
+    var onMarkDone: (LibraryEntry) -> Void
+    var onDeleteFile: (LibraryEntry) -> Void
+    var onChangeStatus: (LibraryEntry, DocumentStatus) -> Void
+
+    @State private var localSearch: String = ""
+    @State private var viewMode: LibraryViewMode = .list
+
+    var body: some View {
+        // Read directly from @Observable store + FolderManager in body so SwiftUI
+        // auto-tracks both — no onAppear/onChange needed.
+        let fm = FolderManager.shared
+        let ids = Set(fm.assignments.compactMap { $0.value == folderID ? $0.key : nil })
+        let folderEntries = store.entries
+            .filter { ids.contains($0.id) }
+            .sorted { $0.document.modifiedAt > $1.document.modifiedAt }
+
+        let query = localSearch.trimmingCharacters(in: .whitespaces)
+        let displayed: [LibraryEntry] = query.isEmpty
+            ? folderEntries
+            : folderEntries.filter { $0.document.name.localizedCaseInsensitiveContains(query) }
+
+        let continueItems = displayed
+            .filter { $0.metadata.isContinueWorking }
+            .sorted { $0.metadata.lastModifiedAt > $1.metadata.lastModifiedAt }
+        let continueIDs = Set(continueItems.map(\.id))
+        let rest = displayed.filter { !continueIDs.contains($0.id) }
+
+        let grouped = Dictionary(grouping: rest) { $0.metadata.status }
+        let sections: [(status: DocumentStatus, entries: [LibraryEntry])] = DocumentStatus.allCases.compactMap { s in
+            guard let es = grouped[s], !es.isEmpty else { return nil }
+            return (s, es)
+        }
+        let gridEntries = continueItems + rest
+        let isEmpty = displayed.isEmpty
+
+        return listBody(query: query, continueItems: continueItems,
+                        sections: sections, gridEntries: gridEntries, isEmpty: isEmpty)
+    }
+
+    // MARK: List body
+
+    @ViewBuilder
+    private func listBody(
+        query: String,
+        continueItems: [LibraryEntry],
+        sections: [(status: DocumentStatus, entries: [LibraryEntry])],
+        gridEntries: [LibraryEntry],
+        isEmpty: Bool
+    ) -> some View {
+        List {
+            if viewMode == .list {
+                // ── Continue Working (indigo rail — matches Home) ──
+                if !continueItems.isEmpty {
+                    Section {
+                        cwHeader(count: continueItems.count)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 3,
+                                                       bottom: 0, trailing: DSSpacing.xs))
+                            .listRowBackground(HStack(spacing: 0) {
+                                Color.indigo.frame(width: 3); Color.clear
+                            })
+                        ForEach(continueItems) { entry in
+                            cardRow(for: entry)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets(top: DSSpacing.xs, leading: 3,
+                                                           bottom: DSSpacing.xs, trailing: DSSpacing.xs))
+                                .listRowBackground(HStack(spacing: 0) {
+                                    Color.indigo.frame(width: 3); Color.clear
+                                })
+                        }
+                    }
+                }
+
+                // ── Status sections (colored rail) ──
+                ForEach(sections, id: \.status) { group in
+                    let isFirst = group.status == sections.first?.status
+                    Section {
+                        sectionHeader(status: group.status, count: group.entries.count)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: isFirst && continueItems.isEmpty ? 0 : DSSpacing.xs,
+                                                       leading: 3,
+                                                       bottom: 0,
+                                                       trailing: DSSpacing.xs))
+                            .listRowBackground(HStack(spacing: 0) {
+                                group.status.tintColor.frame(width: 3); Color.clear
+                            })
+                        ForEach(group.entries) { entry in
+                            cardRow(for: entry)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets(top: DSSpacing.xs, leading: 3,
+                                                           bottom: DSSpacing.xs, trailing: DSSpacing.xs))
+                                .listRowBackground(HStack(spacing: 0) {
+                                    group.status.tintColor.frame(width: 3); Color.clear
+                                })
+                        }
+                    }
+                }
+            } else {
+                // ── Grid mode: section headers + per-group grids ──
+                if !continueItems.isEmpty {
+                    Section {
+                        cwHeader(count: continueItems.count)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 3,
+                                                       bottom: DSSpacing.xs, trailing: DSSpacing.xs))
+                            .listRowBackground(HStack(spacing: 0) {
+                                Color.indigo.frame(width: 3); Color.clear
+                            })
+                        gridSection(entries: continueItems, tintColor: Color.indigo)
+                    }
+                }
+                ForEach(sections, id: \.status) { group in
+                    let isFirst = group.status == sections.first?.status
+                    Section {
+                        sectionHeader(status: group.status, count: group.entries.count)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: isFirst && continueItems.isEmpty ? 0 : DSSpacing.sm,
+                                                       leading: 3,
+                                                       bottom: DSSpacing.xs,
+                                                       trailing: DSSpacing.xs))
+                            .listRowBackground(HStack(spacing: 0) {
+                                group.status.tintColor.frame(width: 3); Color.clear
+                            })
+                        gridSection(entries: group.entries, tintColor: group.status.tintColor)
+                    }
+                }
+            }
+
+            // Bottom safe-area spacer
+            Section {
+                Color.clear
+                    .frame(height: DSTabBarMetrics.listContentTrailingSpacer)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
+        }
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(6)
+        .contentMargins(.top, 0, for: .scrollContent)
+        .background(Color(UIColor.systemGroupedBackground).ignoresSafeArea())
+        .autoHidesTabBarOnScroll()
+        .toolbar(.hidden, for: .navigationBar)
+        .onDisappear { localSearch = "" }
+        .overlay {
+            if isEmpty {
+                ContentUnavailableView(
+                    query.isEmpty ? "No files in this folder" : "No results",
+                    systemImage: query.isEmpty ? "folder" : "magnifyingglass",
+                    description: Text(query.isEmpty
+                        ? "Assign files to this folder from the library"
+                        : "No documents match \"\(query)\"")
+                )
+            }
+        }
+        // ── Sticky title + search header ──
+        .safeAreaInset(edge: .top, spacing: 0) {
+            VStack(spacing: 0) {
+                // Title row — back button left, folder name centered
+                ZStack {
+                    Text(folderName)
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundStyle(Color.primary)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.horizontal, 56)
+                    HStack {
+                        Button(action: onBack) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(Color.dsBrandPrimary)
+                                .frame(width: DSSize.minimumTouchTarget,
+                                       height: DSSize.minimumTouchTarget)
+                                .roundIconButtonSurface()
+                        }
+                        .buttonStyle(.plain)
+                        Spacer()
+                    }
+                }
+                .padding(.horizontal, DSSpacing.lg)
+                .frame(height: 52)
+
+                // Search + view-mode toggle
+                LibrarySearchAndActionsBar(
+                    input: $localSearch,
+                    onClear: { localSearch = "" }
+                ) {
+                    viewModeToggle
+                }
+                .padding(.horizontal, DSSpacing.md)
+                .padding(.top, DSSpacing.xs)
+                .padding(.bottom, DSSpacing.md)
+            }
+            // Matches insetGrouped list background so the sticky header blends seamlessly.
+            .background(Color(UIColor.systemGroupedBackground).ignoresSafeArea())
+        }
+    }
+
+    // One grid row for a set of entries inside the folder detail grid mode.
+    // tintColor drives the 3pt left rail in listRowBackground — matches list mode rail pattern.
+    // leadingPadding = 3 + DSSpacing.xs so grid tiles align with list-mode card edges (same 8pt gap from rail).
+    private func gridSection(entries: [LibraryEntry], tintColor: Color) -> some View {
+        DocumentGrid(
+            entries: entries,
+            onTap: { onTap($0) },
+            onSaveExport: { onSaveExport($0) },
+            onToggleFavourite: { onToggleFavourite($0) },
+            onRename: { entry, stem in await onRename(entry, stem) },
+            onConvertToZip: { onConvertToZip($0) },
+            onMarkDone: { onMarkDone($0) },
+            onDeleteFile: { onDeleteFile($0) },
+            onChangeStatus: { onChangeStatus($0, $1) },
+            leadingPadding: 3 + DSSpacing.xs
+        )
+        .listRowInsets(EdgeInsets())
+        .listRowBackground(HStack(spacing: 0) {
+            tintColor.frame(width: 3)
+            Color.clear
+        })
+        .listRowSeparator(.hidden)
+    }
+
+    // Continue Working section header — mirrors Home's continueWorkingTabHeader (indigo pill + dot count).
+    private func cwHeader(count: Int) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: DSSpacing.sm) {
+                HStack(spacing: 6) {
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                    Text("Continue Working")
+                        .font(.system(size: 15, weight: .semibold))
+                }
+                .foregroundStyle(Color.indigo)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color.indigo.opacity(0.10), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                Spacer(minLength: 0)
+
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(Color.indigo)
+                        .frame(width: 7, height: 7)
+                    Text("\(count)")
+                        .font(.system(size: 13, weight: .medium))
+                        .monospacedDigit()
+                        .foregroundStyle(Color.indigo.opacity(0.6))
+                }
+            }
+            .padding(.bottom, DSSpacing.sm)
+        }
+    }
+
+    // MARK: Helpers
+
+    private func cardRow(for entry: LibraryEntry) -> some View {
+        DocumentCard(
+            entry: entry,
+            onTap: { onTap(entry) },
+            onSaveExport: { onSaveExport(entry) },
+            onToggleFavourite: { onToggleFavourite(entry) },
+            onRename: { stem in await onRename(entry, stem) },
+            onConvertToZip: { onConvertToZip(entry) },
+            onMarkDone: { onMarkDone(entry) },
+            onDeleteFile: { onDeleteFile(entry) }
+        )
+        .padding(.horizontal, DSSpacing.sm)
+        .padding(.vertical, 10)
+        .background(Color.dsBackgroundElevated,
+                    in: RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous)
+            .strokeBorder(Color.dsBorderSubtle))
+        .shadow(color: .black.opacity(0.08), radius: 6, y: 3)
+    }
+
+    // Section header — mirrors Home's statusTabHeader (same pill + dot count, 15pt font).
+    private func sectionHeader(status: DocumentStatus, count: Int) -> some View {
+        let bg: Color = switch status {
+        case .getStarted: Color.dsBrandPrimary.opacity(0.08)
+        case .draft:      .dsStatusWarningBackground
+        case .reviewed:   .dsBrandPrimarySubtle
+        case .done:       .dsStatusSuccessBackground
+        }
+        return VStack(spacing: 0) {
+            HStack(spacing: DSSpacing.sm) {
+                HStack(spacing: 6) {
+                    Image(systemName: status.systemImage)
+                        .font(.system(size: 15, weight: .semibold))
+                    Text(status.displayName)
+                        .font(.system(size: 15, weight: .semibold))
+                }
+                .foregroundStyle(status.tintColor)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(bg, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                Spacer(minLength: 0)
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(status.tintColor)
+                        .frame(width: 7, height: 7)
+                    Text("\(count)")
+                        .font(.system(size: 13, weight: .medium))
+                        .monospacedDigit()
+                        .foregroundStyle(status.tintColor.opacity(0.6))
+                }
+            }
+            .padding(.bottom, DSSpacing.sm)
+        }
+    }
+
+    private var viewModeToggle: some View {
+        Button {
+            viewMode = viewMode == .list ? .grid : .list
+        } label: {
+            Image(systemName: viewMode == .list ? "square.grid.2x2" : "list.bullet")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Color.dsBrandPrimary)
+                .frame(width: DSSize.minimumTouchTarget, height: DSSize.minimumTouchTarget)
+                .roundIconButtonSurface()
+        }
+        .buttonStyle(LibraryIconButtonStyle())
+        .sensoryFeedback(.selection, trigger: viewMode)
+        .accessibilityLabel(viewMode == .list ? "Switch to grid view" : "Switch to list view")
     }
 }
 

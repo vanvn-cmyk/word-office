@@ -22,6 +22,9 @@ final class LibraryStore {
     /// folder to scan) — drives `LibraryView`'s "these are sample
     /// files" banner.
     var hasExternalFolder: Bool = false
+    /// Last-path-component of the resolved external folder URL.
+    /// Nil when running off the app's own Documents/ sandbox (no real folder grant).
+    var watchedFolderName: String? = nil
 
     /// Set when the user taps "Skip for now" on the permission onboarding screen.
     /// In-memory only (never persisted) — a fresh cold launch re-shows onboarding
@@ -31,13 +34,13 @@ final class LibraryStore {
     /// Drives the badge count on `LibraryView`. Derived — never write directly.
     /// See Library-Architecture.md §4 scenario 4 (status change → draftCount decreases automatically).
     var draftCount: Int {
-        entries.reduce(0) { $0 + ($1.metadata.status == .draft ? 1 : 0) }
+        entries.reduce(0) { $0 + ($1.metadata.status == .draft && !$1.metadata.isContinueWorking ? 1 : 0) }
     }
 
     /// Same derivation as `draftCount`, for `DocumentStatusTimeline`'s
     /// Reviewed/Done rows (2026-09-13).
     var reviewedCount: Int {
-        entries.reduce(0) { $0 + ($1.metadata.status == .reviewed ? 1 : 0) }
+        entries.reduce(0) { $0 + ($1.metadata.status == .reviewed && !$1.metadata.isContinueWorking ? 1 : 0) }
     }
 
     var doneCount: Int {

@@ -34,6 +34,16 @@ extension LibraryViewModel {
             }
     }
 
+    /// Entries the user explicitly flagged "Still in progress" from the editor
+    /// Done sheet. Sorted by `lastModifiedAt` descending. Rendered as the
+    /// "Continue Working" section at the very top of Home — above Needs Attention
+    /// and the status groups. Cleared by `recordOpen` / `setStatus`.
+    func continueWorkingEntries() -> [LibraryEntry] {
+        filteredEntries
+            .filter { $0.metadata.isContinueWorking }
+            .sorted { $0.metadata.lastModifiedAt > $1.metadata.lastModifiedAt }
+    }
+
     /// Non-due entries (from `filteredEntries`) grouped by `DocumentStatus`
     /// (2026-09-13 — was `DateBucket`; status is now Home's primary grouping,
     /// date moved to `dateFilter` in `+Filtering`), sorted by `modifiedAt`
@@ -41,10 +51,13 @@ extension LibraryViewModel {
     /// iterates only what it renders. Section order follows
     /// `DocumentStatus.allCases` (Draft → Reviewed → Done), the natural
     /// lifecycle progression, not entry recency.
+    /// Excludes entries already shown in `continueWorkingEntries()` so a file
+    /// never appears twice on the same screen.
     func groupedByStatus(now: Date = .now) -> [(status: DocumentStatus, entries: [LibraryEntry])] {
         let dueIDs = Set(dueReminderEntries(now: now).map(\.id))
+        let continueIDs = Set(continueWorkingEntries().map(\.id))
         let nonDue = filteredEntries
-            .filter { !dueIDs.contains($0.id) }
+            .filter { !dueIDs.contains($0.id) && !continueIDs.contains($0.id) }
             .sorted { $0.document.modifiedAt > $1.document.modifiedAt }
 
         let grouped = Dictionary(grouping: nonDue) { entry in

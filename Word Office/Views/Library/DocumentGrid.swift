@@ -276,7 +276,7 @@ private struct DocumentTile: View {
             .background(Color.dsBackgroundElevated, in: RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous).strokeBorder(Color.dsBorderSubtle.opacity(0.6), lineWidth: 0.5))
             .contentShape(RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous))
-            .shadow(color: .black.opacity(0.09), radius: 6, x: 0, y: 4)
+            .shadow(color: .black.opacity(0.04), radius: 8, x: 0, y: 2)
         }
         .buttonStyle(.plain)
         // `highPriorityGesture` gives the long-press recognizer precedence

@@ -74,11 +74,7 @@ struct OnboardingPageView: View {
         switch page.id {
         case .editOffice:
             ZStack {
-                Image(page.imageName)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(maxWidth: .infinity, maxHeight: heroMaxHeight, alignment: .top)
-                    .clipped()
+                heroImage(named: page.imageName)
                 if !reduceMotion {
                     S1SparkleOverlay(isActive: isActive)
                 }
@@ -86,11 +82,7 @@ struct OnboardingPageView: View {
 
         case .tools:
             ZStack {
-                Image(page.imageName)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(maxWidth: .infinity, maxHeight: heroMaxHeight, alignment: .top)
-                    .clipped()
+                heroImage(named: page.imageName)
 
                 ZStack {
                     // Split — pushed toward top, clears the image icons
@@ -135,11 +127,7 @@ struct OnboardingPageView: View {
 
         case .trackDocuments:
             ZStack {
-                Image(page.imageName)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(maxWidth: .infinity, maxHeight: heroMaxHeight, alignment: .top)
-                    .clipped()
+                heroImage(named: page.imageName)
                 S3StatusOverlay(isActive: isActive)
             }
 
@@ -151,6 +139,25 @@ struct OnboardingPageView: View {
                 .resizable()
                 .scaledToFit()
                 .frame(maxWidth: .infinity, maxHeight: heroMaxHeight)
+        }
+    }
+
+    /// Hero image with platform-appropriate scaling.
+    /// iPad: scaledToFit — full image visible, no cropping (wide screen would over-scale with Fill).
+    /// iPhone: scaledToFill + clipped — fills the card height edge-to-edge.
+    @ViewBuilder
+    private func heroImage(named name: String) -> some View {
+        if isPad {
+            Image(name)
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: .infinity, maxHeight: heroMaxHeight)
+        } else {
+            Image(name)
+                .resizable()
+                .scaledToFill()
+                .frame(maxWidth: .infinity, maxHeight: heroMaxHeight, alignment: .top)
+                .clipped()
         }
     }
 

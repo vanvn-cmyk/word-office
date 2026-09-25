@@ -16,6 +16,7 @@ struct DocumentCard: View {
     var onConvertToZip: (() -> Void)? = nil
     var onMarkDone: (() -> Void)? = nil
     var onDeleteFile: (() -> Void)? = nil
+    var onAddToFolder: (() -> Void)? = nil
 
     @Environment(LibraryStore.self) private var libraryStore
 
@@ -104,7 +105,8 @@ struct DocumentCard: View {
                     onConvertToZip: { onConvertToZip?() },
                     currentStatus: entry.metadata.status,
                     onMarkDone: { onMarkDone?() },
-                    onDelete: { onDeleteFile?() }
+                    onDelete: { onDeleteFile?() },
+                    onAddToFolder: onAddToFolder
                 )
             }
         }
@@ -199,6 +201,10 @@ struct FileActionsMenu: View {
     /// Fires only after the user confirms the destructive alert below —
     /// never call this straight from the row tap.
     let onDelete: () -> Void
+    /// Optional — when nil the "Add to Folder" row is hidden.
+    /// LibraryView provides this only when at least one folder exists,
+    /// so the menu stays clean for users who haven't created folders yet.
+    var onAddToFolder: (() -> Void)? = nil
 
     @State private var isActionsSheetPresented = false
     /// Toggled inside the full-screen overlay to drive the card's own
@@ -442,7 +448,7 @@ struct FileActionsMenu: View {
             .fill(Color.dsBackgroundPrimary)
             .ignoresSafeArea(edges: .bottom)
         )
-        .shadow(color: .black.opacity(0.14), radius: 24, y: -4)
+        .shadow(color: .black.opacity(0.06), radius: 20, y: -2)
     }
 
     /// Two-phase dismiss: animate the card out first, then teardown the
@@ -517,6 +523,15 @@ struct FileActionsMenu: View {
                         try? await Task.sleep(for: .milliseconds(350))
                         isSharePresented = true
                     }
+                }
+            }
+            if let onAddToFolder {
+                rowDivider
+                actionRow(
+                    title: "Add to Folder",
+                    systemImage: "folder.badge.plus"
+                ) {
+                    onAddToFolder()
                 }
             }
             rowDivider

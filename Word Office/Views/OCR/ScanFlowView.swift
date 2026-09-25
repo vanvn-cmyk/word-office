@@ -2,6 +2,7 @@
 // on OCRViewModel.recognize(_:), then a dual export step (editable .docx primary,
 // searchable PDF secondary/optional) per §6.5.
 
+import AVFoundation
 import PDFKit
 import PhotosUI
 import SwiftUI
@@ -92,6 +93,9 @@ struct ScanFlowView: View {
     /// flow cancel back to the pages grid doesn't re-fire the camera
     /// unexpectedly.
     @State private var hasAutoOpenedCamera = false
+    /// Shown when camera permission is permanently denied — directs the user
+    /// to iOS Settings rather than leaving them on a frozen black screen.
+    @State private var showCameraPermissionDeniedAlert = false
     /// Drives `.photosPicker(isPresented:)` for the quick "Photos"
     /// shortcut overlaid on the live camera scanner (below) — the
     /// landing state's own "Choose from Photos" is a `PhotosPicker`
@@ -101,27 +105,23 @@ struct ScanFlowView: View {
     /// short delay, before presenting), so it still needs this.
     @State private var isPhotosPickerPresented = false
 
-    /// True only when a real, usable document-scanner camera is
-    /// present. Combines Apple's own API (`VNDocumentCameraViewController.isSupported`,
-    /// which reports false on the iOS Simulator and on rare device
-    /// configurations without a camera) with a belt-and-braces
-    /// `#if targetEnvironment(simulator)` compile-time guard so a
-    /// future iOS-simulator change that flips `isSupported` to `true`
-    /// without providing an actual camera session (would present a
-    /// frozen black `VNDocumentCameraViewController` again) still
-    /// gets caught here at compile time.
+    /// True on all real devices; false on the Simulator (no camera session).
+    /// `VNDocumentCameraViewController.isSupported` can return false on certain
+    /// MDM-managed or restricted devices even though hardware is present —
+    /// replaced with a simple non-simulator guard so real devices always reach
+    /// the camera. The document scanner VC itself handles unsupported states.
     private var isCameraAvailable: Bool {
         #if targetEnvironment(simulator)
         return false
         #else
-        return VNDocumentCameraViewController.isSupported
+        return true
         #endif
     }
 
     var body: some View {
         stateContent
             .prominentInlineTitle(navigationTitle)
-            .navigationBarBackButtonHidden(stage != .addPages)
+            .navigationBarBackButtonHidden(true)
             .toolbar { toolbarContent }
             .fullScreenCover(isPresented: $isCameraPresented) { cameraSheet }
             .fileImporter(isPresented: $isPDFPickerPresented, allowedContentTypes: [.pdf], onCompletion: handlePDFPicked)
@@ -140,6 +140,16 @@ struct ScanFlowView: View {
                 matching: .images
             )
             .sheet(isPresented: $isSourceSheetPresented) { sourceOptionsSheet }
+            .alert("Camera Access Required", isPresented: $showCameraPermissionDeniedAlert) {
+                Button("Open Settings") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Word Office needs camera access to scan documents. Please enable it in Settings > Privacy & Security > Camera.")
+            }
             .onChange(of: photoItems) { _, items in
                 Task { await loadPhotos(items) }
             }
@@ -168,7 +178,7 @@ struct ScanFlowView: View {
                 // same frozen state.
                 if pages.isEmpty && !hasAutoOpenedCamera && isCameraAvailable {
                     hasAutoOpenedCamera = true
-                    isCameraPresented = true
+                    Task { await requestCameraAndOpen() }
                 }
             }
             .onDisappear { viewModel.reset() }
@@ -229,9 +239,17 @@ struct ScanFlowView: View {
     private var toolbarContent: some ToolbarContent {
         switch stage {
         case .addPages:
-            if showsExplicitCancel {
-                ToolbarItem(placement: .cancellationAction) {
+            // Sheet path: explicit Cancel since there's no nav stack back chevron.
+            // Nav-stack path: custom chevron so it looks identical to the "Back"
+            // pills on later stages (same foreground color, no iOS-26 glass styling).
+            ToolbarItem(placement: .cancellationAction) {
+                if showsExplicitCancel {
                     Button("Cancel") { dismiss() }
+                } else {
+                    Button { dismiss() } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 16, weight: .semibold))
+                    }
                 }
             }
             if !pages.isEmpty {
@@ -243,14 +261,20 @@ struct ScanFlowView: View {
             }
         case .review:
             ToolbarItem(placement: .cancellationAction) {
-                Button("Back") { stage = .addPages }
+                Button { stage = .addPages } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 16, weight: .semibold))
+                }
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Next") { stage = .exportFormat }.fontWeight(.semibold)
             }
         case .exportFormat:
             ToolbarItem(placement: .cancellationAction) {
-                Button("Back") { stage = .review }
+                Button { stage = .review } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 16, weight: .semibold))
+                }
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save") { Task { await performSave() } }
@@ -418,7 +442,7 @@ struct ScanFlowView: View {
     private var sourceOptionsSheet: some View {
         VStack(spacing: 0) {
             sourceRow(icon: "viewfinder", title: "Scan with Camera", isDisabled: !isCameraAvailable) {
-                selectSource { isCameraPresented = true }
+                selectSource { Task { await requestCameraAndOpen() } }
             }
             Divider().padding(.leading, 56)
             sourceRow(icon: "photo.on.rectangle", title: "Choose from Photos") {
@@ -472,6 +496,27 @@ struct ScanFlowView: View {
         }
         .buttonStyle(.plain)
         .disabled(isDisabled)
+    }
+
+    /// Checks camera authorization before presenting the scanner.
+    /// - `.authorized`: opens immediately.
+    /// - `.notDetermined`: requests access; opens on grant.
+    /// - `.denied` / `.restricted`: shows the "Open Settings" alert so the
+    ///   user isn't left staring at a frozen black camera screen.
+    @MainActor
+    private func requestCameraAndOpen() async {
+        let status = AVCaptureDevice.authorizationStatus(for: .video)
+        switch status {
+        case .authorized:
+            isCameraPresented = true
+        case .notDetermined:
+            let granted = await AVCaptureDevice.requestAccess(for: .video)
+            if granted { isCameraPresented = true } else { showCameraPermissionDeniedAlert = true }
+        case .denied, .restricted:
+            showCameraPermissionDeniedAlert = true
+        @unknown default:
+            isCameraPresented = true
+        }
     }
 
     /// Dismisses the sheet, then fires `trigger` after a short delay —
@@ -574,33 +619,23 @@ struct ScanFlowView: View {
                 ? "Your document was saved to your Library"
                 : "\(urls.count) files were saved to your Library"
             toaster.show(.success, title: title, filename: filename)
-            // Single-file save: navigate directly to the recognized doc.
-            // Both-formats save: hand the pair to the gallery so the user
-            // can inspect and open each format without hunting in Library.
-            if urls.count == 1, let url = urls.first {
-                onOpenFile?(url)
-            } else {
-                onShowGallery?(urls)
-            }
-            // The Library FAB entry point (`LibraryAddButton`) supplies
-            // neither callback — a sheet with no editor/gallery destination
-            // reachable from it. Without this, the sheet stayed stuck on
-            // `.exportFormat` with Save still enabled against the same
-            // already-recognized pages, so a second tap silently wrote a
-            // second, distinctly-named export ("Scan 2026-09-05 (2).docx").
+            // Library FAB path (no callbacks): dismiss so the user can find
+            // the saved file in the Library tab.
             if onOpenFile == nil && onShowGallery == nil {
                 dismiss()
             } else {
-                // Tools-tab entry (has callbacks): the callback opens the
-                // editor or gallery on top, but this view stays alive on
-                // the nav stack with `pages`/`results` intact. A second
-                // Save tap would export the same recognized pages again
-                // under a `(2)` suffix (F5). Clear the recognized state
-                // so the export button is `.disabled` and the user has to
-                // re-recognize before another Save can fire.
+                // Tools-tab path: reset scan state and immediately re-open
+                // the camera for the next scan. Calling onOpenFile here would
+                // open the editor, set shouldPopNavAfterEditorDismisses, and
+                // land the user at Tools home on editor close — not back on
+                // the scan screen with camera ready. Saved files are in Library.
                 pages.removeAll()
                 viewModel.reset()
                 stage = .addPages
+                if isCameraAvailable {
+                    hasAutoOpenedCamera = false
+                    await requestCameraAndOpen()
+                }
             }
         } catch {
             viewModel.errorMessage = error.localizedDescription

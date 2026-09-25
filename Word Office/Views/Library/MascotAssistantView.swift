@@ -1,5 +1,10 @@
 import SwiftUI
 
+extension Notification.Name {
+    static let mascotScrollToReviewed = Notification.Name("mascotScrollToReviewed")
+    static let mascotScrollToDraft    = Notification.Name("mascotScrollToDraft")
+}
+
 // MARK: - Main View
 
 struct MascotAssistantView: View {
@@ -10,15 +15,17 @@ struct MascotAssistantView: View {
     @State private var phase: MascotPhase = .intro
     @State private var floatOffset: CGFloat = 0
     @State private var ringScale: CGFloat = 1.0
-    @State private var ringOpacity: Double = 0.55
+    @State private var ringOpacity: Double = 0.35
     @State private var isExiting: Bool = false
     /// Incremented to restart the `.task(id:)` message cycle (e.g. on re-show).
     @State private var cycleID: Int = 0
     /// Persisted: intro greeting shown only on the very first appearance.
     @AppStorage("mascot.hasSeenIntro") private var hasSeenIntro: Bool = false
-    /// Persisted: user explicitly dismissed the mascot via the X button.
-    /// Reset when new pending files arrive so the mascot can re-surface.
-    @AppStorage("mascot.dismissed") private var isDismissed: Bool = false
+    /// Session-only: user tapped X to hide the mascot for this launch.
+    /// Not persisted — on next launch or when new pending files arrive
+    /// the mascot re-surfaces automatically.
+    @State private var isDismissed: Bool = false
+    @State private var mascotScale: CGFloat = 1.0
 
     // MARK: Derived
     private var draftCount: Int    { store.draftCount }
@@ -75,40 +82,42 @@ struct MascotAssistantView: View {
 
     var body: some View {
         if !isDismissed && (pendingCount > 0 || phase == .allDone) {
-            // ZStack layers the display content (non-interactive) under the
-            // dismiss X (interactive). `.allowsHitTesting(false)` on the inner
-            // VStack lets taps on the bubble/avatar fall through to library
-            // content below — only the X button intercepts touches.
-            ZStack(alignment: .topTrailing) {
-                VStack(alignment: .trailing, spacing: 10) {
-                    speechBubble
-                        .transition(
-                            .scale(scale: 0.72, anchor: .bottomTrailing)
-                            .combined(with: .opacity)
-                        )
+            // X is inside the Button label so iOS 26's long-press highlight
+            // dims it together with the speech bubble and avatar.
+            // The inner Button intercepts its own tap → isDismissed fires,
+            // outer onTapMascot does not.
+            Button {
+                onTapMascot()
+            } label: {
+                ZStack(alignment: .topTrailing) {
+                    VStack(alignment: .trailing, spacing: 10) {
+                        speechBubble
+                            .transition(
+                                .scale(scale: 0.72, anchor: .bottomTrailing)
+                                .combined(with: .opacity)
+                            )
 
-                    mascotAvatar
-                }
-                .allowsHitTesting(false)
-
-                // Small dismiss button at the bubble's top-right corner.
-                Button {
-                    withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.8)) {
-                        isDismissed = true
+                        mascotAvatar
                     }
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(Color.dsTextSecondary)
-                        .frame(width: 20, height: 20)
-                        .background(Color.secondary.opacity(0.14), in: Circle())
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
+
+                    Button {
+                        withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.8)) {
+                            isDismissed = true
+                        }
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(Color.dsTextSecondary)
+                            .frame(width: 20, height: 20)
+                            .background(Color.secondary.opacity(0.14), in: Circle())
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
-                .padding(.top, -8)
-                .padding(.trailing, -8)
             }
+            .buttonStyle(.plain)
+            .scaleEffect(mascotScale, anchor: .bottomTrailing)
             .opacity(isExiting ? 0 : 1)
             .scaleEffect(isExiting ? 0.75 : 1, anchor: .bottomTrailing)
             .animation(
@@ -172,17 +181,17 @@ struct MascotAssistantView: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 11)
-            .frame(maxWidth: 210)
+            .frame(maxWidth: 175)
             .background {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.dsBackgroundElevated)
+                    .fill(.regularMaterial)
                     .shadow(color: .black.opacity(0.07), radius: 6, x: 0, y: 3)
                     .shadow(color: .black.opacity(0.04), radius: 18, x: 0, y: 8)
             }
 
             // Tail pointing down toward avatar
             MascotBubbleTail()
-                .fill(Color.dsBackgroundElevated)
+                .fill(.regularMaterial)
                 .frame(width: 15, height: 9)
                 .padding(.trailing, 28)
         }
@@ -194,7 +203,7 @@ struct MascotAssistantView: View {
         ZStack {
             // Expanding pulse ring
             Circle()
-                .strokeBorder(Color.dsBrandPrimary.opacity(ringOpacity), lineWidth: 2.5)
+                .strokeBorder(Color.dsBrandPrimary.opacity(ringOpacity), lineWidth: 1.5)
                 .frame(width: 84, height: 84)
                 .scaleEffect(ringScale)
 
@@ -208,6 +217,25 @@ struct MascotAssistantView: View {
         .offset(y: floatOffset)
     }
 
+    // MARK: Tap
+
+    private func onTapMascot() {
+        // Scroll to the most actionable pending section:
+        // Draft takes priority (user must finalize before review); fall back to Reviewed.
+        let notification: Notification.Name = draftCount > 0 ? .mascotScrollToDraft : .mascotScrollToReviewed
+        NotificationCenter.default.post(name: notification, object: nil)
+        guard !reduceMotion else { return }
+        withAnimation(.spring(response: 0.15, dampingFraction: 0.5)) {
+            mascotScale = 0.92
+        }
+        Task {
+            try? await Task.sleep(for: .milliseconds(160))
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.65)) {
+                mascotScale = 1.0
+            }
+        }
+    }
+
     // MARK: Animations
 
     private func startIdleAnimations() {
@@ -217,8 +245,8 @@ struct MascotAssistantView: View {
             floatOffset = -7
         }
         // Expanding pulse ring
-        withAnimation(.easeOut(duration: 1.9).repeatForever(autoreverses: false)) {
-            ringScale   = 1.7
+        withAnimation(.easeOut(duration: 2.2).repeatForever(autoreverses: false)) {
+            ringScale   = 1.4
             ringOpacity = 0
         }
     }

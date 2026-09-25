@@ -40,6 +40,20 @@ struct PaywallView: View {
     @State private var showCloseButton = false
     private let showCloseDelay: Duration = .seconds(3)
 
+    /// Container height — measured via onGeometryChange so heroContent can
+    /// reduce the illustration height on short screens and prevent the 4th
+    /// benefit from being clipped by the bottom card.
+    @State private var containerHeight: CGFloat = 812
+
+    /// True for non-iPad screens shorter than 740pt (iPhone SE & mini family).
+    /// Drives tighter spacing and a shorter illustration so all 4 benefits fit.
+    private var isCompact: Bool { hSizeClass != .regular && containerHeight < 740 }
+
+    /// True for standard iPhones (740–809pt safe-area height — iPhone 16, 15, 14 family).
+    /// Uses 145pt illustration instead of 195pt; the safe-area content on a 393×852pt
+    /// iPhone 16 is ~764pt, leaving barely 1pt of Spacer at 195pt → subtitle clips.
+    private var isMedium: Bool { hSizeClass != .regular && !isCompact && containerHeight < 810 }
+
     /// Not real Terms/Privacy pages yet — same situation as
     /// `SettingsView.privacyPolicyURL`/`termsOfServiceURL` (app hasn't
     /// shipped). Kept as a separate, local optional here rather than shared
@@ -102,6 +116,7 @@ struct PaywallView: View {
                 Spacer(minLength: 0)
                 bottomCard
             }
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { containerHeight = $0 }
         }
         .overlay(alignment: .topTrailing) {
             if showCloseButton { closeButton }
@@ -178,11 +193,15 @@ struct PaywallView: View {
     /// split (which the user flagged as "xấu" through three iterations).
     private var heroContent: some View {
         let isPad = hSizeClass == .regular
-        return VStack(spacing: DSSpacing.md) {
+        let compact = isCompact
+        return VStack(spacing: compact ? DSSpacing.xs : DSSpacing.md) {
             Image("PaywallHeroIllustration")
                 .resizable()
                 .scaledToFit()
-                .frame(maxHeight: isPad ? 290 : 195)
+                // compact: 110pt — iPhone SE / mini (containerHeight < 740).
+                // medium:  145pt — standard iPhones 14/15/16 (containerHeight 740–809).
+                // default: 195pt — tall iPhones (Pro Max) and iPads.
+                .frame(maxHeight: isPad ? 290 : compact ? 110 : isMedium ? 145 : 195)
                 .padding(.horizontal, DSSpacing.xs)
 
             VStack(spacing: DSSpacing.xxs) {
@@ -219,7 +238,7 @@ struct PaywallView: View {
             // restored per the user's explicit request) — the
             // illustration is what absorbs the resulting space pressure,
             // per `body`'s comment.
-            VStack(alignment: .leading, spacing: isPad ? DSSpacing.sm : DSSpacing.xs) {
+            VStack(alignment: .leading, spacing: compact ? DSSpacing.xs : DSSpacing.md) {
                 HeroBenefitRow(
                     icon: "square.and.pencil",
                     title: "Edit Office Files",
@@ -247,7 +266,7 @@ struct PaywallView: View {
             }
             .padding(.horizontal, DSSpacing.lg)
         }
-        .padding(.top, DSSpacing.xxs)
+        .padding(.top, compact ? 0 : DSSpacing.xxs)
         .frame(maxWidth: .infinity)
     }
 
@@ -425,18 +444,18 @@ private struct HeroBenefitRow: View {
     var isLarge: Bool = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: DSSpacing.sm) {
+        HStack(alignment: .center, spacing: DSSpacing.sm) {
             ZStack {
                 Circle().fill(.white)
                 Image(systemName: icon)
-                    .font(.system(size: isLarge ? 20 : 15, weight: .bold))
+                    .font(.system(size: isLarge ? 20 : 16, weight: .bold))
                     .foregroundStyle(Color.dsBrandPrimary)
             }
-            .frame(width: isLarge ? 44 : 34, height: isLarge ? 44 : 34)
+            .frame(width: isLarge ? 44 : 36, height: isLarge ? 44 : 36)
             .shadow(color: .black.opacity(0.15), radius: 3, y: 1.5)
             .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: isLarge ? 3 : 1) {
+            VStack(alignment: .leading, spacing: DSSpacing.xxs) {
                 Text(title)
                     .font(isLarge ? DSFont.title3 : DSFont.callout.weight(.semibold))
                     .foregroundStyle(.white)
@@ -444,8 +463,8 @@ private struct HeroBenefitRow: View {
                 Text(subtitle)
                     .font(isLarge ? DSFont.callout : DSFont.footnote)
                     .foregroundStyle(.white.opacity(0.75))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.9)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

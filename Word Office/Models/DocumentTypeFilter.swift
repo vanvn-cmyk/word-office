@@ -22,6 +22,27 @@ enum DocumentTypeFilter: CaseIterable, Identifiable, Hashable, Sendable {
         }
     }
 
+    var systemImage: String {
+        switch self {
+        case .all:        "doc.on.doc"
+        case .word:       "doc.richtext"
+        case .excel:      "tablecells"
+        case .powerPoint: "play.rectangle"
+        case .pdf:        "doc.text"
+        }
+    }
+
+    /// Named image asset; nil = use systemImage fallback (for .all).
+    var assetName: String? {
+        switch self {
+        case .all:        nil
+        case .word:       "DocumentIconWord"
+        case .excel:      "DocumentIconSpreadsheet"
+        case .powerPoint: "DocumentIconPresentation"
+        case .pdf:        "DocumentIconPDF"
+        }
+    }
+
     /// `nil` means "match every kind" (`.all`).
     var kinds: Set<DocumentKind>? {
         switch self {

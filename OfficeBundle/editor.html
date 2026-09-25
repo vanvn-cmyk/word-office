@@ -117,6 +117,7 @@
     let pendingFilePayload = null; // set by receiveFileFromIOS before editor loads
     let _innerWin = null;          // inner iframe contentWindow, saved in onAppReady()
     let _currentDocType = null;    // "word" | "cell" | "slide" — set in createEditor()
+    let _userZoomOverride = false; // true after user manually zooms PPT — suppresses further zoomFitToPage calls
 
     // Show the "requires internet" hint after 5 s if the editor hasn't become
     // ready yet — the CDN sdkjs download is what takes time on first launch.
@@ -148,36 +149,55 @@
         else if (typeof _ed.asc_getCurrentPageIndex     === 'function') _cur = (_ed.asc_getCurrentPageIndex()     || 0) + 1;
         else if (typeof _ed.getCurrentPageIndex         === 'function') _cur = (_ed.getCurrentPageIndex()         || 0) + 1;
         else if (typeof _ed.getCurrentPage              === 'function') _cur = (_ed.getCurrentPage()              || 0) + 1;
-        // total slides
-        if      (typeof _ed.asc_getSlidesCount          === 'function') _tot = _ed.asc_getSlidesCount()          || 1;
-        else if (typeof _ed.asc_getSlideCount           === 'function') _tot = _ed.asc_getSlideCount()           || 1;
-        else if (typeof _ed.asc_getCountPages           === 'function') _tot = _ed.asc_getCountPages()           || 1;
-        else if (typeof _ed.asc_getPagesCount           === 'function') _tot = _ed.asc_getPagesCount()           || 1;
-        else if (typeof _ed.getSlideCount               === 'function') _tot = _ed.getSlideCount()               || 1;
-        else if (typeof _ed.getPresentationInfo         === 'function') { try { _tot = (_ed.getPresentationInfo() || {}).slides || 1; } catch(_) {} }
-        // DOM fallback: count slide thumbnail elements rendered by OO in the inner frame
-        if (_tot <= 1) {
-          try {
-            var _fr3 = document.querySelector('iframe[name="frameEditor"]');
-            var _doc3 = _fr3 && _fr3.contentDocument;
-            if (_doc3) {
-              var _thumbSelectors = [
-                '[id*="-slide-"]:not(body):not(html)',
-                '[class*="slide-item"]','[class*="pe-slide"]',
-                '[class*="thumbnail-item"]','[data-slide-index]',
-                'li[class*="slide"]','div[class*="slide"]'
-              ];
-              for (var _tsi = 0; _tsi < _thumbSelectors.length; _tsi++) {
-                var _thumbs = _doc3.querySelectorAll(_thumbSelectors[_tsi]);
-                if (_thumbs.length > 1) { _tot = _thumbs.length; break; }
-              }
-            }
-          } catch(_) {}
-        }
+        // total slides — do NOT use || 1 fallback: 0 is valid (all slides deleted)
+        if      (typeof _ed.asc_getSlidesCount          === 'function') _tot = _ed.asc_getSlidesCount()          || 0;
+        else if (typeof _ed.asc_getSlideCount           === 'function') _tot = _ed.asc_getSlideCount()           || 0;
+        else if (typeof _ed.asc_getCountPages           === 'function') _tot = _ed.asc_getCountPages()           || 0;
+        else if (typeof _ed.asc_getPagesCount           === 'function') _tot = _ed.asc_getPagesCount()           || 0;
+        else if (typeof _ed.getCountPages               === 'function') _tot = _ed.getCountPages()               || 0;
+        else if (typeof _ed.getSlideCount               === 'function') _tot = _ed.getSlideCount()               || 0;
+        else if (typeof _ed.getPresentationInfo         === 'function') { try { _tot = (_ed.getPresentationInfo() || {}).slides || 0; } catch(_) {} }
+        // DOM fallback was removed: it counted OO's stale thumbnail DOM elements
+        // after slide deletion, causing the toolbar to show incorrect totals.
+        // The API return value (including 0) is trusted directly.
+        // Sanity-clamp: asc_getCurrentSlide() can return a stale index briefly after
+        // delete/add (race between slide model update and callback). Clamp to valid range.
+        if (_tot > 0 && _cur > _tot) _cur = _tot;
+        if (_cur < 1) _cur = 1;
         window.webkit.messageHandlers.editorBridge.postMessage({
           action: 'slideChange', current: _cur, total: _tot
         });
+        // Capture thumbnail for current slide so the strip updates immediately
+        // (ooUIScript's periodic reportSlides() only fires at 3s/6s/10s from load).
+        var _thumbSlide = _cur;
+        setTimeout(function() { _captureSlideThumb(_thumbSlide); }, 60);
       } catch(_e) {}
+    }
+
+    // Captures OO's slide render canvas and sends thumbnail to Swift for the strip.
+    // Mirrors captureThumb() in ooUIScript but runs from editor.html (has _innerWin directly).
+    function _captureSlideThumb(slideNum) {
+      try {
+        var _td = _innerWin && _innerWin.document;
+        if (!_td) return;
+        var _biggest = null, _bigArea = 0;
+        _td.querySelectorAll('canvas').forEach(function(c) {
+          var w = c.width || c.offsetWidth || 0, h = c.height || c.offsetHeight || 0;
+          var area = w * h;
+          if (area > _bigArea && w > 100 && h > 60) { _bigArea = area; _biggest = c; }
+        });
+        if (!_biggest) return;
+        var _out = document.createElement('canvas');
+        _out.width = 192; _out.height = 108;
+        var _ctx = _out.getContext('2d');
+        if (!_ctx) return;
+        _ctx.drawImage(_biggest, 0, 0, _biggest.width, _biggest.height, 0, 0, 192, 108);
+        var _b64 = _out.toDataURL('image/jpeg', 0.6).split(',')[1];
+        if (!_b64) return;
+        window.webkit.messageHandlers.editorBridge.postMessage(
+          { action: 'slideThumbnail', slideNum: slideNum, data: _b64 }
+        );
+      } catch(_) {}
     }
 
     // ── Word page position reporter ───────────────────────────────────────────
@@ -999,26 +1019,26 @@
       //   mode, not edit mode), so typed characters go nowhere and the keyboard blocks the view.
       if (_currentDocType === 'word' || _currentDocType === 'cell' || _currentDocType === 'slide') {
         try {
-          // (a) focus override — intercepts area_id (Word/Excel) and _oo_ppt_kbd (PPT)
+          // (a) focus override — intercepts area_id (Word/Excel only) and _oo_ppt_kbd (PPT only).
+          // PPT must NOT intercept area_id: OO focuses area_id on any canvas tap (selection mode),
+          // not just on text-box edit entry. Intercepting it would make the keyboard appear on
+          // every touch and allow typing anywhere on the slide canvas.
           var _origElFocus = innerWin.HTMLElement.prototype.focus;
           innerWin.HTMLElement.prototype.focus = function(opts) {
             var _id = this && this.id;
-            if (_id === 'area_id' || _id === '_oo_ppt_kbd') {
+            var _isPPT = (typeof _currentDocType !== 'undefined' && _currentDocType === 'slide');
+            // Word/Excel: intercept area_id. PPT: intercept _oo_ppt_kbd only.
+            var _intercept = _isPPT ? (_id === '_oo_ppt_kbd') : (_id === 'area_id' || _id === '_oo_ppt_kbd');
+            if (_intercept) {
               // Tell Swift → UITextField becomes iOS first responder for keyboard input
               try { window.webkit.messageHandlers.editorBridge.postMessage({action:'focusKeyboard'}); } catch(_kf) {}
-              // MUST call original: OO needs the element in DOM focus to activate cursor
-              // and register its keyboard handlers (N0e for Word; E4b for PPT).
-              if (_origElFocus) _origElFocus.call(this, opts);
-              // PPT: re-confirm SetDeviceInputHelperId on focus so OO's E4b handler is
-              // definitely registered at the moment the keyboard is about to appear.
-              if (_id === '_oo_ppt_kbd') {
-                try {
-                  var _ed2 = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
-                  if (_ed2 && typeof _ed2.SetDeviceInputHelperId === 'function') {
-                    _ed2.SetDeviceInputHelperId('_oo_ppt_kbd');
-                  }
-                } catch(_) {}
-              }
+              // Word/Excel: MUST call original — OO needs area_id in DOM focus for cursor.
+              // PPT: do NOT call original — focusing _oo_ppt_kbd in DOM causes WKWebView to
+              //   show its own keyboard for that inner <input>, competing with UITextField.
+              //   If WKWebView keyboard wins, UITextField is NOT first responder, so
+              //   shouldChangeCharactersIn never fires and ooInjectInputPPT is never called.
+              //   Swift UITextField.becomeFirstResponder() via focusKeyboard is sufficient.
+              if (!_isPPT && _origElFocus) _origElFocus.call(this, opts);
               return;
             }
             if (_origElFocus) _origElFocus.call(this, opts);
@@ -1051,38 +1071,105 @@
       if (_currentDocType === 'slide') {
         var _pptTapX = 0, _pptTapY = 0;
         iDoc.addEventListener('touchstart', function(e) {
+          if (!e.isTrusted) return; // ignore synthetic touch events from simulation code
           var _t = e.touches && e.touches[0];
           if (_t) { _pptTapX = _t.clientX; _pptTapY = _t.clientY; }
         }, { passive: true });
         iDoc.addEventListener('touchend', function(e) {
+          // Skip synthetic touch events (isTrusted=false) dispatched by our own simulation
+          // (_insertTextBoxWithText, insertImageByURL, etc.) to prevent a second spurious
+          // dblclick that exits/re-enters text-edit mode and causes a zoom glitch.
+          if (!e.isTrusted) return;
           var _tc = e.changedTouches && e.changedTouches[0];
           if (!_tc) return;
           if (Math.abs(_tc.clientX - _pptTapX) > 10 || Math.abs(_tc.clientY - _pptTapY) > 10) return;
           var _ex = _tc.clientX, _ey = _tc.clientY;
-          // After OO processes the first tap (select), simulate a second tap → dblclick → edit mode
+          // After OO processes the first tap (select), simulate a second tap → dblclick → edit mode.
+          // Skip EditShape if OO is ALREADY in text-edit mode (ra.wI != null):
+          // EditShape re-called while in text-edit mode resets cursor to end of text — destroying
+          // the cursor position that OO's real-touch handler already placed at the tap location.
           setTimeout(function() {
-            var _el = iDoc.elementFromPoint(_ex, _ey) || iDoc.body;
-            function _pev2(type, btns) {
-              return new innerWin.PointerEvent(type, {
-                bubbles: true, cancelable: true, view: innerWin,
-                clientX: _ex, clientY: _ey, button: 0, buttons: btns,
-                pointerId: 9, pointerType: 'touch', isPrimary: false
-              });
+            var _sdiEdCheck = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+            var _alreadyEditing = _sdiEdCheck && _sdiEdCheck.ra && _sdiEdCheck.ra.wI != null;
+            if (!_alreadyEditing) {
+              // Not in text-edit mode: need EditShape to enter it, then synthetic dblclick
+              // at tap coords so OO positions cursor where user tapped (not at end).
+              try {
+                if (_innerWin.AscDesktopEditor &&
+                    typeof _innerWin.AscDesktopEditor.executeFocusedCommand === 'function') {
+                  _innerWin.AscDesktopEditor.executeFocusedCommand('EditShape');
+                }
+              } catch(_editS) {}
+              var _el = iDoc.elementFromPoint(_ex, _ey) || iDoc.body;
+              function _pev2(type, btns) {
+                return new _innerWin.PointerEvent(type, {
+                  bubbles: true, cancelable: true, view: _innerWin,
+                  clientX: _ex, clientY: _ey, button: 0, buttons: btns,
+                  pointerId: 1, pointerType: 'touch', isPrimary: true
+                });
+              }
+              try { _el.dispatchEvent(_pev2('pointerdown', 1)); } catch(_) {}
+              try { _el.dispatchEvent(_pev2('pointerup',   0)); } catch(_) {}
+              try { _el.dispatchEvent(new _innerWin.MouseEvent('dblclick', {
+                bubbles: true, cancelable: true, view: _innerWin,
+                clientX: _ex, clientY: _ey, button: 0, detail: 2
+              })); } catch(_) {}
             }
-            try { _el.dispatchEvent(_pev2('pointerdown', 1)); } catch(_) {}
-            try { _el.dispatchEvent(_pev2('pointerup',   0)); } catch(_) {}
-            try { _el.dispatchEvent(new innerWin.MouseEvent('dblclick', {
-              bubbles: true, cancelable: true, view: innerWin,
-              clientX: _ex, clientY: _ey, button: 0, detail: 2
-            })); } catch(_) {}
-            // Explicit focus fallback: OO's SetDeviceInputHelperId path calls _oo_ppt_kbd.focus()
-            // internally to show the keyboard, but this may not fire reliably on iOS WKWebView.
-            // Focusing here explicitly ensures our prototype override sends focusKeyboard to Swift
-            // (making ooKeyboardProxy first responder) even if OO skips the focus call.
-            setTimeout(function() {
+            // Already in text-edit mode: OO's real-touch handler already moved cursor to
+            // tap position. Do NOT call EditShape — it would reset cursor to end.
+            // Explicit focus: trigger focusKeyboard → Swift proxy first responder → keyboard appears.
+            // PPT: call SetDeviceInputHelperId('_oo_ppt_kbd') which:
+            //   • On first call (E4b undefined, wI != null): registers _oo_ppt_kbd with OO's
+            //     onkeypress/onkeydown handlers (required for character injection via ooInjectInputPPT),
+            //     then calls E4b.focus() → our override posts focusKeyboard → keyboard shows.
+            //   • On subsequent calls (E4b already set): skips re-registration, calls E4b.focus()
+            //     → focusKeyboard → keyboard shows. Handlers from first call persist.
+            // Word/Excel: focus area_id (OO's confirmed text-entry element for those doc types).
+            // Delay 400ms (was 150ms): gives OO time to set wI (text-edit model) after dblclick.
+            // If wI is still null at 400ms, retry at 800ms.
+            function _doPPTFocus() {
               var _k = iDoc.getElementById('_oo_ppt_kbd');
-              if (_k) { try { _k.focus(); } catch(_kf) {} }
-            }, 150);
+              if (!_k) return false;
+              try {
+                var _sdiEd = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+                // Reset E4b so SDI always re-registers onkeypress on the current element.
+                // Without this: after slide delete OO may clear _oo_ppt_kbd.onkeypress, but
+                // SDI's guard (void 0 === a.E4b) skips re-registration because E4b is still set.
+                try { if (_innerWin && typeof _innerWin.E4b !== 'undefined') _innerWin.E4b = undefined; } catch(_re) {}
+                if (_sdiEd && typeof _sdiEd.SetDeviceInputHelperId === 'function') {
+                  _sdiEd.SetDeviceInputHelperId('_oo_ppt_kbd');
+                }
+                // Signal ooInjectInputPPT to re-attempt SDI on first inject: if OO's WASM
+                // text-edit model (wI) was still null here, E4b is not registered yet.
+                // By the time the user actually types, wI is set, so SDI will succeed then.
+                window._pptSdiNeeded = true;
+                // Always focus explicitly: SetDeviceInputHelperId may not call E4b.focus()
+                // when OO is already in text-edit mode (re-registration is a no-op internally).
+                // _k.focus() triggers our override → focusKeyboard → Swift UITextField first responder.
+                _k.focus();
+                return true;
+              } catch(_sdih) {
+                try { window._pptSdiNeeded = true; _k.focus(); } catch(_kf) {}
+                return false;
+              }
+            }
+            setTimeout(function() {
+              var _isPPTFocus = (typeof _currentDocType !== 'undefined' && _currentDocType === 'slide');
+              if (_isPPTFocus) {
+                _doPPTFocus();
+                // Retry at increasing intervals: OO WASM on real device may take 1-2s to set wI
+                setTimeout(function() { if (_currentDocType === 'slide') _doPPTFocus(); }, 400);
+                setTimeout(function() { if (_currentDocType === 'slide') _doPPTFocus(); }, 1000);
+                setTimeout(function() { if (_currentDocType === 'slide') _doPPTFocus(); }, 1800);
+              } else {
+                var _ai2 = iDoc.getElementById('area_id');
+                if (_ai2) { try { _ai2.focus(); } catch(_af) {} }
+              }
+            }, 400);
+            // zoomFitToPage() was previously called here (350-900ms after dblclick) to
+            // undo OO's auto-zoom-to-cursor. Removed: it exits text-edit mode, causing
+            // the "can't type" bug and blank canvas. OO's cursor zoom while editing is
+            // acceptable; the user can adjust with the zoom buttons if needed.
           }, 200);
         }, { passive: true });
       }
@@ -1919,9 +2006,25 @@
         };
 
         // Insert a text box on the current PPT slide.
-        // Calls _insertTextBoxWithText('') — kept for backward compat.
+        // Primary: click OO's own internal TextBox toolbar button — OO enters draw mode via its
+        // own event path (avoids needing a prior canvas focus tap that StartAddShape requires).
+        // After this, user draws the textbox with their finger on the slide.
         window._insertTextBox = function() {
-          window._insertTextBoxWithText('');
+          if (!_innerWin) return;
+          var _ed = _innerWin.Asc && _innerWin.Asc.editor;
+          if (!_ed) return;
+          // Click OO's own Insert TextBox button — fires OO's internal handler directly
+          if (typeof _clickOOBtn === 'function') {
+            if (_clickOOBtn(['text box', 'textbox', 'text-box', 'insert text'])) return;
+          }
+          // Fallback: focus OO iframe element in outer DOM, then call StartAddShape
+          try {
+            var _fr = document.querySelector('iframe[name="frameEditor"]');
+            if (_fr) try { _fr.focus(); } catch(_ff) {}
+            if (typeof _ed.StartAddShape === 'function') {
+              setTimeout(function() { try { _ed.StartAddShape('textRect', true); } catch(_se) {} }, 60);
+            }
+          } catch(_e) {}
         };
 
         // Inserts a text box at the centre of the current PPT slide via StartAddShape +
@@ -1988,8 +2091,16 @@
                 _dispatch(_cv, 'pointermove', _cx, _cy, 1);
                 _dispatch(_cv, 'pointerup',   _x2, _y2, 0);
 
-                // Step 2: double-tap/click → OO enters text-edit mode.
+                // Step 2: enter text-edit mode on the newly drawn text box.
                 setTimeout(function() {
+                  // Primary: OO's EditShape command — enters text-edit mode directly.
+                  try {
+                    if (_innerWin.AscDesktopEditor &&
+                        typeof _innerWin.AscDesktopEditor.executeFocusedCommand === 'function') {
+                      _innerWin.AscDesktopEditor.executeFocusedCommand('EditShape');
+                    }
+                  } catch(_es2) {}
+                  // Fallback: single-tap + dblclick simulation.
                   _dispatch(_cv, 'pointerdown', _cx, _cy, 1);
                   _dispatch(_cv, 'pointerup',   _cx, _cy, 0);
                   try { _cv.dispatchEvent(new _innerWin.MouseEvent('click',    {bubbles:true,cancelable:true,view:_innerWin,clientX:_cx,clientY:_cy,button:0,detail:1})); } catch(_) {}
@@ -1998,14 +2109,32 @@
                     _dispatch(_cv, 'pointerup',   _cx, _cy, 0);
                     try { _cv.dispatchEvent(new _innerWin.MouseEvent('dblclick', {bubbles:true,cancelable:true,view:_innerWin,clientX:_cx,clientY:_cy,button:0,detail:2})); } catch(_) {}
 
-                    // Step 3: inject pre-filled text via PPT keyboard path.
+                    // Step 3: register keyboard helper + show keyboard.
+                    // SetDeviceInputHelperId needs OO in text-edit mode (wI != null),
+                    // which is set after the dblclick above. 500ms gives OO time.
+                    setTimeout(function() {
+                      var _tbKbd = _d.getElementById('_oo_ppt_kbd');
+                      if (_tbKbd) {
+                        try {
+                          var _tbEd = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+                          try { if (_innerWin && typeof _innerWin.E4b !== 'undefined') _innerWin.E4b = undefined; } catch(_re2) {}
+                          if (_tbEd && typeof _tbEd.SetDeviceInputHelperId === 'function') {
+                            _tbEd.SetDeviceInputHelperId('_oo_ppt_kbd');
+                          }
+                          window._pptSdiNeeded = true;
+                          _tbKbd.focus(); // always explicit — SDI may not call E4b.focus() if re-registration no-op
+                        } catch(_tbSdi) {
+                          try { _tbKbd.focus(); } catch(_tbF) {}
+                        }
+                      }
+                    }, 500);
+                    // Step 4: inject pre-filled text via ooInjectInputPPT (ra.cCb path).
                     if (text && text.length > 0) {
                       setTimeout(function() {
-                        var _pptKbd = _d.getElementById('_oo_ppt_kbd');
-                        if (!_pptKbd) return;
-                        _pptKbd.value = (_pptKbd.value || '') + text;
-                        try { _pptKbd.dispatchEvent(new (_innerWin.Event || Event)('input', {bubbles:true, cancelable:false})); } catch(_ev) {}
-                      }, 300);
+                        if (typeof window.ooInjectInputPPT === 'function') {
+                          window.ooInjectInputPPT(text);
+                        }
+                      }, 600);
                     }
                   }, 120);
                 }, 150);
@@ -2104,32 +2233,74 @@
           } catch(_ev) {}
         };
 
-        // PPT-specific inject: routes to _oo_ppt_kbd (OO's registered PPT keyboard helper).
+        // PPT-specific inject: routes typed characters into OO's PPT editor.
         // Called by Swift shouldChangeCharactersIn when currentDocType == 'slide'.
-        // Mirrors ooInjectInput (Word): set .value + fire input event so OO's oninput handler
-        // reads the accumulated value, then also dispatch keypress for older OO paths.
+        // ONLY dispatches to _oo_ppt_kbd (SetDeviceInputHelper element registered by OO).
+        // Do NOT dispatch to area_id — OO also focuses area_id on any canvas tap (selection
+        // mode), so sending input events there causes text to appear anywhere on the slide.
         window.ooInjectInputPPT = function(data) {
           if (!data) return;
           var _fr = document.querySelector('iframe[name="frameEditor"]');
           if (!_fr || !_fr.contentDocument) return;
-          var inner = _fr.contentDocument.getElementById('_oo_ppt_kbd');
-          if (!inner) return;
+          var _inner = _fr.contentDocument.getElementById('_oo_ppt_kbd');
+          if (!_inner) return;
           var _iWin = _fr.contentWindow;
-          // Primary path: set value to ONLY the new data (not cumulative) + input event.
-          // OO's oninput handler reads .value to get the inserted text; using fresh value
-          // prevents re-insertion of previously typed characters on each keystroke.
-          inner.value = data;
-          try { inner.dispatchEvent(new (_iWin.Event || Event)('input', {bubbles: true, cancelable: false})); } catch(_ie) {}
-          inner.value = ''; // Clear so next injection starts fresh
-          // Secondary path: keypress per character (for OO builds using onkeypress+charCode)
-          for (var _i = 0; _i < data.length; _i++) {
-            var _ch = data[_i], _cc = data.charCodeAt(_i);
+          var _sdi2 = _iWin && _iWin.Asc && _iWin.Asc.editor;
+          var _ra = _sdi2 && _sdi2.ra;
+          // nta guard: E4b.onkeypress checks `if(!1===editor.ra.nta)` = `false===nta`.
+          // Initial nta is undefined → false===undefined = false → guard skips body.
+          // Pre-set to false so the guard passes on every path.
+          if (_ra) _ra.nta = false;
+          // Path A (FIRST PRIORITY): call _inner.onkeypress() directly with a plain object.
+          // This is the EXACT handler that SDI installs: closure captures internal `editor`
+          // (the real f-instance), calls editor.ra.cCb(ha) — not the Asc.editor wrapper.
+          // Plain object (not KeyboardEvent) preserves charCode on iOS Safari (KeyboardEvent
+          // constructor silently sets charCode=0 regardless of init dict on iOS 17+).
+          if (typeof _inner.onkeypress === 'function') {
+            for (var _j = 0; _j < data.length; _j++) {
+              var _jch = data[_j], _jcc = data.charCodeAt(_j);
+              try {
+                _inner.onkeypress({ type: 'keypress', charCode: _jcc, keyCode: _jcc, which: _jcc, key: _jch,
+                  target: _inner, currentTarget: _inner,
+                  isTrusted: false, preventDefault: function(){}, stopPropagation: function(){} });
+              } catch(_ev0) {}
+            }
+            return;
+          }
+          // Path B: editor.cCb() → f.prototype.cCb → ra.cCb (fallback if SDI not yet run).
+          if (_sdi2 && typeof _sdi2.cCb === 'function') {
+            for (var _i = 0; _i < data.length; _i++) {
+              var _ch = data[_i], _cc = data.charCodeAt(_i);
+              try {
+                _sdi2.cCb({ type: 'keypress', charCode: _cc, keyCode: _cc, which: _cc, key: _ch,
+                  target: _inner, isTrusted: false, preventDefault: function(){}, stopPropagation: function(){} });
+              } catch(_ev) {}
+            }
+            return;
+          }
+          // Path C: ra.cCb() direct.
+          if (_ra && typeof _ra.cCb === 'function') {
+            for (var _i2 = 0; _i2 < data.length; _i2++) {
+              var _ch2 = data[_i2], _cc2 = data.charCodeAt(_i2);
+              try {
+                _ra.cCb({ type: 'keypress', charCode: _cc2, keyCode: _cc2, which: _cc2, key: _ch2,
+                  target: _inner, isTrusted: false, preventDefault: function(){}, stopPropagation: function(){} });
+              } catch(_ev2) {}
+            }
+            return;
+          }
+          // Path D: last resort — synthetic dispatch (charCode=0 bug, but only reached when
+          // SDI never ran and Asc.editor.cCb is unavailable).
+          _inner.value = data;
+          try { _inner.dispatchEvent(new (_iWin.Event || Event)('input', {bubbles: true, cancelable: false})); } catch(_ie) {}
+          _inner.value = '';
+          for (var _fi = 0; _fi < data.length; _fi++) {
+            var _fch = data[_fi], _fcc = data.charCodeAt(_fi);
             try {
-              inner.dispatchEvent(new _iWin.KeyboardEvent('keypress', {
-                key: _ch, keyCode: _cc, which: _cc, charCode: _cc,
-                bubbles: true, cancelable: true
+              _inner.dispatchEvent(new _iWin.KeyboardEvent('keypress', {
+                key: _fch, keyCode: _fcc, which: _fcc, charCode: _fcc, bubbles: true, cancelable: true
               }));
-            } catch(_ev) {}
+            } catch(_fev) {}
           }
         };
 
@@ -4110,6 +4281,12 @@
         };
         if (MAP[cmd]) {
           // Do NOT call _innerWin.focus() — breaks PPT canvas/text selection state.
+          // PPT: executeFocusedCommand works via OO's internal focus (independent of DOM focus).
+          // _clickOOBtn fails for PPT because alignment button labels differ or aren't found.
+          if (_currentDocType === 'slide') {
+            try { _innerWin.AscDesktopEditor.executeFocusedCommand(MAP[cmd]); } catch(_ae) {}
+            return;
+          }
           var _mkwMap = {
             'align-left':    ['align left','left align','alignleft'],
             'align-center':  ['align center','center align','aligncenter','centered'],
@@ -4472,8 +4649,19 @@
           // ── Zoom in / out ─────────────────────────────────────────────────────
           if (cmd === 'zoom-in' || cmd === 'zoom-out') {
             var _zIn = cmd === 'zoom-in';
-            // PPT: use zoomIn()/zoomOut() — confirmed in app.js (e.api.zoomIn/zoomOut via Ctrl+/-)
+            // PPT: mark user-initiated zoom so zoomFitToPage() re-fits are suppressed.
+            // Use asc_setZoom(current ± 10) — more stable than zoomIn()/zoomOut() which can
+            // conflict with OO's fit-to-page mode and cause blank canvas on step back.
             if (_currentDocType === 'slide') {
+              _userZoomOverride = true;
+              var _zAPI = _ed.asc_setZoom || _ed.asc_SetZoom;
+              if (typeof _zAPI === 'function') {
+                var _curZ2 = (typeof _ed.asc_getZoom === 'function' ? _ed.asc_getZoom() : null)
+                           || (typeof _ed.asc_GetZoom === 'function' ? _ed.asc_GetZoom() : null)
+                           || 75;
+                var _newZ2 = Math.max(25, Math.min(400, _curZ2 + (_zIn ? 10 : -10)));
+                try { _zAPI.call(_ed, _newZ2); return; } catch(_) {}
+              }
               if (_zIn && typeof _ed.zoomIn  === 'function') { try { _ed.zoomIn();  return; } catch(_) {} }
               if (!_zIn && typeof _ed.zoomOut === 'function') { try { _ed.zoomOut(); return; } catch(_) {} }
             }
@@ -4673,6 +4861,66 @@
             var r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
             var c = new _A.asc_CColor(); c.r = r; c.g = g; c.b = b;
             _ed.asc_setCellBackgroundColor && _ed.asc_setCellBackgroundColor(c);
+            return;
+          }
+
+          // PPT shape fill color: 'ppt-fill-color:#RRGGBB'
+          // Sets the background fill of the selected shape/text-box in PPT.
+          if (cmd.indexOf('ppt-fill-color:') === 0) {
+            var _pfHex = cmd.slice(15);
+            var _pfR = parseInt(_pfHex.slice(1,3),16), _pfG = parseInt(_pfHex.slice(3,5),16), _pfB = parseInt(_pfHex.slice(5,7),16);
+            setTimeout(function() {
+              try { _innerWin.focus(); } catch(_) {}
+              var _pfEd = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+              if (!_pfEd) return;
+              var _pfA = _innerWin.Asc || {}, _pfAC = _innerWin.AscCommon || {};
+              var _pfCClr = _pfA.asc_CColor || _pfAC.asc_CColor;
+              if (!_pfCClr) return;
+              var _pfc;
+              try { _pfc = new _pfCClr(_pfR, _pfG, _pfB); } catch(_) { _pfc = new _pfCClr(); }
+              if (typeof _pfc.asc_putR === 'function') {
+                _pfc.asc_putR(_pfR); _pfc.asc_putG(_pfG); _pfc.asc_putB(_pfB);
+              } else { _pfc.r = _pfR; _pfc.g = _pfG; _pfc.b = _pfB; }
+              if      (typeof _pfEd.asc_setShapeFillColor   === 'function') { _pfEd.asc_setShapeFillColor(_pfc); }
+              else if (typeof _pfEd.asc_setFillColor         === 'function') { _pfEd.asc_setFillColor(_pfc); }
+              else if (typeof _pfEd.put_FillColor            === 'function') { _pfEd.put_FillColor(_pfc); }
+              else if (typeof _pfEd.asc_setParagraphFill     === 'function') { _pfEd.asc_setParagraphFill(_pfc); }
+            }, 80);
+            return;
+          }
+
+          // ppt-slide-bg-color:#RRGGBB — set the background fill of the current slide.
+          // Uses SetSlideProps(CAscSlideProps) + CBackground — confirmed in sdk-all-min.js.
+          if (cmd.indexOf('ppt-slide-bg-color:') === 0) {
+            var _sbHex = cmd.slice(18);
+            var _sbR = parseInt(_sbHex.slice(1,3),16), _sbG = parseInt(_sbHex.slice(3,5),16), _sbB = parseInt(_sbHex.slice(5,7),16);
+            setTimeout(function() {
+              try {
+                var _sbEd = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+                if (!_sbEd || typeof _sbEd.SetSlideProps !== 'function') return;
+                var _sbA = _innerWin.Asc || {};
+                // Color object
+                var _sbCClr = _sbA.asc_CColor;
+                if (!_sbCClr) return;
+                var _sbClr;
+                try { _sbClr = new _sbCClr(_sbR, _sbG, _sbB); } catch(_) { _sbClr = new _sbCClr(); }
+                if (typeof _sbClr.asc_putR === 'function') {
+                  _sbClr.asc_putR(_sbR); _sbClr.asc_putG(_sbG); _sbClr.asc_putB(_sbB);
+                } else { _sbClr.r = _sbR; _sbClr.g = _sbG; _sbClr.b = _sbB; }
+                // Background object (value 1 = solid fill)
+                var _sbCBg = _sbA.CBackground;
+                if (!_sbCBg) return;
+                var _sbBg = new _sbCBg();
+                _sbBg.put_Value(1);
+                _sbBg.put_Color(_sbClr);
+                // Slide props
+                var _sbCSP = _sbA.CAscSlideProps;
+                if (!_sbCSP) return;
+                var _sbProps = new _sbCSP();
+                _sbProps.put_background(_sbBg);
+                _sbEd.SetSlideProps(_sbProps);
+              } catch(_) {}
+            }, 80);
             return;
           }
 
@@ -5382,6 +5630,17 @@
         // Schedule slide position report for all slide nav/management commands.
         // setTimeout fires after the current call returns, by which time OO has
         // updated its internal slide index.
+
+        // Helper: after add/delete, report new slide count at multiple intervals
+        // Report updated slide count to Swift after add/delete/duplicate.
+        // _reprefetchThumbs was removed: it navigates slides post-delete which
+        // puts OO into a stale state and causes the blank "Click to add first slide" bug.
+        function _scheduleSlideSync() {
+          setTimeout(_reportSlidePos, 400);
+          setTimeout(_reportSlidePos, 900);
+          setTimeout(_reportSlidePos, 2200);
+        }
+
         if (['slide-add','slide-delete','slide-duplicate','slide-prev','slide-next'].indexOf(cmd) !== -1) {
           setTimeout(_reportSlidePos, 200);
         }
@@ -5390,38 +5649,44 @@
           var _sled = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
           if (_sled) {
             // AddSlide (no prefix) — confirmed in sdk-all.js b.prototype.AddSlide + app.js this.api.AddSlide()
-            if      (typeof _sled.AddSlide            === 'function') { try { _sled.AddSlide();            setTimeout(_reportSlidePos, 400); return; } catch(_) {} }
-            else if (typeof _sled.asc_addSlide        === 'function') { try { _sled.asc_addSlide();        setTimeout(_reportSlidePos, 400); return; } catch(_) {} }
-            else if (typeof _sled.asc_AddSlide        === 'function') { try { _sled.asc_AddSlide();        setTimeout(_reportSlidePos, 400); return; } catch(_) {} }
-            else if (typeof _sled.asc_insertSlide     === 'function') { try { _sled.asc_insertSlide();     setTimeout(_reportSlidePos, 400); return; } catch(_) {} }
+            if      (typeof _sled.AddSlide            === 'function') { try { _sled.AddSlide();            _scheduleSlideSync(); return; } catch(_) {} }
+            else if (typeof _sled.asc_addSlide        === 'function') { try { _sled.asc_addSlide();        _scheduleSlideSync(); return; } catch(_) {} }
+            else if (typeof _sled.asc_AddSlide        === 'function') { try { _sled.asc_AddSlide();        _scheduleSlideSync(); return; } catch(_) {} }
+            else if (typeof _sled.asc_insertSlide     === 'function') { try { _sled.asc_insertSlide();     _scheduleSlideSync(); return; } catch(_) {} }
           }
-          if (_clickOOBtn(['new slide','add slide','insert slide','add new slide'])) { setTimeout(_reportSlidePos, 400); return; }
+          if (_clickOOBtn(['new slide','add slide','insert slide','add new slide'])) { _scheduleSlideSync(); return; }
           _focusedCmd('NewSlide'); // confirmed name from OO sdkjs/slide
-          setTimeout(_reportSlidePos, 400);
+          _scheduleSlideSync();
           return;
         }
         if (cmd === 'slide-delete') {
-          // Do NOT call _innerWin.focus() — disrupts PPT canvas state and breaks _focusedCmd.
-          var _slded = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
-          if (_slded) {
-            // RemoveSlides(startIdx, count) — confirmed in sdk-all.js b.prototype.RemoveSlides=b.prototype.Ptf
-            // Use same lookup chain as _reportSlidePos so we get the actual selected slide index (0-based).
-            if (typeof _slded.RemoveSlides === 'function') {
-              var _rdCur = 0;
-              if      (typeof _slded.asc_getCurrentSlide     === 'function') _rdCur = _slded.asc_getCurrentSlide()     || 0;
-              else if (typeof _slded.asc_getCurrentPage      === 'function') _rdCur = _slded.asc_getCurrentPage()      || 0;
-              else if (typeof _slded.asc_getCurrentPageIndex === 'function') _rdCur = _slded.asc_getCurrentPageIndex() || 0;
-              else if (typeof _slded.getCurrentPageIndex     === 'function') _rdCur = _slded.getCurrentPageIndex()     || 0;
-              else if (typeof _slded.getCurrentPage          === 'function') _rdCur = _slded.getCurrentPage()          || 0;
-              try { _slded.RemoveSlides(_rdCur, 1); setTimeout(_reportSlidePos, 400); return; } catch(_) {}
+          // Safe single-slide delete via monkey-patch on Ea.toa() + synchronous DeleteSlide().
+          // Root cause: with slide strip hidden, OO's internal selection covers ALL slides,
+          // so toa() returns all slides → laf()/DeleteSlide() deletes all except one.
+          // Fix: patch toa() to return only [currentSlide], then call DeleteSlide() SYNCHRONOUSLY
+          // so laf() reads our patch in the same JS tick, then remove the patch.
+          // IMPORTANT: executeFocusedCommand('RemoveSlide') is ASYNC — it queues the command,
+          // so laf() fires AFTER 'delete _delEa2.toa' restores prototype, defeating the patch.
+          // SDK: DeleteSlide=laf=f.prototype.laf; Ea.He=slides array; Ea.Dc=current index.
+          var _delEd2 = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+          var _delEa2 = _delEd2 && _delEd2.ra && _delEd2.ra.Ea;
+          if (_delEa2 && typeof _delEa2.toa === 'function' && _delEa2.He &&
+              typeof _delEd2.DeleteSlide === 'function') {
+            // Use getCurrentPage() (0-based) — authoritative after goToPage() navigation.
+            // Ea.Dc may be stale if user navigated via native strip (goToPage doesn't update Dc).
+            var _delIdx = (typeof _delEd2.getCurrentPage === 'function' ? _delEd2.getCurrentPage() : null);
+            if (_delIdx === null || _delIdx < 0) _delIdx = (_delEa2.Dc >= 0 ? _delEa2.Dc : 0);
+            var _delSlide2 = _delEa2.He[_delIdx] || _delEa2.He[0];
+            if (_delSlide2) {
+              _delEa2.toa = function() { return [_delSlide2]; };
+              try { _delEd2.DeleteSlide(); } catch(_) {}
+              try { delete _delEa2.toa; } catch(_) {}
+              _scheduleSlideSync();
+              return;
             }
-            if      (typeof _slded.asc_deleteSlide    === 'function') { try { _slded.asc_deleteSlide();    setTimeout(_reportSlidePos, 400); return; } catch(_) {} }
-            else if (typeof _slded.asc_DeleteSlide    === 'function') { try { _slded.asc_DeleteSlide();    setTimeout(_reportSlidePos, 400); return; } catch(_) {} }
-            else if (typeof _slded.asc_removeSlide    === 'function') { try { _slded.asc_removeSlide();    setTimeout(_reportSlidePos, 400); return; } catch(_) {} }
           }
-          if (_clickOOBtn(['delete slide','remove slide','delete current slide'])) { setTimeout(_reportSlidePos, 400); return; }
-          _focusedCmd('RemoveSlide'); // confirmed name from OO sdkjs/slide
-          setTimeout(_reportSlidePos, 400);
+          if (_clickOOBtn(['delete slide','remove slide','delete current slide'])) { _scheduleSlideSync(); return; }
+          _scheduleSlideSync();
           return;
         }
         if (cmd === 'slide-duplicate') {
@@ -5573,6 +5838,94 @@
               hasPropsCls: !!(_trAsc && _trAsc.CAscSlideProps),
               hasSetSlideProps: !!(_tred && typeof _tred.SetSlideProps === 'function')
             });
+          }
+          return;
+        }
+
+        // ppt-delete-object — delete the currently selected object (shape/image/text box).
+        // When an object is selected (handles visible) the keyboard proxy is not first
+        // responder, so the user can't press Delete. This command dispatches Delete to
+        // OO's inner document which handles key events for selected objects.
+        if (cmd === 'ppt-delete-object') {
+          var _dEd = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+          if (_dEd) {
+            if      (typeof _dEd.asc_DeleteSelectedObjects === 'function') { try { _dEd.asc_DeleteSelectedObjects(); return; } catch(_) {} }
+            else if (typeof _dEd.asc_deleteSelectedObjects === 'function') { try { _dEd.asc_deleteSelectedObjects(); return; } catch(_) {} }
+            else if (typeof _dEd.DeleteSelectedObjects     === 'function') { try { _dEd.DeleteSelectedObjects();     return; } catch(_) {} }
+          }
+          // Fallback: dispatch Delete (46) then Backspace (8) to inner document at its key-event
+          // listener level; OO handles both for selected-object deletion.
+          var _dDoc = _innerWin && _innerWin.document;
+          if (_dDoc) {
+            try { _dDoc.dispatchEvent(new _innerWin.KeyboardEvent('keydown', {bubbles:true, cancelable:true, key:'Delete',    keyCode:46, which:46})); } catch(_) {}
+          }
+          // Also try area_id in the inner iframe (OO's canvas element gets key events for objects)
+          var _dFr = document.querySelector('iframe[name="frameEditor"]');
+          if (_dFr && _dFr.contentDocument) {
+            var _dAI = _dFr.contentDocument.getElementById('area_id');
+            if (_dAI) {
+              try { _dAI.dispatchEvent(new (_dFr.contentWindow.KeyboardEvent||KeyboardEvent)('keydown', {bubbles:true,cancelable:true,key:'Delete',keyCode:46,which:46})); } catch(_) {}
+            }
+          }
+          return;
+        }
+
+        // ppt-notes-toggle — show/hide OO's built-in speaker notes panel
+        if (cmd === 'ppt-notes-toggle') {
+          var _ntEd = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+          if (_ntEd) {
+            if      (typeof _ntEd.asc_toggleNotes        === 'function') { try { _ntEd.asc_toggleNotes();        return; } catch(_) {} }
+            else if (typeof _ntEd.asc_ShowNotes          === 'function') { try { _ntEd.asc_ShowNotes();          return; } catch(_) {} }
+            else if (typeof _ntEd.asc_showNotesPanel     === 'function') { try { _ntEd.asc_showNotesPanel();     return; } catch(_) {} }
+            else if (typeof _ntEd.asc_toggleNotesPanel   === 'function') { try { _ntEd.asc_toggleNotesPanel();   return; } catch(_) {} }
+            else if (typeof _ntEd.asc_SetNotesVisible    === 'function') { try { _ntEd.asc_SetNotesVisible(true); return; } catch(_) {} }
+          }
+          // Fallback: click OO's Notes button in bottom bar, View menu, or status bar
+          if (_clickOOBtn(['notes','speaker notes','edit notes','show notes','notes panel','заметки'])) return;
+          // Try dispatching View > Notes keyboard shortcut
+          var _ntDoc = _innerWin && _innerWin.document;
+          if (_ntDoc) {
+            try { _ntDoc.dispatchEvent(new _innerWin.KeyboardEvent('keydown', {bubbles:true,cancelable:true,key:'F6',keyCode:117,which:117})); } catch(_) {}
+          }
+          return;
+        }
+
+        // ppt-view-sorter — switch to OO's slide sorter view.
+        // Uses asc_changePresentationViewMode with the sorter constant (c_oAscPresentationViewMode.sorter).
+        if (cmd === 'ppt-view-sorter') {
+          var _vsEd = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+          if (_vsEd && typeof _vsEd.asc_changePresentationViewMode === 'function') {
+            try {
+              var _vsMode = _innerWin.Asc.c_oAscPresentationViewMode;
+              var _vsSorter = (_vsMode && _vsMode.sorter !== undefined) ? _vsMode.sorter
+                            : (_innerWin.Asc.eHc && _innerWin.Asc.eHc.vfj !== undefined) ? _innerWin.Asc.eHc.vfj
+                            : 2; // fallback enum value for sorter
+              _vsEd.asc_changePresentationViewMode(_vsSorter);
+              return;
+            } catch(_) {}
+          }
+          if (_clickOOBtn(['slide sorter','sorter','sort','view slides'])) return;
+          return;
+        }
+
+        // ppt-present — start OO's built-in presentation / slideshow mode.
+        // SDK names (confirmed from sdk-all-min.js prototype table):
+        //   StartDemonstrationFromBeginning  (f.prototype.dAh)
+        //   StartDemonstrationFromCurrentSlide (f.prototype.eAh)
+        //   StartDemonstration               (f.prototype.WBc)
+        if (cmd === 'ppt-present') {
+          var _prEd = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+          if (_prEd) {
+            if      (typeof _prEd.StartDemonstrationFromBeginning   === 'function') { try { _prEd.StartDemonstrationFromBeginning();   return; } catch(_) {} }
+            else if (typeof _prEd.StartDemonstrationFromCurrentSlide=== 'function') { try { _prEd.StartDemonstrationFromCurrentSlide();return; } catch(_) {} }
+            else if (typeof _prEd.StartDemonstration                === 'function') { try { _prEd.StartDemonstration();                return; } catch(_) {} }
+            else if (typeof _prEd.asc_startPresentation             === 'function') { try { _prEd.asc_startPresentation();             return; } catch(_) {} }
+            else if (typeof _prEd.asc_startSlideShow                === 'function') { try { _prEd.asc_startSlideShow();                return; } catch(_) {} }
+          }
+          if (_clickOOBtn(['start presentation','presentation mode','slideshow','slide show','start slideshow','present','preview','демонстрация'])) return;
+          var _prDoc = _innerWin && _innerWin.document;
+          if (_prDoc) {
+            try { _prDoc.dispatchEvent(new _innerWin.KeyboardEvent('keydown', {bubbles:true,cancelable:true,key:'F5',keyCode:116,which:116})); } catch(_) {}
           }
           return;
         }

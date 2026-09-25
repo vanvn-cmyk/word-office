@@ -198,6 +198,33 @@ Trước khi sửa bất kỳ bug liên quan đến keyboard, focus, first respo
 
 *Lý do: nhiều lần sửa 1 bug rồi break bug khác (S22 session), user explicitly ask "add rule đi".*
 
+## 12. Không động vào những gì đã hoạt động ổn
+
+**Nguyên tắc cốt lõi: "If it ain't broke, don't fix it."**
+
+### Trước khi sửa bất kỳ thứ gì đã hoạt động
+
+1. **Đánh giá blast radius** — grep callsites, trace flow, list tất cả feature có thể bị ảnh hưởng. Nếu không chắc → hỏi user trước, không tự sửa.
+2. **Minimal targeted change** — chỉ sửa đúng dòng/hàm gây ra bug. Không "dọn dẹp thêm", không refactor code xung quanh, không thêm abstraction mới trừ khi được yêu cầu.
+3. **State risk explicitly** — trước khi apply, nói rõ: "Thay đổi này có thể ảnh hưởng tới X, Y, Z" — dù không ai hỏi.
+
+### Những thứ KHÔNG được đụng vào trừ khi có lỗi rõ ràng
+
+- **Editor.html và JS logic bên trong** — đã hoạt động ổn thì KHÔNG chỉnh sửa (PPT frozen rule: `git checkout 7a699f1 -- OfficeBundle/editor.html` nếu bị drift).
+- **Base href trong 3 inner HTML files** — KHÔNG thay đổi (đã break một lần, session 2026-09-19).
+- **SDK patches** (`sdk-core/index.mjs` và tương tự) — chỉ sửa nếu bug xác nhận ở đó, không sửa "preventively".
+- **Bất kỳ UI/flow nào user đã confirm** ở session trước — xem Rule #9.
+- **Toolbar, focus chain, typing logic** của Word/Excel/PPT — xem Rule #11.
+
+### Khi nhận yêu cầu sửa feature đang hoạt động
+
+1. Xác định: đây là bug thật hay improvement mong muốn?
+2. Nếu là improvement → confirm scope rõ trước khi làm (Rule #1).
+3. Nếu là bug → sửa minimal, không side-effect, report risk.
+4. **Không bao giờ** sửa file working chỉ vì "nhìn thấy cách tốt hơn" — stability > elegance.
+
+*Lý do: nhiều lần fix bug A → break bug B (PPT spinner, editor.html, base href, toolbar). Nguyên tắc ổn định là ưu tiên số 1 trong giai đoạn này.*
+
 ---
 
 *File này là rule bắt buộc cho project Word Office — đọc trước khi bắt đầu bất kỳ phiên làm

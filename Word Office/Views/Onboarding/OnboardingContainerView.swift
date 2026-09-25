@@ -164,7 +164,7 @@ struct OnboardingContainerView: View {
             }
             .frame(maxWidth: .infinity, minHeight: 56)
             .foregroundStyle(.white)
-            .background(Color.dsBrandPrimary, in: Capsule())
+            .background(Color.dsBrandPrimary, in: RoundedRectangle(cornerRadius: DSRadius.control, style: .continuous))
             .shadow(color: Color.dsBrandPrimary.opacity(0.35), radius: 16, y: 8)
         }
         .buttonStyle(OnboardingPressableStyle())

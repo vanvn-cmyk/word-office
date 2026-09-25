@@ -148,7 +148,7 @@ struct LibraryAddButton: View {
         // with the tab pill for coherent glass sampling.
         .buttonStyle(.plain)
         .glassEffect(.regular.tint(Color.dsBrandPrimary).interactive(), in: .circle)
-        .shadow(color: Color.dsBrandPrimary.opacity(0.28), radius: 12, y: 6)
+        .shadow(color: Color.dsBrandPrimary.opacity(0.18), radius: 16, y: 4)
         // Explicit circular hit area — keeps the button's interactive
         // zone exactly on the circle so the rectangular frame corners
         // (which are visually transparent) don't respond to taps.
@@ -200,7 +200,7 @@ struct LibraryAddButton: View {
         .frame(width: 220)
         .background(Color.dsBackgroundElevated, in: RoundedRectangle(cornerRadius: DSRadius.large, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: DSRadius.large, style: .continuous).strokeBorder(Color.dsBorderSubtle))
-        .shadow(color: .black.opacity(0.18), radius: 20, y: 8)
+        .shadow(color: .black.opacity(0.08), radius: 24, y: 6)
         // `.contentShape` on the finished card so the whole card absorbs
         // hit-testing. Without this, taps into "dead" regions (section
         // headers, dividers, padding between rows) fall through the overlay

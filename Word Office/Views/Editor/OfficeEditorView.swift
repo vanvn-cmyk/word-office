@@ -19,6 +19,7 @@ struct OfficeEditorView: View {
     let ref: DocumentRef
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(DSToastPresenter.self) private var toaster
 
     @State private var errorMessage: String? = nil
     @State private var saveCount = 0
@@ -26,11 +27,19 @@ struct OfficeEditorView: View {
     @State private var editorVC: OfficeEditorViewController?
     @State private var slideProgress: (current: Int, total: Int) = (1, 1)
     @State private var slideThumbnails: [Int: UIImage] = [:]
+    /// Incremented on every thumbnail update so PPTSlideStrip.== detects the change
+    /// without comparing UIImage instances (which don't conform to Equatable).
+    @State private var thumbnailVersion: Int = 0
     @State private var sheetNames: [String] = []
     @State private var activeSheetIndex: Int = 0
     @State private var currentExcelFont: String = "Font"
     @State private var currentWordFont:  String = "Font"
     @State private var currentPPTFont:   String = "Font"
+    // Debounce tasks — font-change events fire on every cursor move; coalescing
+    // to 80ms prevents rapid @State churn from re-running OfficeEditorView.body.
+    @State private var excelFontTask: Task<Void, Never>?
+    @State private var wordFontTask:  Task<Void, Never>?
+    @State private var pptFontTask:   Task<Void, Never>?
 
     // Native photo insertion
     @State private var showImagePicker = false
@@ -91,26 +100,61 @@ struct OfficeEditorView: View {
                             onFileSaved: handleSave,
                             onError: handleError,
                             onReady: handleReady,
-                            onDirtyChange: { isDirty = $0 },
+                            onDirtyChange: { if $0 { isDirty = true } },
+                            onInteraction: { isDirty = true },
                             onVCReady: { editorVC = $0 },
                             onFilterRequest: { items in
                                 filterItems = items
                                 showFilterSheet = true
                             },
-                            onSlideChange: { c, t in slideProgress = (c, t) },
+                            onSlideChange: { c, t in
+                                if t < slideProgress.total {
+                                    // Slides were deleted: remove thumbnails for indices that no
+                                    // longer exist. Do NOT removeAll() — that clears thumbnails for
+                                    // slides that still exist and makes the strip flash blank.
+                                    for idx in (t + 1)...max(t + 1, slideProgress.total) {
+                                        slideThumbnails.removeValue(forKey: idx)
+                                    }
+                                    thumbnailVersion &+= 1
+                                }
+                                slideProgress = (c, t)
+                            },
                             onSlideThumbnail: { num, data in
                                 if let img = UIImage(data: data) {
                                     slideThumbnails[num] = img
+                                    thumbnailVersion &+= 1
                                 }
                             },
                             onSheetListChange: { names, idx in
                                 sheetNames = names
                                 activeSheetIndex = idx
                             },
-                            onExcelFontChange: { name in currentExcelFont = name },
-                            onWordFontChange:  { name in currentWordFont  = name },
-                            onPPTFontChange:   { name in currentPPTFont   = name },
-                            onPPTZoomReady:    { pptZoomReady = true }
+                            onExcelFontChange: { name in
+                                excelFontTask?.cancel()
+                                excelFontTask = Task { @MainActor in
+                                    try? await Task.sleep(for: .milliseconds(80))
+                                    guard !Task.isCancelled else { return }
+                                    currentExcelFont = name
+                                }
+                            },
+                            onWordFontChange: { name in
+                                wordFontTask?.cancel()
+                                wordFontTask = Task { @MainActor in
+                                    try? await Task.sleep(for: .milliseconds(80))
+                                    guard !Task.isCancelled else { return }
+                                    currentWordFont = name
+                                }
+                            },
+                            onPPTFontChange: { name in
+                                pptFontTask?.cancel()
+                                pptFontTask = Task { @MainActor in
+                                    try? await Task.sleep(for: .milliseconds(80))
+                                    guard !Task.isCancelled else { return }
+                                    currentPPTFont = name
+                                }
+                            },
+                            onPPTZoomReady:    { pptZoomReady = true },
+                            onDocSaved:        { toaster.show(.success, title: "Saved") }
                         )
                         if fileKind == .ppt && !pptZoomReady {
                             Color.dsBackgroundPrimary
@@ -156,12 +200,19 @@ struct OfficeEditorView: View {
                         }
                     )
                 }
-                // Native hyperlink insert sheet — insertHyperlink fires in onDismiss so the
-                // WKWebView has fully regained focus before JS is evaluated.
+                // Native hyperlink insert sheet. onDismiss fires at the START of the
+                // sheet's dismiss animation (~350ms before WKWebView is fully foregrounded).
+                // The 400ms delay here + 200ms setTimeout inside _insertHyperlink = 600ms
+                // total before the API fires, safely after the animation completes and the
+                // editor cursor is restored. Without this delay, add_Hyperlink throws in
+                // the catch block and the user sees "Link insert failed — please try again".
                 .sheet(isPresented: $showLinkSheet, onDismiss: {
                     if let link = pendingLink {
-                        editorVC?.insertHyperlink(url: link.url, displayText: link.text)
+                        let captured = link
                         pendingLink = nil
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                            editorVC?.insertHyperlink(url: captured.url, displayText: captured.text)
+                        }
                     }
                 }) {
                     NativeLinkView(
@@ -349,6 +400,16 @@ struct OfficeEditorView: View {
             )
         default: break
         }
+        // Mark the document dirty for any command that modifies content.
+        // Pure view/navigation commands are excluded so browsing slides or
+        // adjusting zoom does not arm the Discard alert unnecessarily.
+        let isViewCmd = cmd == "zoom-in" || cmd == "zoom-out"
+            || cmd == "slide-prev" || cmd == "slide-next"
+            || cmd.hasPrefix("slide-goto:") || cmd.hasPrefix("word-page-")
+            || cmd == "ppt-present" || cmd == "ppt-notes-toggle" || cmd == "print"
+            || cmd == "save"
+        if !isViewCmd { isDirty = true }
+
         switch cmd {
         case "insert-image":        showImagePicker       = true
         case "insert-link":         showLinkSheet          = true
@@ -427,7 +488,14 @@ struct OfficeEditorView: View {
     @ViewBuilder
     private var bottomStrip: some View {
         if fileKind == .ppt {
-            slideStrip
+            PPTSlideStrip(
+                current: slideProgress.current,
+                total: slideProgress.total,
+                thumbnailVersion: thumbnailVersion,
+                thumbnails: slideThumbnails,
+                accent: OfficeEditorView.pptAccent,
+                onTap: { num in handleCommand("slide-goto:\(num)") }
+            ).equatable()
         } else if fileKind == .excel {
             sheetStrip
         }
@@ -435,76 +503,7 @@ struct OfficeEditorView: View {
 
     // MARK: - PPT slide strip
 
-    private static let pptAccent = Color(red: 0.84, green: 0.22, blue: 0.18)
-
-    /// Horizontal thumbnail strip below the PPT canvas.
-    /// Each card is a 16:9 mini slide placeholder with a slide-number badge.
-    /// Active card gets the PPT red border; strip auto-scrolls to keep it visible.
-    private var slideStrip: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(1...max(1, slideProgress.total), id: \.self) { num in
-                        let isCurrent = num == slideProgress.current
-                        Button { handleCommand("slide-goto:\(num)") } label: {
-                            ZStack(alignment: .bottomTrailing) {
-                                // 16:9 slide card — show real thumbnail if captured, else placeholder
-                                if let thumb = slideThumbnails[num] {
-                                    Image(uiImage: thumb)
-                                        .resizable()
-                                        .scaledToFill()
-                                        .frame(width: 96, height: 54)
-                                        .clipped()
-                                        .cornerRadius(5)
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 5)
-                                                .strokeBorder(
-                                                    isCurrent ? Self.pptAccent : Color.secondary.opacity(0.25),
-                                                    lineWidth: isCurrent ? 2.5 : 1
-                                                )
-                                        )
-                                } else {
-                                    RoundedRectangle(cornerRadius: 5)
-                                        .fill(Color(uiColor: .secondarySystemBackground))
-                                        .frame(width: 96, height: 54)
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 5)
-                                                .strokeBorder(
-                                                    isCurrent ? Self.pptAccent : Color.secondary.opacity(0.25),
-                                                    lineWidth: isCurrent ? 2.5 : 1
-                                                )
-                                        )
-                                }
-                                // Number badge bottom-right
-                                Text("\(num)")
-                                    .font(.system(size: 9, weight: .bold, design: .monospaced))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 4)
-                                    .padding(.vertical, 2)
-                                    .background(
-                                        isCurrent ? Self.pptAccent : Color.secondary.opacity(0.55),
-                                        in: RoundedRectangle(cornerRadius: 3)
-                                    )
-                                    .padding(4)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .id(num)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-            }
-            .frame(height: 74)
-            .background(.bar)
-            .overlay(alignment: .top) { Divider() }
-            .onChange(of: slideProgress.current) { _, current in
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    proxy.scrollTo(current, anchor: .center)
-                }
-            }
-        }
-    }
+    static let pptAccent = Color(red: 0.84, green: 0.22, blue: 0.18)
 
     // MARK: - Excel sheet strip
 
@@ -613,9 +612,23 @@ struct OfficeEditorView: View {
                         Spacer().frame(width: 6)
                     }
                     Button {
-                        NotificationCenter.default.post(name: .editorSaveRequested, object: nil)
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                            NotificationCenter.default.post(name: .editorDoneRequested, object: nil)
+                        if ref.kind.isOnlyOfficeEditable {
+                            // Dismiss WKWebView keyboard before showing status picker sheet.
+                            // Without this, the sheet presentation races with keyboard
+                            // dismiss animation → garbled layout (keyboard + sheet overlap).
+                            editorVC?.dismissKeyboard()
+                            UIApplication.shared.sendAction(
+                                #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil
+                            )
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                                NotificationCenter.default.post(name: .editorDoneRequested, object: nil)
+                            }
+                        } else {
+                            // PDF / other: save then close (no status picker).
+                            NotificationCenter.default.post(name: .editorSaveRequested, object: nil)
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                                NotificationCenter.default.post(name: .editorDoneRequested, object: nil)
+                            }
                         }
                     } label: {
                         Text("Done").fontWeight(.semibold)
@@ -688,6 +701,99 @@ struct OfficeEditorView: View {
     }
 }
 
+// MARK: - PPT slide strip
+
+/// Isolated slide thumbnail strip.
+///
+/// Conforms to `Equatable` with a custom `==` that ignores the `onTap` closure
+/// (closures aren't Equatable) and skips deep-comparing the `thumbnails` dictionary
+/// (UIImage isn't Equatable). Instead it uses `thumbnailVersion` — a counter
+/// incremented each time a new thumbnail arrives — to detect real changes.
+/// Combined with `.equatable()` at the call site, SwiftUI skips `body` entirely
+/// whenever `current`, `total`, and `thumbnailVersion` are all unchanged, preventing
+/// unrelated @State flips in OfficeEditorView (isDirty, font names, etc.) from
+/// causing the strip to redraw.
+private struct PPTSlideStrip: View, Equatable {
+    let current: Int
+    let total: Int
+    let thumbnailVersion: Int
+    let thumbnails: [Int: UIImage]
+    let accent: Color
+    let onTap: (Int) -> Void
+
+    static func == (lhs: PPTSlideStrip, rhs: PPTSlideStrip) -> Bool {
+        lhs.current == rhs.current &&
+        lhs.total == rhs.total &&
+        lhs.thumbnailVersion == rhs.thumbnailVersion
+        // accent is a static constant — never changes
+        // onTap and thumbnails are excluded: closure non-Equatable; UIImage non-Equatable
+    }
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(1...max(1, total), id: \.self) { num in
+                        let isCurrent = num == current
+                        Button { onTap(num) } label: {
+                            ZStack(alignment: .bottomTrailing) {
+                                if let thumb = thumbnails[num] {
+                                    Image(uiImage: thumb)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 96, height: 54)
+                                        .clipped()
+                                        .cornerRadius(5)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 5)
+                                                .strokeBorder(
+                                                    isCurrent ? accent : Color.secondary.opacity(0.25),
+                                                    lineWidth: isCurrent ? 2.5 : 1
+                                                )
+                                        )
+                                } else {
+                                    RoundedRectangle(cornerRadius: 5)
+                                        .fill(Color(uiColor: .secondarySystemBackground))
+                                        .frame(width: 96, height: 54)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 5)
+                                                .strokeBorder(
+                                                    isCurrent ? accent : Color.secondary.opacity(0.25),
+                                                    lineWidth: isCurrent ? 2.5 : 1
+                                                )
+                                        )
+                                }
+                                Text("\(num)")
+                                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 2)
+                                    .background(
+                                        isCurrent ? accent : Color.secondary.opacity(0.55),
+                                        in: RoundedRectangle(cornerRadius: 3)
+                                    )
+                                    .padding(4)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .id(num)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+            }
+            .frame(height: 74)
+            .background(.bar)
+            .overlay(alignment: .top) { Divider() }
+            .onChange(of: current) { _, curr in
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    proxy.scrollTo(curr, anchor: .center)
+                }
+            }
+        }
+    }
+}
+
 // MARK: - UIViewControllerRepresentable
 
 private struct _OfficeWebView: UIViewControllerRepresentable {
@@ -696,6 +802,7 @@ private struct _OfficeWebView: UIViewControllerRepresentable {
     let onError: (String) -> Void
     let onReady: () -> Void
     let onDirtyChange: (Bool) -> Void
+    var onInteraction: () -> Void = {}
     let onVCReady: (OfficeEditorViewController) -> Void
     let onFilterRequest: ([NativeFilterItem]) -> Void
     let onSlideChange: (Int, Int) -> Void
@@ -706,6 +813,7 @@ private struct _OfficeWebView: UIViewControllerRepresentable {
     let onWordFontChange:  (String) -> Void
     let onPPTFontChange:   (String) -> Void
     var onPPTZoomReady: () -> Void = {}
+    var onDocSaved: () -> Void = {}
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -715,6 +823,7 @@ private struct _OfficeWebView: UIViewControllerRepresentable {
         vc.onError = { msg in Task { @MainActor in onError(msg) } }
         vc.onReady = { Task { @MainActor in onReady() } }
         vc.onDirtyChange = { dirty in Task { @MainActor in onDirtyChange(dirty) } }
+        vc.onInteraction = { Task { @MainActor in onInteraction() } }
         vc.onFilterRequest = { items in Task { @MainActor in onFilterRequest(items) } }
         vc.onSlideChange = { c, t in Task { @MainActor in onSlideChange(c, t) } }
         vc.onSlideThumbnail = { num, data in Task { @MainActor in onSlideThumbnail(num, data) } }
@@ -724,6 +833,7 @@ private struct _OfficeWebView: UIViewControllerRepresentable {
         vc.onWordFontChange  = { name in Task { @MainActor in onWordFontChange(name)  } }
         vc.onPPTFontChange   = { name in Task { @MainActor in onPPTFontChange(name)   } }
         vc.onPPTZoomReady    = { Task { @MainActor in onPPTZoomReady() } }
+        vc.onDocSaved        = { Task { @MainActor in onDocSaved() } }
         vc.openFile(at: ref.url)
         Task { @MainActor in onVCReady(vc) }
         return vc

@@ -15,7 +15,9 @@ import SwiftUI
 /// `.regularMaterial + strokeBorder + shadow` fallback branch here.
 fileprivate extension View {
     func tabBarPillStyle() -> some View {
-        glassEffect(.regular, in: .capsule)
+        self
+            .background(Capsule().fill(Color(UIColor.systemBackground).opacity(0.42)))
+            .glassEffect(.regular, in: .capsule)
     }
 }
 
@@ -49,6 +51,9 @@ struct RootView: View {
     /// Set to true after the permission sheet is shown — never show again.
     @AppStorage("noti.permissionAsked") private var permissionAsked: Bool = false
     @State private var showNotificationPermissionSheet = false
+    /// Set when the first-action fires while the user is deep in a feature (not at
+    /// a root tab). Consumed and shown the next time the user switches to any tab.
+    @AppStorage("noti.pendingPrompt") private var pendingNotificationPrompt = false
     @State private var selectedTab: RootTab = .library
     /// FAB "+" menu open state — lifted from `LibraryAddButton` so
     /// `libraryShell` can render a screen-wide invisible scrim that
@@ -192,6 +197,9 @@ struct RootView: View {
 
                     SettingsView {
                         await permissionVM.resetPermission()
+                        // Immediately present the folder picker after resetting so
+                        // the user can choose a new folder without extra taps.
+                        await permissionVM.requestPermission()
                     }
                     .opacity(selectedTab == .settings ? 1 : 0)
                     .allowsHitTesting(selectedTab == .settings)
@@ -298,6 +306,7 @@ struct RootView: View {
             .onChange(of: selectedTab) { _, newTab in
                 guard newTab == .library || newTab == .tools else { return }
                 feedbackTrigger.check(usageTracker: usageTracker)
+                showPendingNotificationIfNeeded()
             }
             .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: feedbackTrigger.shouldShowOverlay)
             .sheet(isPresented: Binding(
@@ -307,10 +316,10 @@ struct RootView: View {
                 FeedbackSheetView()
             }
             .fullScreenCover(item: $editingRef) { ref in
-                EditorSheet(container: container, ref: ref, onDone: {
+                EditorSheet(container: container, ref: ref, onDone: { status in
                     guard let entry = libraryVM.store.entries.first(where: { $0.document.url == ref.url })
                     else { return }
-                    Task { await libraryVM.setStatus(.done, for: entry.id) }
+                    Task { await libraryVM.setStatusFromEditor(status, for: entry.id) }
                     toaster.show(.success, title: "Saved", filename: entry.document.name)
                     handleFirstAction()
                 })
@@ -389,7 +398,9 @@ struct RootView: View {
     private func tabBarButton(_ tab: RootTab, label: String, systemImage: String, isCustomAsset: Bool = false) -> some View {
         let isSelected = selectedTab == tab
         return Button {
-            selectedTab = tab
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
+                selectedTab = tab
+            }
         } label: {
             VStack(spacing: 3) {
                 if isCustomAsset {
@@ -485,9 +496,27 @@ struct RootView: View {
     private func handleFirstAction() {
         guard !firstActionDone, !permissionAsked else { return }
         firstActionDone = true
+        if selectedTab == .library {
+            // Library editor fires onDone then closes — user is back at Library
+            // root, safe to show after a short settle delay.
+            permissionAsked = true
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(800))
+                showNotificationPermissionSheet = true
+            }
+        } else {
+            // User is deep inside a tool flow (Tools nav-stack push). Defer the
+            // prompt until they switch to any root tab.
+            pendingNotificationPrompt = true
+        }
+    }
+
+    private func showPendingNotificationIfNeeded() {
+        guard pendingNotificationPrompt else { return }
+        pendingNotificationPrompt = false
         permissionAsked = true
         Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(800))
+            try? await Task.sleep(for: .milliseconds(600))
             showNotificationPermissionSheet = true
         }
     }

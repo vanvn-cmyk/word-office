@@ -424,7 +424,17 @@ struct ToolsTabView: View {
     /// the user tapped, now that the gallery is off-screen and it's
     /// safe to present the editor sheet on top.
     private func openPendingEditorIfNeeded() {
-        guard let url = pendingEditorURL else { return }
+        guard let url = pendingEditorURL else {
+            // Gallery dismissed without the user tapping a file. When the flow
+            // originated from Scan (shouldPopNavAfterEditorDismisses = true), the
+            // scan screen has already cleared its pages — popping to Tools root
+            // avoids leaving the user on a blank "Add pages" screen.
+            if shouldPopNavAfterEditorDismisses {
+                shouldPopNavAfterEditorDismisses = false
+                navPath = NavigationPath()
+            }
+            return
+        }
         pendingEditorURL = nil
         openFile(url)
     }
@@ -436,13 +446,13 @@ struct ToolsTabView: View {
     /// row-height and card widths stay consistent across the whole page.
     private var gridColumns: [GridItem] {
         [
-            GridItem(.flexible(), spacing: DSSpacing.sm),
-            GridItem(.flexible(), spacing: DSSpacing.sm)
+            GridItem(.flexible(), spacing: DSSpacing.md),
+            GridItem(.flexible(), spacing: DSSpacing.md)
         ]
     }
 
     private var convertGrid: some View {
-        LazyVGrid(columns: gridColumns, spacing: DSSpacing.sm) {
+        LazyVGrid(columns: gridColumns, spacing: DSSpacing.md) {
             // "To PDF" and "PDF to Word" keep their own cards (distinct
             // workflows). "PDF to Image" and "Image to PDF" are merged
             // into one hub card — user picks direction inside.
@@ -472,7 +482,7 @@ struct ToolsTabView: View {
     }
 
     private var organizeGrid: some View {
-        LazyVGrid(columns: gridColumns, spacing: DSSpacing.sm) {
+        LazyVGrid(columns: gridColumns, spacing: DSSpacing.md) {
             Button {
                 pendingDestination = .merge()
                 isSourcePickerPresented = true
@@ -517,7 +527,7 @@ struct ToolsTabView: View {
     }
 
     private var fillAndSignGrid: some View {
-        LazyVGrid(columns: gridColumns, spacing: DSSpacing.sm) {
+        LazyVGrid(columns: gridColumns, spacing: DSSpacing.md) {
             Button {
                 pendingDestination = .fillForm()
                 isSourcePickerPresented = true
@@ -574,7 +584,7 @@ struct ToolsTabView: View {
     /// resorting to explicit backgrounds around sections.
     @ViewBuilder
     private func section<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: DSSpacing.xs) {
+        VStack(alignment: .leading, spacing: DSSpacing.sm) {
             content()
         }
     }
@@ -629,7 +639,7 @@ struct ToolsTabView: View {
                         openFile(url)
                     },
                     onShowGallery: { [self] urls in
-                        shouldPopNavAfterEditorDismisses = true
+                        shouldPopNavAfterEditorDismisses = true  // pop to root after gallery (whether user opens a file or not)
                         showGallery(urls)
                     }
                 )
@@ -868,8 +878,8 @@ private struct ToolCardSurface: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .padding(DSSpacing.md - 2) // 14pt
-            .frame(maxWidth: .infinity, minHeight: 152, maxHeight: 152, alignment: .topLeading)
+            .padding(DSSpacing.md)
+            .frame(maxWidth: .infinity, minHeight: 150, alignment: .topLeading)
             .background(
                 RoundedRectangle(cornerRadius: corner, style: .continuous)
                     .fill(surfaceFill)

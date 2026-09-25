@@ -63,6 +63,12 @@ final class MetadataStoreImpl: MetadataStoring {
             }
         }
 
+        migrator.registerMigration("v3_continue_working") { db in
+            try db.alter(table: "document_metadata") { t in
+                t.add(column: "is_continue_working", .boolean).notNull().defaults(to: false)
+            }
+        }
+
         try migrator.migrate(db)
     }
 
@@ -80,14 +86,15 @@ final class MetadataStoreImpl: MetadataStoring {
             try db.execute(
                 sql: """
                     INSERT INTO document_metadata
-                        (id, status, last_opened_at, last_modified_at, remind_at, is_favourite)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                        (id, status, last_opened_at, last_modified_at, remind_at, is_favourite, is_continue_working)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
-                        status           = excluded.status,
-                        last_opened_at   = excluded.last_opened_at,
-                        last_modified_at = excluded.last_modified_at,
-                        remind_at        = excluded.remind_at,
-                        is_favourite     = excluded.is_favourite
+                        status               = excluded.status,
+                        last_opened_at       = excluded.last_opened_at,
+                        last_modified_at     = excluded.last_modified_at,
+                        remind_at            = excluded.remind_at,
+                        is_favourite         = excluded.is_favourite,
+                        is_continue_working  = excluded.is_continue_working
                     """,
                 arguments: [
                     metadata.id,
@@ -95,7 +102,8 @@ final class MetadataStoreImpl: MetadataStoring {
                     metadata.lastOpenedAt.timeIntervalSince1970,
                     metadata.lastModifiedAt.timeIntervalSince1970,
                     metadata.remindAt?.timeIntervalSince1970,
-                    metadata.isFavourite
+                    metadata.isFavourite,
+                    metadata.isContinueWorking
                 ]
             )
         }
@@ -164,7 +172,8 @@ final class MetadataStoreImpl: MetadataStoring {
             lastOpenedAt: Date(timeIntervalSince1970: row["last_opened_at"]),
             lastModifiedAt: Date(timeIntervalSince1970: row["last_modified_at"]),
             remindAt: (row["remind_at"] as TimeInterval?).map { Date(timeIntervalSince1970: $0) },
-            isFavourite: row["is_favourite"]
+            isFavourite: row["is_favourite"],
+            isContinueWorking: (row["is_continue_working"] as Bool?) ?? false
         )
     }
 

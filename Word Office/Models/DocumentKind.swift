@@ -50,4 +50,11 @@ enum DocumentKind: String, Codable, Hashable, Sendable, CaseIterable {
         default: return false
         }
     }
+
+    var isWordOrExcel: Bool {
+        switch self {
+        case .docx, .doc, .xlsx, .xls: return true
+        default: return false
+        }
+    }
 }

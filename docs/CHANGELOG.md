@@ -6,6 +6,202 @@ Format tham khảo [Keep a Changelog](https://keepachangelog.com/). Entry mới 
 
 ---
 
+## [Unreleased] — 2026-09-25h (Keyboard lifecycle + PPT flicker + save toast + blank spreadsheet)
+
+### 🐛 Keyboard shows at Library/home screen after closing editor
+**File:** `Views/Editor/OfficeEditorViewController.swift`
+
+Added `private var isEditorVisible = false` flag:
+- `viewWillAppear` → `isEditorVisible = true`
+- `viewWillDisappear` → `isEditorVisible = false` then `resignFirstResponder()`
+- ALL `becomeFirstResponder()` calls (focusKeyboard, pptZoomDone, auto-keyboard) gated by `guard isEditorVisible`
+
+**Root cause**: JS `area_id.focus()` timer in `onDocumentReady` could fire after `viewWillDisappear` already resigned → Swift received `focusKeyboard` bridge message → `becomeFirstResponder()` → keyboard re-appeared at Library. `view.window != nil` check was insufficient (view still in window during dismiss animation).
+
+---
+
+### 🐛 Blank spreadsheet / Word document on first (cold) open
+**Files:** `OfficeBundle/editor.html`, `Views/Editor/OfficeEditorViewController.swift`
+
+- Removed `area_id.focus()` +400ms from JS `onDocumentReady` block entirely
+- Moved auto-keyboard for Word/Excel to Swift `case .ready:` +800ms:
+  ```swift
+  if currentDocType == "word" || currentDocType == "cell" {
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+          guard let self, self.isEditorVisible else { return }
+          _ = self.ooKeyboardProxy?.becomeFirstResponder()
+      }
+  }
+  ```
+
+**Root cause**: Cold load (first open, JS not cached) = `onDocumentReady` fires while canvas still painting. `area_id.focus()` at +400ms triggered keyboard → iOS changed `window.innerHeight` → OO's resize handler fired during incomplete canvas init → blank. Second open: JS cached, canvas done before 400ms → worked. `case .ready:` fires after `onAppReady` (OO fully initialised), 800ms gives additional buffer for canvas paint.
+
+---
+
+### 🐛 PPT slide flickers / moves when keyboard appears
+**Files:** `Views/Editor/OfficeEditorView.swift`, `Views/Editor/OfficeEditorViewController.swift`
+
+- Removed `.ignoresSafeArea(.keyboard)` from ZStack (was making slide go DOWN — extended WebView into keyboard area → `window.innerHeight` increased → OO centered slide lower)
+- Added `private var webViewBottomConstraint: NSLayoutConstraint!` stored property
+- Registered `keyboardWillChangeFrameNotification` observer in `viewDidLoad`
+- `@objc keyboardWillChangeFrame`: PPT only; reads `keyboardFrameEndUserInfoKey`, sets `webViewBottomConstraint.constant = keyboardHeight`
+
+**Mechanism**: SwiftUI shrinks UIViewControllerRepresentable frame by keyboard height → UIKit constraint extends WebView bottom by same amount → net WebView height unchanged → `window.innerHeight` constant → slide doesn't move.
+
+---
+
+### 🐛 PPT second-tap on same text: typing broken
+**File:** `OfficeBundle/editor.html`
+
+Removed `_pptKbdResizeLock` from both locations:
+- Focus override: removed `if (_isPPT) { innerWin._pptKbdResizeLock = Date.now(); }`
+- `_reInjectOO`: removed entire capture-phase resize listener block
+
+**Root cause**: On second tap (already in text-edit mode), OO fires a `resize` event for cursor repositioning scroll. Our capture-phase listener was blocking all resize events within 800ms of `_oo_ppt_kbd.focus()` → OO couldn't reposition cursor → typing silently failed.
+
+---
+
+### ✨ Save success toast
+**Files:** `Views/Editor/OfficeEditorView.swift`, `Views/Editor/OfficeEditorViewController.swift`
+
+- `case .saved:` now calls `onDocSaved?()` (was `break`)
+- Added `var onDocSaved: (() -> Void)?` to `OfficeEditorViewController`
+- `OfficeEditorView` wires `onDocSaved: { toaster.show(.success, title: "Saved") }` via `@Environment(DSToastPresenter.self)`
+
+---
+
+## [Unreleased] — 2026-09-24 (Status sheet v2 + Mascot full-section highlight)
+
+### 🐛 EditorStatusPickerSheet — redesign, responsive, status logic fix
+**File:** `Views/Common/EditorSheet.swift`
+
+- **Status logic**: "Still in progress" now maps to `.reviewed` (was `.draft`). User intent: saving and closing after "still in progress" should be recorded as Reviewed, not Draft.
+- **Sheet height**: 320 → 298pt (card row height 48 → 44pt + inter-card spacing DSSpacing.sm → xs; total content ~266pt + 28pt drag = 294pt; 4pt breathing room)
+- **Icon selected state**: solid `tintColor` background + white SF symbol (was tint-opacity bg with tint foreground). More impactful confirmation visual.
+- **Icon size**: 18pt uniform (was `isSelected ? 22 : 20` — avoids jitter on selection)
+- **Icon frame**: 44×44pt (was 48×48pt) — matches DS icon cell size
+- **Icon corner**: `DSRadius.card` token (was raw `12`)
+- **Card bg**: `Color.clear` when unselected (was `Color.dsBackgroundElevated` — cleaner, no competing "lifted" effect)
+- **Selected border**: 1.5pt (was 1.0pt — more visible state change)
+- **Animation**: `.spring(response: 0.22, dampingFraction: 0.75)` everywhere (was `.easeOut(0.12)` / `easeOut(0.13)` — smooth spring bounce)
+- Applies to Word/Excel/PPT via `.isOnlyOfficeEditable` (unchanged)
+
+---
+
+### ✨ Mascot highlight wraps entire Reviewed section (list + grid)
+**File:** `Views/Library/LibraryView.swift`
+
+Previously only the section header got the highlight stroke animation; file rows had plain `Color.clear` backgrounds. Now the full section (header + all file rows) glows with a `tintColor.opacity(0.05)` wash:
+
+- **List mode**: both the header `listRowBackground` and each file-row `listRowBackground` now use `group.status.tintColor.opacity(highlightedStatus == group.status ? 0.05 : 0)` as the row fill alongside the 3pt rail
+- **Grid mode**: the `timelineGroupedGrid` VStack for each group gains a `.background(tintColor.opacity(...))` + `.id("grid-<rawValue>")` for programmatic scroll targeting; `statusTabHeader` now receives `highlighted:` for the ring animation
+- **Grid scroll**: `.onReceive(.mascotScrollToReviewed)` no longer guards on `viewMode == .list`; computes scroll ID as `"lib-reviewed"` (list) or `"grid-reviewed"` (grid) and calls `proxy.scrollTo` for both
+- **Animation**: `withAnimation(.spring(response: 0.35, dampingFraction: 0.7))` wraps both the set and the 2s clear of `highlightedStatus`
+
+---
+
+## [Unreleased] — 2026-09-23 (Camera fix + Paywall responsive + Status sheet + Link insert)
+
+### 🐛 Scan & OCR — camera not opening on real device
+**File:** `Views/OCR/ScanFlowView.swift`
+
+`isCameraAvailable` was calling `VNDocumentCameraViewController.isSupported` which returned `false` on certain real devices (MDM-managed or restricted). Now always returns `true` on non-simulator builds — the VC itself handles unsupported states gracefully. Auto-open on appear now triggers correctly on device.
+
+---
+
+### 🐛 Paywall — 4th benefit subtitle clipped on small screens
+**File:** `Views/Paywall/PaywallView.swift`
+
+Added responsive compact mode for screens < 740pt (iPhone SE / mini family). Tracks container height via `onGeometryChange`. In compact mode: illustration `maxHeight` shrinks from 195 → 110pt, outer VStack spacing xs (8pt) vs md (16pt), benefits spacing xxs (4pt) vs xs (8pt), top padding removed. All 4 benefit rows always visible on all supported screen sizes.
+
+---
+
+### 🐛 Insert Link — "Link insert failed" error on Word/Excel/PPT
+**File:** `Views/Editor/OfficeEditorView.swift`
+
+`onDismiss` of the link sheet fires at the START of the sheet dismiss animation (~350ms before WKWebView is fully foregrounded). `_insertHyperlink` in editor.html has its own 200ms internal setTimeout, but the Swift call was happening too early — `add_Hyperlink` was throwing when cursor state was not restored yet. Added 400ms delay in Swift so total lead time = 600ms, safely past the animation completion window.
+
+---
+
+### 🎨 EditorStatusPickerSheet — DS compliance + excess bottom spacing
+**File:** `Views/Common/EditorSheet.swift`
+
+- Sheet height: 340 → 320pt (removed ~28pt gap between "Continue Editing" and bottom edge)
+- Bottom padding: `isIPad ? DSSpacing.lg : DSSpacing.md` → `DSSpacing.sm` (uniform, system safe area extension handles home indicator visual gap)
+- Header spacing: raw `4` → `DSSpacing.xxs` (design system token)
+- Header font: `DSFont.headline.weight(.semibold)` → `DSFont.headline` (headline already is semibold)
+- Removed `isIPad: Bool` computed property (no longer needed)
+
+---
+
+## [Unreleased] — 2026-09-23 (Mascot scroll-to-Reviewed + CTA radius sync + more)
+
+### ✨ Mascot tap → scroll to Reviewed section
+**Files:** `Views/Library/MascotAssistantView.swift`, `Views/Library/LibraryView.swift`
+
+Tapping the mascot bubble/avatar now scrolls the Library to the "Reviewed" section with a spring highlight animation on the section header. The mascot itself plays a scale-bounce (0.92 → 1.0) to confirm the tap.
+
+- `MascotAssistantView`: inner VStack is now a tappable `Button` (removed `.allowsHitTesting(false)`); posts `Notification.Name.mascotScrollToReviewed`; scale animation via `@State private var mascotScale`
+- `LibraryView`: wrapped `List` in `ScrollViewReader`; `.id("lib-<rawValue>")` on section header rows in list mode; `.onReceive(.mascotScrollToReviewed)` → `proxy.scrollTo("lib-reviewed", anchor: .top)` + 2s highlight pulse; `statusTabHeader` gains `highlighted:` param → stroke ring + tint fill + `scaleEffect` animated via `.spring`
+
+---
+
+### 🎨 CTA button radius sync (`Capsule` → `DSRadius.control`)
+**File:** `Views/Onboarding/OnboardingContainerView.swift`
+
+Design team flagged Onboarding primary CTA (`Capsule()` = fully-rounded pill) vs PaywallView (`DSPrimaryButton` → `DSRadius.control = 10pt`). Synced Onboarding to `RoundedRectangle(cornerRadius: DSRadius.control)`. Shadow retained.
+
+---
+
+## [Unreleased] — 2026-09-23 (Perf shadow merge + Discard alert HIG fix + EditorStatusPickerSheet)
+
+### ⚡ Performance — double shadow merge (scroll jank fix)
+**Files:** `Views/Library/LibraryView.swift`, `Views/Library/DocumentGrid.swift`, `Views/Tabs/ToolsTabView.swift`
+
+**Root cause:** Two `.shadow()` modifiers per card = 2 CALayer compositing passes per render frame. With 10–15 visible list rows × 2 passes × radius 12, GPU shadow budget was the primary scroll jank cause.
+
+**Fix:** Merged all double-shadow pairs to single `.shadow(color:opacity:radius:y:)` across 3 files:
+- `LibraryView` — 3 pairs (radius 12+3, 14+2) → 3 × single radius 6
+- `DocumentGrid` — radius 2+14 → single radius 6
+- `ToolsTabView` — radius 2+14 (with dark-mode conditional) → single radius 6
+
+**Result:** ~75% GPU compositing reduction per card × visible rows.
+
+---
+
+### 🎨 Discard Changes dialog — `.confirmationDialog` → `.alert` (HIG fix)
+**File:** `Views/Common/EditorSheet.swift`
+
+`.confirmationDialog` (action sheet from bottom) is the wrong HIG pattern for a 2-option destructive confirm. Pages, Keynote, and Word for iOS all use a centered `.alert`. Fixed:
+- Changed to `.alert("Discard Changes?")` with centered layout
+- "Cancel" → "Keep Editing" (clearer intent — user stays in editor)
+- Message: "Your unsaved edits will be lost."
+- Gate: `isDirty && ref.kind.isOnlyOfficeEditable` for both Discard alert and `interactiveDismissDisabled`
+
+---
+
+### ✨ EditorStatusPickerSheet — status tagging before Done
+**Files:** `Views/Common/EditorSheet.swift`, `Views/Root/RootView.swift`
+
+**Problem:** Tapping Done always hardcoded `.done` status regardless of actual workflow state ("edit done ≠ document done").
+
+**Solution:** For OO-editable files (Word/Excel/PPT), Done now shows a bottom sheet before closing so the user can tag the document's real status.
+
+**API change:** `EditorSheet.onDone: (() -> Void)?` → `((DocumentStatus) -> Void)?`
+
+**Flow:**
+1. User taps Done → `editorDoneRequested` fires
+2. `EditorSheet` shows `.sheet(.height(320))` instead of dismissing
+3. Two status cards:
+   - `pencil.circle` (orange) — "Still in progress" / "I'll come back to edit" → `.draft`
+   - `checkmark.seal` (green) — "All done" / "No more edits needed" → `.done`
+4. "Continue Editing" cancel button (or drag to dismiss) returns to editor
+5. On pick: `onDone?(status)` → `dismiss()`
+
+`RootView` call site updated: receives status param, applies via `libraryVM.setStatus(status, for: entry.id)`.
+
+---
+
 ## [Unreleased] — 2026-09-21 (Editor insert reliability — Review tab, Table/Symbol/Chart for Excel+PPT)
 
 ### 🐛 Review tab (Word) — Track Changes / Accept / Reject không hoạt động

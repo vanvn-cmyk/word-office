@@ -39,9 +39,10 @@ struct EditorTopToolbar: View {
     }
 
     private enum PPTTab: String, CaseIterable {
-        case home   = "Home"
-        case insert = "Insert"
-        case slide  = "Slide"
+        case home    = "Home"
+        case insert  = "Insert"
+        case slide   = "Slide"
+        case present = "Present"
     }
 
     // MARK: - Inputs & state
@@ -65,6 +66,8 @@ struct EditorTopToolbar: View {
     @State private var wordFontColor:           Color = .black
     @State private var wordHighlightColor:      Color = Color(red: 1.0, green: 0.93, blue: 0.0)
     @State private var pptFontColor:            Color = .black
+    @State private var pptFillColor:            Color = Color(red: 0.95, green: 0.95, blue: 0.95)
+    @State private var pptSlideBgColor:         Color = .white
     @State private var wordTrackChangesActive:  Bool  = false
 
     // MARK: - Body
@@ -223,6 +226,7 @@ struct EditorTopToolbar: View {
                         vDivider()
                         iconBtn("arrow.uturn.backward", label: "Undo", cmd: "undo")
                         iconBtn("arrow.uturn.forward",  label: "Redo", cmd: "redo")
+                        iconBtn("arrow.down.doc.fill",  label: "Save", cmd: "save")
                         vDivider()
                         fmtBtn(.bold,          cmd: "bold")
                         fmtBtn(.italic,        cmd: "italic")
@@ -238,7 +242,7 @@ struct EditorTopToolbar: View {
 
                     case .insert:
                         iconBtn("photo",       label: "Insert image",  cmd: "insert-image")
-                        chipBtn("Table",       label: "Insert table",  cmd: "insert-table")
+                        chipBtn("Chart",       label: "Insert chart",  cmd: "insert-chart")
                         chipBtn("Shape",       label: "Insert shape",  cmd: "insert-shape")
                         vDivider()
                         iconBtn("link",        label: "Hyperlink",     cmd: "insert-link")
@@ -401,6 +405,7 @@ struct EditorTopToolbar: View {
                         vDivider()
                         iconBtn("arrow.uturn.backward", label: "Undo", cmd: "undo")
                         iconBtn("arrow.uturn.forward",  label: "Redo", cmd: "redo")
+                        iconBtn("arrow.down.doc.fill",  label: "Save", cmd: "save")
                         vDivider()
                         textBtn("A+", label: "Increase font size", cmd: "font-size-inc")
                         textBtn("A−", label: "Decrease font size", cmd: "font-size-dec")
@@ -507,9 +512,10 @@ struct EditorTopToolbar: View {
                             label: "Font face", cmd: "ppt-font-picker"
                         )
                         vDivider()
-                        // Undo / Redo
+                        // Undo / Redo / Save
                         iconBtn("arrow.uturn.backward", label: "Undo", cmd: "undo")
                         iconBtn("arrow.uturn.forward",  label: "Redo", cmd: "redo")
+                        iconBtn("arrow.down.doc.fill",  label: "Save", cmd: "save")
                         vDivider()
                         fmtBtn(.bold,          cmd: "bold")
                         fmtBtn(.italic,        cmd: "italic")
@@ -531,6 +537,8 @@ struct EditorTopToolbar: View {
                         iconBtn("list.number", label: "Numbered list", cmd: "list-numbered")
                         vDivider()
                         iconBtn("eraser", label: "Clear formatting", cmd: "clear-format")
+                        vDivider()
+                        iconBtn("trash", label: "Delete selected object", cmd: "ppt-delete-object")
 
                     case .insert:
                         chipBtn("Text Box",      label: "Insert text box", cmd: "ppt-insert-textbox")
@@ -564,13 +572,34 @@ struct EditorTopToolbar: View {
                         layoutChipBtn("2 Col",   icon: "rectangle.split.3x1",          cmd: "slide-layout:3")
                         layoutChipBtn("Title Only", icon: "rectangle.topthird.inset.filled", cmd: "slide-layout:5")
                         layoutChipBtn("Center",  icon: "text.aligncenter",             cmd: "slide-layout:6")
+
+                    case .present:
+                        // Start slideshow from beginning
+                        iconBtn("play.circle.fill", label: "Start from beginning", cmd: "ppt-present")
+                        chipBtn("Slideshow",        label: "Start slideshow",      cmd: "ppt-present")
+                        vDivider()
+                        // Slide sorter view
+                        iconBtn("square.grid.2x2",  label: "Slide sorter",   cmd: "ppt-view-sorter")
+                        chipBtn("Sorter",            label: "Slide sorter view",    cmd: "ppt-view-sorter")
+                        vDivider()
+                        iconBtn("note.text",        label: "Speaker notes",      cmd: "ppt-notes-toggle")
+                        chipBtn("Notes",            label: "Toggle speaker notes", cmd: "ppt-notes-toggle")
                     }
                 }
                 .padding(.horizontal, 4)
             }
             if pptTab == .home {
-                nativeColorBtn(icon: "character", label: "Font color",
+                vDivider()
+                iconBtn("square.and.arrow.down", label: "Save", cmd: "save")
+                vDivider()
+                nativeColorBtn(icon: "character",        label: "Font color",
                                color: $pptFontColor, cmd: "font-color")
+                nativeColorBtn(icon: "paintbucket.fill", label: "Fill color",
+                               color: $pptFillColor, cmd: "ppt-fill-color")
+            }
+            if pptTab == .slide {
+                nativeColorBtn(icon: "rectangle.fill", label: "Slide background color",
+                               color: $pptSlideBgColor, cmd: "ppt-slide-bg-color")
             }
         }
         .frame(height: 44)

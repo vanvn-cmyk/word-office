@@ -5,25 +5,14 @@ import StoreKit
 /// (per `/swiftui-expert-skill` sheet guidance — sheets shouldn't take
 /// onSave/onCancel closures from the caller).
 ///
-/// Every submitted rating — not just 4-5 stars — routes to `requestReview()`
-/// (SwiftUI's StoreKit environment action, the modern replacement for
-/// manually looking up a `UIWindowScene` and calling
-/// `SKStoreReviewController.requestReview(in:)`). Apple's Human Interface
-/// Guidelines (Ratings and Reviews) explicitly warn against gating the
-/// system review request behind your own pre-screen so only satisfied users
-/// ever reach it — that's exactly what a `rating >= 4` condition here would
-/// do, so the star picker stays a pure feedback/thank-you UI and never
-/// decides who gets asked.
+/// Only 4–5 star ratings trigger `requestReview()` (SwiftUI's StoreKit
+/// environment action). 1–3 star ratings show a thank-you toast but skip
+/// the system prompt so unsatisfied users aren't sent to the App Store.
 struct RatingDialogView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.requestReview) private var requestReview
     @Environment(DSToastPresenter.self) private var toastPresenter
 
-    // Defaults to all 5 stars filled rather than empty — user can still
-    // lower it before submitting, and `submit()` requests a review
-    // regardless of the final value either way (see the type doc), so this
-    // is just the dialog's starting visual state, not a thumb on the scale
-    // for who gets asked.
     @State private var rating = 5
 
     @ScaledMetric private var starHeaderSize: CGFloat = 36
@@ -78,13 +67,14 @@ struct RatingDialogView: View {
     private func submit() {
         let finalRating = rating
         dismiss()
-        // A review prompt presented mid-dismiss-animation is commonly
-        // dropped by the system — give this sheet's own dismissal a moment
-        // to finish first. Fires for every rating, not just high ones — see
-        // the type doc for why this must not be gated by `finalRating`.
-        Task {
-            try? await Task.sleep(for: .milliseconds(400))
-            requestReview()
+        // Only request an in-app review for satisfied users (4–5 stars).
+        // For 1–3 stars, the toast is shown but the system prompt is skipped
+        // so unimpressed users aren't asked to rate on the App Store.
+        if finalRating >= 4 {
+            Task {
+                try? await Task.sleep(for: .milliseconds(400))
+                requestReview()
+            }
         }
         toastPresenter.show(.success, title: finalRating >= 4 ? "Thanks for the love!" : "Thanks for your feedback!")
     }

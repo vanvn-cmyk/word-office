@@ -51,6 +51,8 @@ final class OfficeEditorViewController: UIViewController {
     var onReady: (() -> Void)?
     /// Called whenever the document dirty state changes (true = unsaved edits, false = clean).
     var onDirtyChange: ((Bool) -> Void)?
+    /// Called on the first user interaction (keyboard focus) — fires once per editor session.
+    var onInteraction: (() -> Void)?
     /// Called when JS intercepts the OO filter panel; present native filter UI.
     var onFilterRequest: (([NativeFilterItem]) -> Void)?
     /// Called when the active slide changes in PPT. Provides 1-based current index and total count.
@@ -69,6 +71,13 @@ final class OfficeEditorViewController: UIViewController {
     var onPPTFontChange: ((String) -> Void)?
     /// Called when the PPT zoom-fit snap completes; safe to hide the loading overlay.
     var onPPTZoomReady: (() -> Void)?
+    /// Called when the document is saved; use to show a save-success toast.
+    var onDocSaved: (() -> Void)?
+
+    // Retained so the keyboard observer can adjust it without re-querying the constraint list.
+    private var webViewBottomConstraint: NSLayoutConstraint!
+    // True while the editor view is on screen. Blocks auto-keyboard from firing after dismiss.
+    private var isEditorVisible = false
 
     // MARK: - Lifecycle
 
@@ -80,6 +89,23 @@ final class OfficeEditorViewController: UIViewController {
         }
         setupWebView()
         loadEditorHTML()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(keyboardWillChangeFrame(_:)),
+            name: UIResponder.keyboardWillChangeFrameNotification,
+            object: nil
+        )
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        isEditorVisible = true
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        isEditorVisible = false
+        ooKeyboardProxy?.resignFirstResponder()
     }
 
     deinit {
@@ -143,15 +169,52 @@ final class OfficeEditorViewController: UIViewController {
         pc.present(animated: true, completionHandler: nil)
     }
 
-    /// Inserts an image by storing it in OfficeSchemeHandler and passing the
-    /// resulting office:// URL to insertImageByURL, which uses OO's official
-    /// AddImageUrl([url]) API. OO's WASM fetches the image via the scheme handler —
-    /// no base64 encoding, no blob: scheme issues.
+    /// Inserts an image by storing it in OfficeSchemeHandler and choosing the
+    /// correct JS path per document type.
+    ///
+    /// Word/PPT: `window.insertImageByURL` → cache-registers a blob: URL → `AddImageUrl`.
+    /// Excel ("cell"): `insertImageByURL` hangs because `AddImageUrl` triggers OO's WASM
+    /// fetcher on a blob: URL it hasn't pre-cached — "Loading Image" never resolves.
+    /// Fix: fetch office:// in the outer frame, create blob in inner frame, then call
+    /// `asc_addImageDrawingObject([blobURL])` directly — Excel's drawing API, no WASM path.
     func insertImage(data: Data, mimeType: String = "image/jpeg") {
         guard scriptReady else { return }
         let officeURL = schemeHandler.storeImage(data: data, mimeType: mimeType)
-        let urlJS = jsStringLiteral(officeURL)
-        webView.evaluateJavaScript("window.insertImageByURL(\(urlJS));")
+        let urlJS  = jsStringLiteral(officeURL)
+
+        guard currentDocType == "cell" else {
+            webView.evaluateJavaScript("window.insertImageByURL(\(urlJS));")
+            return
+        }
+
+        // Excel-specific path: bypass AddImageUrl → go straight to asc_addImageDrawingObject.
+        let mimeJS = jsStringLiteral(mimeType)
+        let js = """
+        (function(oURL, mime) {
+            var _w = null;
+            try { _w = window.frames['frameEditor']; } catch(_) {}
+            if (!_w) { try { var _f = document.getElementById('frameEditor'); _w = _f && _f.contentWindow; } catch(_) {} }
+            if (!_w) { console.warn('[iOS-xl] insertImage: no inner frame'); return; }
+            fetch(oURL)
+                .then(function(r) { return r.arrayBuffer(); })
+                .then(function(ab) {
+                    var iURL    = _w.URL  || URL;
+                    var blobURL = iURL.createObjectURL(new (_w.Blob || Blob)([new (_w.Uint8Array || Uint8Array)(ab)], { type: mime }));
+                    var ed = _w.Asc && _w.Asc.editor;
+                    if (!ed) { iURL.revokeObjectURL(blobURL); console.warn('[iOS-xl] insertImage: editor not ready'); return; }
+                    var done = false;
+                    ['asc_addImageDrawingObject', 'asc_insertImageFromUrl', 'AddImageUrl'].forEach(function(m) {
+                        if (done || typeof ed[m] !== 'function') return;
+                        try { ed[m]([blobURL]); done = true; console.log('[iOS-xl] insertImage via', m); }
+                        catch(e) { console.warn('[iOS-xl] insertImage', m, e); }
+                    });
+                    if (!done) console.warn('[iOS-xl] insertImage: no API worked');
+                    setTimeout(function() { try { iURL.revokeObjectURL(blobURL); } catch(_) {} }, 6000);
+                })
+                .catch(function(e) { console.warn('[iOS-xl] insertImage fetch:', e); });
+        })(\(urlJS), \(mimeJS));
+        """
+        webView.evaluateJavaScript(js)
     }
 
     /// Sends the user's filter selection back to the hidden OO filter panel.
@@ -910,6 +973,9 @@ final class OfficeEditorViewController: UIViewController {
                 // Starts after the first two reportSlides passes (3s, 6s) have already
                 // captured the originally-viewed slide and confirmed OO is stable.
                 setTimeout(_prefetchOtherThumbnails, 6500);
+                // Expose for slide add/delete: editor.html calls window._reprefetchThumbs()
+                // after structural changes so the strip reflects the new slide layout.
+                window._reprefetchThumbs = _prefetchOtherThumbnails;
                 // PPT geometry fallback — CSS + observer cover most cases; these two
                 // catch panels that appeared before the observer attached or escaped CSS.
                 setTimeout(pptHide, 300);
@@ -943,9 +1009,11 @@ final class OfficeEditorViewController: UIViewController {
         webView.translatesAutoresizingMaskIntoConstraints = false
 
         view.addSubview(webView)
+        let bottomC = webView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        webViewBottomConstraint = bottomC
         NSLayoutConstraint.activate([
             webView.topAnchor.constraint(equalTo: view.topAnchor),
-            webView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            bottomC,
             webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         ])
@@ -1198,6 +1266,15 @@ extension OfficeEditorViewController: OfficeBridgeDelegate {
         case .ready:
             editorLoaded = true
             onReady?()
+            // Auto-keyboard for Word/Excel: show keyboard after OO is fully rendered.
+            // Moved from JS onDocumentReady (+400ms) to here (+800ms) so cold-load canvas
+            // finishes painting before the keyboard resize fires — prevents blank content.
+            if currentDocType == "word" || currentDocType == "cell" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                    guard let self, self.isEditorVisible else { return }
+                    _ = self.ooKeyboardProxy?.becomeFirstResponder()
+                }
+            }
             // Delay filter interception by 3s so OO can restore any saved state
             // (auto-opened filter panels, view settings) without triggering native sheet.
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
@@ -1244,9 +1321,11 @@ extension OfficeEditorViewController: OfficeBridgeDelegate {
             onPPTFontChange?(fontName)
 
         case .focusKeyboard:
-            guard editorLoaded else { break }
+            guard editorLoaded, isEditorVisible else { break }
+            onInteraction?()
             DispatchQueue.main.async { [weak self] in
-                _ = self?.ooKeyboardProxy?.becomeFirstResponder()
+                guard let self, self.isEditorVisible else { return }
+                _ = self.ooKeyboardProxy?.becomeFirstResponder()
             }
 
         case .blurKeyboard:
@@ -1256,6 +1335,10 @@ extension OfficeEditorViewController: OfficeBridgeDelegate {
 
         case .pptZoomDone:
             onPPTZoomReady?()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                guard let self, self.isEditorVisible else { return }
+                _ = self.ooKeyboardProxy?.becomeFirstResponder()
+            }
 
         case .slideThumbnail(let slideNum, let data):
             onSlideThumbnail?(slideNum, data)
@@ -1270,9 +1353,26 @@ extension OfficeEditorViewController: OfficeBridgeDelegate {
                 self?.showNativeOODialog(payload)
             }
 
-        case .saved, .unknown:
+        case .saved:
+            onDocSaved?()
+
+        case .unknown:
             break
         }
+    }
+
+    // MARK: - Keyboard layout compensation (PPT only)
+    // When ooKeyboardProxy becomes first responder, SwiftUI shrinks the
+    // UIViewControllerRepresentable frame by the keyboard height. That shrinks the
+    // WebView → window.innerHeight decreases in OO's JS → OO re-centres the slide
+    // (visible flicker). Compensate by extending the WebView's bottom constraint by
+    // the same amount, keeping window.innerHeight constant while keyboard is visible.
+    @objc private func keyboardWillChangeFrame(_ notification: Notification) {
+        guard currentDocType == "slide", let info = notification.userInfo else { return }
+        let endFrame = (info[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect) ?? .zero
+        let screenHeight = UIScreen.main.bounds.height
+        let kbHeight = max(0, screenHeight - endFrame.origin.y)
+        webViewBottomConstraint.constant = kbHeight
     }
 
     private func showNativeOODialog(_ payload: OODialogPayload) {

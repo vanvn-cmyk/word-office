@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(ThemeStore.self) private var themeStore
     @Environment(FeedbackTriggerService.self) private var feedbackTrigger
+    @Environment(LibraryStore.self) private var libraryStore
 
     /// Resets the granted-folder bookmark and sends `RootView` back to onboarding.
     /// Wired to `FolderPermissionViewModel.resetPermission()` by the caller — this
@@ -30,21 +31,18 @@ struct SettingsView: View {
         @Bindable var theme = themeStore
 
         NavigationStack {
-            VStack(alignment: .leading, spacing: 0) {
-                // Inline large title on the leading edge — same shape as
-                // `LibraryView.titleRow` / `ToolsTabView.titleRow`, so all
-                // three home tabs read as the same visual family. Replaced
-                // `.prominentInlineTitle` (which sits centered in the nav
-                // bar at ~22pt) with the 34pt leading-aligned pattern the
-                // other two tabs already use.
-                titleRow
-                    .padding(.horizontal, DSSpacing.lg)
-                    // Small breathing gap between the large title and the
-                    // banner below. Same pattern as `LibraryView.titleRow`
-                    // giving its search row an 8pt gap.
-                    .padding(.bottom, DSSpacing.xs)
+            Form {
+                // Title row scrolls with the form content.
+                Section {
+                    titleRow
+                        .padding(.leading, DSSpacing.md)
+                        .padding(.trailing, DSSpacing.lg)
+                        .padding(.bottom, DSSpacing.xs)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
 
-                Form {
                     Section {
                         SettingsPremiumBanner {
                             isPaywallPresented = true
@@ -59,16 +57,17 @@ struct SettingsView: View {
                         Task { await onChangeFolder() }
                     } label: {
                         Label {
-                            // `Color.dsTextPrimary` + `DSFont.body` explicit —
-                            // without them, `Button`'s label text picks up the
-                            // accent-blue tint (the row shows "Change folder…"
-                            // in blue while every other row is black), and the
-                            // font falls back to SwiftUI's raw `.body` default
-                            // instead of referencing the app's DS token. Same
-                            // recipe every other row in this Form uses.
-                            Text("Change folder…")
-                                .font(DSFont.body)
-                                .foregroundStyle(Color.dsTextPrimary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Change folder")
+                                    .font(DSFont.body)
+                                    .foregroundStyle(Color.dsTextPrimary)
+                                if let folderName = libraryStore.watchedFolderName {
+                                    Text(folderName)
+                                        .font(DSFont.footnote)
+                                        .foregroundStyle(Color.dsTextSecondary)
+                                        .lineLimit(1)
+                                }
+                            }
                         } icon: {
                             SettingsRowIcon(systemName: "folder.fill", tint: Color.dsBrandPrimary)
                         }
@@ -166,13 +165,7 @@ struct SettingsView: View {
                 // custom List backgrounds and stays current on iOS 26.
                 .scrollContentBackground(.hidden)
                 .autoHidesTabBarOnScroll()
-            }
-            // Same background as `ToolsTabView` (line ~110) so the title
-            // strip and the Form's `insetGrouped` gray surface read as one
-            // continuous page — without this, `NavigationStack`'s default
-            // white background shows through above the Form, producing a
-            // visible white band under the status bar.
-            .background(Color.dsBackgroundSecondary)
+                .background(Color.dsBackgroundSecondary)
             // `.navigationTitle` kept for VoiceOver + parent back-button
             // semantics; the visible title lives in `titleRow` above.
             // `.toolbarVisibility(.hidden)` collapses the empty navbar
