@@ -48,7 +48,7 @@ final class AppOpenAdService: NSObject {
         isLoading = true
 
         let request = Request()
-        AppOpenAd.load(withAdUnitID: kAdUnitID, request: request) { [weak self] ad, error in
+        AppOpenAd.load(with: kAdUnitID, request: request) { [weak self] ad, error in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.isLoading = false

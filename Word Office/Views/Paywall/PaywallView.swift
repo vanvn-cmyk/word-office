@@ -285,7 +285,7 @@ struct PaywallView: View {
             // CTA copy names the actual next action — Weekly has a
             // trial to start, Monthly doesn't, so "Continue" (generic)
             // only fits the no-trial path.
-            DSPrimaryButton(title: vm.isBusy ? vm.ctaLabel : (selectedPlan == .weekly ? "Start Trial Now" : "Get Yearly Access")) {
+            DSPrimaryButton(title: vm.isBusy ? LocalizedStringKey(vm.ctaLabel) : (selectedPlan == .weekly ? "Start Trial Now" : "Get Yearly Access")) {
                 vm.selectedOfferID = selectedPlan.productID
                 Task { await vm.purchase() }
             }
