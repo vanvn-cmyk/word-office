@@ -64,15 +64,14 @@ final class SampleFileSeeder {
     /// three tiny Office file copies (each <50 KB) complete
     /// well under one runloop tick.
     ///
-    /// Failures are best-effort: a single file that fails to copy (or
-    /// can't be found in the bundle) doesn't block the other two, and
-    /// the "did seed" flag still flips true — the seeder is a
-    /// convenience, not a critical path, and repeated retries after
-    /// a permanent failure would just re-log the same error every
-    /// launch.
+    /// The "did seed" flag is set only when at least one file was
+    /// actually accessible in the bundle — either copied or already
+    /// present at the destination. This lets the seeder retry on the
+    /// next launch if all bundle URLs were unavailable (e.g. a build
+    /// that shipped without the SampleFiles resources), rather than
+    /// silently marking itself done with an empty Documents/.
     func seedIfNeeded(to destinationDirectory: URL) {
         guard !defaults.bool(forKey: Self.didSeedDefaultsKey) else { return }
-        defer { defaults.set(true, forKey: Self.didSeedDefaultsKey) }
 
         // Ensure destination exists — `URL.documentsDirectory` is created
         // by iOS on first access, but this is defensive.
@@ -83,6 +82,7 @@ final class SampleFileSeeder {
             )
         }
 
+        var accessibleCount = 0
         for sample in Self.sampleFiles {
             guard let sourceURL = bundle.url(
                 forResource: sample.bundleName,
@@ -101,8 +101,20 @@ final class SampleFileSeeder {
             // skip rather than overwrite. Users may have edited the seed;
             // the flag is the authority on "should we seed", not the
             // absence of files.
-            guard !fileManager.fileExists(atPath: destinationURL.path) else { continue }
-            try? fileManager.copyItem(at: sourceURL, to: destinationURL)
+            if fileManager.fileExists(atPath: destinationURL.path) {
+                accessibleCount += 1
+                continue
+            }
+            if (try? fileManager.copyItem(at: sourceURL, to: destinationURL)) != nil {
+                accessibleCount += 1
+            }
+        }
+
+        // Only mark seeding done when at least 1 file reached Documents/.
+        // If accessibleCount == 0 (all bundle URLs missing), leave the flag
+        // unset so the next launch retries.
+        if accessibleCount > 0 {
+            defaults.set(true, forKey: Self.didSeedDefaultsKey)
         }
     }
 }

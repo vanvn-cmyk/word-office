@@ -79,6 +79,21 @@ final class OfficeEditorViewController: UIViewController {
     // True while the editor view is on screen. Blocks auto-keyboard from firing after dismiss.
     private var isEditorVisible = false
 
+    // MARK: - Pinch-to-zoom state
+    private var pinchRecognizer: UIPinchGestureRecognizer?
+    // Accumulated log-scale delta since the last zoom step fired.
+    private var pinchAccum: CGFloat = 0
+    // Timestamp of the last zoom-in/zoom-out command sent — throttle guard.
+    private var pinchLastStep: Date = .distantPast
+
+    // MARK: - Manual-save gate
+    // OO SDK auto-saves internally (blob download + onSaveDocument callback) without
+    // user action. This flag is set ONLY when the user explicitly taps Save; both the
+    // file-write (case .save) and the toast (case .saved) are suppressed unless it is set.
+    // A 1.5 s reset task clears it after the save cycle completes, regardless of event order.
+    private var userSaveRequested = false
+    private var saveResetTask: DispatchWorkItem?
+
     // MARK: - Lifecycle
 
     override func viewDidLoad() {
@@ -134,6 +149,14 @@ final class OfficeEditorViewController: UIViewController {
     ///           'list-bullet', 'list-numbered', 'style:<StyleName>'
     func execEditorCommand(_ cmd: String) {
         guard scriptReady else { return }
+        if cmd == "save" {
+            // Arm the manual-save gate so the upcoming .save/.saved bridge events are allowed through.
+            userSaveRequested = true
+            saveResetTask?.cancel()
+            let task = DispatchWorkItem { [weak self] in self?.userSaveRequested = false }
+            saveResetTask = task
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: task)
+        }
         // cmd only contains alphanumeric, hyphens, and spaces (style names) — safe to interpolate
         webView.evaluateJavaScript("window.execEditorCommand('\(cmd)')")
     }
@@ -1018,6 +1041,11 @@ final class OfficeEditorViewController: UIViewController {
             webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         ])
 
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+        pinch.delegate = self
+        webView.addGestureRecognizer(pinch)
+        pinchRecognizer = pinch
+
         // Off-screen UITextField that intercepts iOS keyboard input for Word/Excel.
         // area_id.focus() in the inner iframe is intercepted in JS; Swift makes this
         // field first responder so RTI routes typed characters here instead of failing
@@ -1247,6 +1275,7 @@ extension OfficeEditorViewController: OfficeBridgeDelegate {
             }
 
         case .save(let fileName, let data):
+            guard userSaveRequested else { break }
             onFileSaved?(data, fileName)
 
         case .editorError(let msg):
@@ -1354,10 +1383,46 @@ extension OfficeEditorViewController: OfficeBridgeDelegate {
             }
 
         case .saved:
+            guard userSaveRequested else { break }
             onDocSaved?()
 
         case .unknown:
             break
+        }
+    }
+
+    // MARK: - Pinch-to-zoom
+
+    // Translates a native pinch gesture into sequential zoom-in / zoom-out commands
+    // using the same JS path as the toolbar buttons (window.execEditorCommand).
+    // Throttled to 120 ms between steps so asc_setZoom isn't called every frame.
+    // Log-scale accumulation makes zoom-in and zoom-out symmetric (pinch 2× == reverse).
+    @objc private func handlePinch(_ gr: UIPinchGestureRecognizer) {
+        guard scriptReady else { return }
+        switch gr.state {
+        case .began:
+            pinchAccum = 0
+            gr.scale = 1.0
+        case .changed:
+            // Incremental log-scale delta (reset gr.scale each frame to keep it incremental).
+            pinchAccum += log(max(gr.scale, 0.01))
+            gr.scale = 1.0
+
+            let now = Date()
+            guard now.timeIntervalSince(pinchLastStep) >= 0.12 else { return }
+
+            // ~0.14 log-units ≈ 15% scale change per step — feels responsive without spamming.
+            if pinchAccum > 0.14 {
+                webView.evaluateJavaScript("window.execEditorCommand('zoom-in')")
+                pinchAccum = 0
+                pinchLastStep = now
+            } else if pinchAccum < -0.14 {
+                webView.evaluateJavaScript("window.execEditorCommand('zoom-out')")
+                pinchAccum = 0
+                pinchLastStep = now
+            }
+        default:
+            pinchAccum = 0
         }
     }
 
@@ -1403,6 +1468,18 @@ extension OfficeEditorViewController: OfficeBridgeDelegate {
             })
         }
         present(ac, animated: true)
+    }
+}
+
+// MARK: - UIGestureRecognizerDelegate (pinch-to-zoom)
+
+extension OfficeEditorViewController: UIGestureRecognizerDelegate {
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        // Allow pinch to fire alongside WKWebView's built-in scroll/tap recognizers.
+        return gestureRecognizer === pinchRecognizer
     }
 }
 

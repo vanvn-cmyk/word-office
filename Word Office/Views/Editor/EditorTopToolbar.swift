@@ -219,14 +219,14 @@ struct EditorTopToolbar: View {
 
                     switch excelTab {
                     case .home:
+                        iconBtn("arrow.down.doc.fill",  label: "Save", cmd: "save")
+                        iconBtn("arrow.uturn.backward", label: "Undo", cmd: "undo")
+                        iconBtn("arrow.uturn.forward",  label: "Redo", cmd: "redo")
+                        vDivider()
                         chipBtn(
                             String(excelFontName.prefix(11)) + (excelFontName.count > 11 ? "…" : ""),
                             label: "Font face", cmd: "excel-font-picker"
                         )
-                        vDivider()
-                        iconBtn("arrow.uturn.backward", label: "Undo", cmd: "undo")
-                        iconBtn("arrow.uturn.forward",  label: "Redo", cmd: "redo")
-                        iconBtn("arrow.down.doc.fill",  label: "Save", cmd: "save")
                         vDivider()
                         fmtBtn(.bold,          cmd: "bold")
                         fmtBtn(.italic,        cmd: "italic")
@@ -391,21 +391,19 @@ struct EditorTopToolbar: View {
                 HStack(spacing: 0) {
                     switch wordTab {
                     case .home:
-                        // Font name chip first — mirrors Excel Home tab pattern
+                        iconBtn("arrow.down.doc.fill",  label: "Save", cmd: "save")
+                        iconBtn("arrow.uturn.backward", label: "Undo", cmd: "undo")
+                        iconBtn("arrow.uturn.forward",  label: "Redo", cmd: "redo")
+                        vDivider()
                         chipBtn(
                             String(wordFontName.prefix(11)) + (wordFontName.count > 11 ? "…" : ""),
                             label: "Font face", cmd: "word-font-picker"
                         )
                         vDivider()
-                        // Format — B next to font chip as requested
                         fmtBtn(.bold,          cmd: "bold")
                         fmtBtn(.italic,        cmd: "italic")
                         fmtBtn(.underline,     cmd: "underline")
                         fmtBtn(.strikethrough, cmd: "strikeout")
-                        vDivider()
-                        iconBtn("arrow.uturn.backward", label: "Undo", cmd: "undo")
-                        iconBtn("arrow.uturn.forward",  label: "Redo", cmd: "redo")
-                        iconBtn("arrow.down.doc.fill",  label: "Save", cmd: "save")
                         vDivider()
                         textBtn("A+", label: "Increase font size", cmd: "font-size-inc")
                         textBtn("A−", label: "Decrease font size", cmd: "font-size-dec")
@@ -506,16 +504,14 @@ struct EditorTopToolbar: View {
                     switch pptTab {
 
                     case .home:
-                        // Font name chip first — mirrors Word/Excel Home tab pattern
+                        iconBtn("arrow.down.doc.fill",  label: "Save", cmd: "save")
+                        iconBtn("arrow.uturn.backward", label: "Undo", cmd: "undo")
+                        iconBtn("arrow.uturn.forward",  label: "Redo", cmd: "redo")
+                        vDivider()
                         chipBtn(
                             String(pptFontName.prefix(11)) + (pptFontName.count > 11 ? "…" : ""),
                             label: "Font face", cmd: "ppt-font-picker"
                         )
-                        vDivider()
-                        // Undo / Redo / Save
-                        iconBtn("arrow.uturn.backward", label: "Undo", cmd: "undo")
-                        iconBtn("arrow.uturn.forward",  label: "Redo", cmd: "redo")
-                        iconBtn("arrow.down.doc.fill",  label: "Save", cmd: "save")
                         vDivider()
                         fmtBtn(.bold,          cmd: "bold")
                         fmtBtn(.italic,        cmd: "italic")

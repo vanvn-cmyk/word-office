@@ -300,10 +300,11 @@ final class LibraryViewModel {
             // No external bookmark — always fall through to the app's own
             // Documents/ sandbox. After "Maybe Later" in onboarding the user
             // should land on the Library with seeded files visible, not an
-            // empty "No folder yet" gate. If Documents/ is also empty they see
-            // "No documents yet" with an add-files CTA — still better than a
-            // dead end. The .notGranted state is now reserved for .revoked only
-            // (external folder access lost).
+            // empty "No folder yet" gate. Re-seed here in case the first-launch
+            // seeder (DependencyContainer.init) failed to copy the bundle files
+            // (e.g. transient bundle-URL miss) — seedIfNeeded() is a fast no-op
+            // if the flag is already set.
+            SampleFileSeeder().seedIfNeeded(to: documentsURL)
             folderURL = documentsURL
             hasExternalBookmark = false
         }

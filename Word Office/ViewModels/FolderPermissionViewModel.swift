@@ -28,15 +28,12 @@ final class FolderPermissionViewModel {
     /// A saved bookmark that fails to resolve is `.revoked` (surfaces CTA),
     /// never silent empty (Library-Architecture.md §7 trap #4).
     ///
-    /// Session 19 — added "auto-grant to app's Documents/" fallback. When
-    /// no user bookmark is saved BUT the first-launch sample-file seeder
-    /// has already run (`SampleFileSeeder.didSeedDefaultsKey == true`),
-    /// treat the app's own `Documents/` folder as the granted library
-    /// source. Skips the folder-permission onboarding entirely on first
-    /// launch; the user opens the app and finds Word Office
-    /// pre-populated with three tour files instead of a "Choose Folder"
-    /// gate. `LibraryViewModel.loadLibrary` picks up the same
-    /// no-bookmark + granted state and scans `documentsURL` directly.
+    /// No external bookmark → always `.granted` (Documents/ sandbox, no security
+    /// claim needed). `LibraryViewModel.loadLibrary` re-seeds Documents/ if needed
+    /// and scans it. The old `didSeedDefaultsKey` gate that flipped to `.notGranted`
+    /// caused a "No folder yet" flash after "Maybe Later" when the seeder hadn't run
+    /// yet; since loadLibrary always uses Documents/ when no bookmark, the gate added
+    /// no value.
     func checkExistingPermission() async {
         if let saved = bookmarkStore.loadSaved() {
             do {
@@ -48,12 +45,8 @@ final class FolderPermissionViewModel {
             return
         }
 
-        if UserDefaults.standard.bool(forKey: SampleFileSeeder.didSeedDefaultsKey) {
-            store.folderPermissionState = .granted
-            return
-        }
-
-        store.folderPermissionState = .notGranted
+        // No external bookmark — Documents/ sandbox is always accessible.
+        store.folderPermissionState = .granted
     }
 
     /// User taps "Choose folder" (onboarding) or "Re-grant access" (reauth CTA).

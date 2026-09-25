@@ -642,7 +642,7 @@ struct LibraryView: View {
                                 .listRowSeparator(.hidden)
                                 .listRowInsets(EdgeInsets(
                                     top: 0,
-                                    leading: 3,
+                                    leading: 3 + DSSpacing.xs,
                                     bottom: DSSpacing.xs,
                                     trailing: DSSpacing.xs))
                                 .listRowBackground(
@@ -758,7 +758,7 @@ struct LibraryView: View {
                                 .listRowSeparator(.hidden)
                                 .listRowInsets(EdgeInsets(
                                     top: 0,
-                                    leading: 3,
+                                    leading: 3 + DSSpacing.xs,
                                     bottom: DSSpacing.xs,
                                     trailing: DSSpacing.xs))
                                 .listRowBackground(
@@ -2934,7 +2934,7 @@ private struct FolderDetailContent: View {
                         ForEach(continueItems) { entry in
                             cardRow(for: entry)
                                 .listRowSeparator(.hidden)
-                                .listRowInsets(EdgeInsets(top: DSSpacing.xs, leading: 3,
+                                .listRowInsets(EdgeInsets(top: DSSpacing.xs, leading: 3 + DSSpacing.xs,
                                                            bottom: DSSpacing.xs, trailing: DSSpacing.xs))
                                 .listRowBackground(HStack(spacing: 0) {
                                     Color.indigo.frame(width: 3); Color.clear
@@ -2959,7 +2959,7 @@ private struct FolderDetailContent: View {
                         ForEach(group.entries) { entry in
                             cardRow(for: entry)
                                 .listRowSeparator(.hidden)
-                                .listRowInsets(EdgeInsets(top: DSSpacing.xs, leading: 3,
+                                .listRowInsets(EdgeInsets(top: DSSpacing.xs, leading: 3 + DSSpacing.xs,
                                                            bottom: DSSpacing.xs, trailing: DSSpacing.xs))
                                 .listRowBackground(HStack(spacing: 0) {
                                     group.status.tintColor.frame(width: 3); Color.clear
