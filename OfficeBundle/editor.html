@@ -955,6 +955,9 @@
       }
       function fireContextMenu() {
         pressTimer = null;
+        // PPT: OO's context menu is desktop-only (Arrange/Align/Merge shapes/etc.).
+        // Suppress it on slides — long-press has no mobile equivalent here.
+        if (typeof _currentDocType !== 'undefined' && _currentDocType === 'slide') return;
         var target = iDoc.elementFromPoint(curX, curY) || iDoc.body;
         target.dispatchEvent(new MouseEvent('contextmenu', {
           bubbles: true, cancelable: true, button: 2, buttons: 2,
@@ -2251,6 +2254,15 @@
           // Initial nta is undefined → false===undefined = false → guard skips body.
           // Pre-set to false so the guard passes on every path.
           if (_ra) _ra.nta = false;
+          // SDI self-heal: if onkeypress is not registered (wI was null when _doPPTFocus ran),
+          // re-attempt SDI now — user is actively typing so OO should be in text-edit (wI != null).
+          if (typeof _inner.onkeypress !== 'function' && _sdi2 &&
+              typeof _sdi2.SetDeviceInputHelperId === 'function') {
+            try {
+              if (_iWin && typeof _iWin.E4b !== 'undefined') _iWin.E4b = undefined;
+              _sdi2.SetDeviceInputHelperId('_oo_ppt_kbd');
+            } catch(_sdiR) {}
+          }
           // Path A (FIRST PRIORITY): call _inner.onkeypress() directly with a plain object.
           // This is the EXACT handler that SDI installs: closure captures internal `editor`
           // (the real f-instance), calls editor.ra.cCb(ha) — not the Asc.editor wrapper.

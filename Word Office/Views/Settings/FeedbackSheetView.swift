@@ -224,7 +224,7 @@ struct FeedbackSheetView: View {
                         Text("Back")
                             .font(DSFont.body)
                     }
-                    .foregroundStyle(Color.dsTextSecondary)
+                    .foregroundStyle(Color.dsBrandPrimary)
                     .frame(minHeight: DSSize.buttonHeight)
                     .padding(.horizontal, DSSpacing.md)
                 }

@@ -29,6 +29,8 @@ struct DocumentCard: View {
             HStack(spacing: DSSpacing.sm) {
                 DocumentKindIcon(kind: entry.document.kind)
                     .frame(width: 36, height: 36)
+                    .shadow(color: .black.opacity(0.12), radius: 3, y: 1.5)
+                    .shadow(color: .black.opacity(0.06), radius: 6, y: 3)
 
                 VStack(alignment: .leading, spacing: DSSpacing.xxs) {
                     HStack(alignment: .center, spacing: DSSpacing.xs) {

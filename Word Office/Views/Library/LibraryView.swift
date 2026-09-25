@@ -382,6 +382,14 @@ struct LibraryView: View {
     // Opacity + allowsHitTesting swap which view receives interaction;
     // suppressTabBarHiddenPreference prevents the inactive view's scroll
     // auto-hide state from bleeding into the active tab's tab-bar visibility.
+    // ZStack keeps both scroll hierarchies alive — avoids the UITableView
+    // create/destroy cost on every tab switch (which caused the visible flash).
+    // Opacity + allowsHitTesting swap which view receives interaction;
+    // suppressTabBarHiddenPreference prevents the inactive view's scroll
+    // auto-hide state from bleeding into the active tab's tab-bar visibility.
+    // Background: explicit systemGroupedBackground prevents the parent
+    // NavigationStack's systemBackground (white) from bleeding through during
+    // the 220ms opacity cross-fade between tabs.
     @ViewBuilder private var libraryList: some View {
         ZStack {
             libraryListContent
@@ -393,10 +401,11 @@ struct LibraryView: View {
                 .allowsHitTesting(libraryTab == .folders)
                 .suppressTabBarHiddenPreference(unless: libraryTab == .folders)
         }
+        .background(Color(UIColor.systemGroupedBackground))
     }
 
-    /// Folders tab — `FolderGridView` with its entire header (title + banner +
-    /// tabs + sort row) scrolling inside the grid's own ScrollView.
+    /// Folders tab — `FolderGridView` with its scrollable header (titleRow +
+    /// banner + tabs + sort row).
     private var folderTabList: some View {
         FolderGridView(
             folderManager: folderManager,
@@ -632,7 +641,7 @@ struct LibraryView: View {
                                 trailing: DSSpacing.xs))
                             .listRowBackground(
                                 HStack(spacing: 0) {
-                                    Color.indigo.frame(width: 3)
+                                    Color.dsBrandPrimary.frame(width: 3)
                                     Color.clear
                                 }
                             )
@@ -647,7 +656,7 @@ struct LibraryView: View {
                                     trailing: DSSpacing.xs))
                                 .listRowBackground(
                                     HStack(spacing: 0) {
-                                        Color.indigo.frame(width: 3)
+                                        Color.dsBrandPrimary.frame(width: 3)
                                         Color.clear
                                     }
                                 )
@@ -692,9 +701,10 @@ struct LibraryView: View {
                                     guard dueEntries.isEmpty && group.status == firstTipStatus else { return }
                                     tipSectionHeaderFrame = newValue
                                 }
-                                // Section-spanning border — top + leading on header row (trailing omitted: 16pt inset puts it too close to screen edge).
-                                .overlay(alignment: .top)      { group.status.tintColor.opacity(highlightedStatus == group.status ? 0.85 : 0).frame(height: 2.5) }
-                                .overlay(alignment: .leading)  { group.status.tintColor.opacity(highlightedStatus == group.status ? 0.85 : 0).frame(width:  2.5) }
+                                // Border overlays on listRowBackground (not on content) so
+                                // all rows share the same cell-background origin regardless
+                                // of their different listRowInsets — fixes the misalignment
+                                // visible in the Mascot scroll-to-section highlight ring.
                                 .animation(.spring(response: 0.35, dampingFraction: 0.7), value: highlightedStatus == group.status)
                                 .listRowSeparator(.hidden)
                                 .listRowInsets(EdgeInsets(
@@ -708,6 +718,8 @@ struct LibraryView: View {
                                         group.status.tintColor
                                             .opacity(highlightedStatus == group.status ? 0.05 : 0)
                                     }
+                                    .overlay(alignment: .top)     { group.status.tintColor.opacity(highlightedStatus == group.status ? 0.85 : 0).frame(height: 2.5) }
+                                    .overlay(alignment: .leading) { group.status.tintColor.opacity(highlightedStatus == group.status ? 0.85 : 0).frame(width:  2.5) }
                                     .animation(.spring(response: 0.35, dampingFraction: 0.7), value: highlightedStatus == group.status)
                                 )
                                 .id("lib-\(group.status.rawValue)")
@@ -751,9 +763,6 @@ struct LibraryView: View {
                                             }
                                         }
                                 }
-                                // Section-spanning border — leading + bottom on file rows (trailing omitted: near screen edge).
-                                .overlay(alignment: .leading)  { group.status.tintColor.opacity(highlightedStatus == group.status ? 0.85 : 0).frame(width:  2.5) }
-                                .overlay(alignment: .bottom)   { group.status.tintColor.opacity(highlightedStatus == group.status && isLastEntry ? 0.85 : 0).frame(height: 2.5) }
                                 .animation(.spring(response: 0.35, dampingFraction: 0.7), value: highlightedStatus == group.status)
                                 .listRowSeparator(.hidden)
                                 .listRowInsets(EdgeInsets(
@@ -767,6 +776,8 @@ struct LibraryView: View {
                                         group.status.tintColor
                                             .opacity(highlightedStatus == group.status ? 0.05 : 0)
                                     }
+                                    .overlay(alignment: .leading) { group.status.tintColor.opacity(highlightedStatus == group.status ? 0.85 : 0).frame(width: 2.5) }
+                                    .overlay(alignment: .bottom)  { group.status.tintColor.opacity((highlightedStatus == group.status) && isLastEntry ? 0.85 : 0).frame(height: 2.5) }
                                     .animation(.spring(response: 0.35, dampingFraction: 0.7), value: highlightedStatus == group.status)
                                 )
                             }
@@ -920,10 +931,10 @@ struct LibraryView: View {
                     Text("Continue Working")
                         .font(.system(size: 15, weight: .semibold))
                 }
-                .foregroundStyle(Color.indigo)
+                .foregroundStyle(Color.dsBrandPrimary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                .background(Color.indigo.opacity(0.10), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .background(Color.dsBrandPrimary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
                 Spacer(minLength: 0)
 
@@ -933,7 +944,7 @@ struct LibraryView: View {
                     } label: {
                         HStack(spacing: 4) {
                             Circle()
-                                .fill(Color.indigo)
+                                .fill(Color.dsBrandPrimary)
                                 .frame(width: 7, height: 7)
                                 .scaleEffect(badgePulse ? 1.35 : 1.0)
                                 .opacity(badgePulse ? 0.5 : 1.0)
@@ -944,13 +955,13 @@ struct LibraryView: View {
                             Text("View all")
                                 .font(.system(size: 13, weight: .semibold))
                         }
-                        .foregroundStyle(Color.indigo)
+                        .foregroundStyle(Color.dsBrandPrimary)
                     }
                     .buttonStyle(.plain)
                 } else {
                     HStack(spacing: 4) {
                         Circle()
-                            .fill(Color.indigo)
+                            .fill(Color.dsBrandPrimary)
                             .frame(width: 7, height: 7)
                             .scaleEffect(badgePulse ? 1.35 : 1.0)
                             .opacity(badgePulse ? 0.5 : 1.0)
@@ -961,7 +972,7 @@ struct LibraryView: View {
                         Text("\(count)")
                             .font(.system(size: 13, weight: .medium))
                             .monospacedDigit()
-                            .foregroundStyle(Color.indigo.opacity(0.6))
+                            .foregroundStyle(Color.dsBrandPrimary.opacity(0.6))
                     }
                 }
             }
@@ -987,13 +998,13 @@ struct LibraryView: View {
                 ZStack {
                     Text("Continue Working")
                         .font(.system(size: 28, weight: .bold))
-                        .foregroundStyle(Color.primary)
+                        .foregroundStyle(Color.dsBrandPrimary)
                         .frame(maxWidth: .infinity, alignment: .center)
                     HStack {
                         Button { navPath.removeLast() } label: {
                             Image(systemName: "chevron.left")
                                 .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(Color.dsTextPrimary)
+                                .foregroundStyle(Color.dsBrandPrimary)
                                 .frame(width: DSSize.minimumTouchTarget, height: DSSize.minimumTouchTarget)
                                 .roundIconButtonSurface()
                         }
@@ -1026,8 +1037,8 @@ struct LibraryView: View {
                         cardContent(for: entry)
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
-                            .listRowInsets(EdgeInsets(top: DSSpacing.xs, leading: DSSpacing.md,
-                                                      bottom: DSSpacing.xs, trailing: DSSpacing.xs))
+                            .listRowInsets(EdgeInsets(top: DSSpacing.xs, leading: DSSpacing.xl,
+                                                      bottom: DSSpacing.xs, trailing: DSSpacing.xl))
                     }
                 }
             } else {
@@ -1054,9 +1065,9 @@ struct LibraryView: View {
                                 )
                             }
                         },
-                        leadingPadding: DSSpacing.md
+                        leadingPadding: DSSpacing.xl
                     )
-                    .listRowInsets(EdgeInsets(top: DSSpacing.sm, leading: 0, bottom: 0, trailing: DSSpacing.xs))
+                    .listRowInsets(EdgeInsets(top: DSSpacing.sm, leading: 0, bottom: 0, trailing: DSSpacing.xl))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                 }
@@ -1153,7 +1164,7 @@ struct LibraryView: View {
                     // Title centered across the full row
                     Text(status.displayName)
                         .font(.system(size: 28, weight: .bold))
-                        .foregroundStyle(Color.primary)
+                        .foregroundStyle(status.tintColor)
                         .frame(maxWidth: .infinity, alignment: .center)
 
                     // Back button pinned to leading edge
@@ -1161,7 +1172,7 @@ struct LibraryView: View {
                         Button { navPath.removeLast() } label: {
                             Image(systemName: "chevron.left")
                                 .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(Color.dsTextPrimary)
+                                .foregroundStyle(Color.dsBrandPrimary)
                                 .frame(width: DSSize.minimumTouchTarget,
                                        height: DSSize.minimumTouchTarget)
                                 .roundIconButtonSurface()
@@ -1199,8 +1210,8 @@ struct LibraryView: View {
                         cardContent(for: entry)
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
-                            .listRowInsets(EdgeInsets(top: DSSpacing.xs, leading: DSSpacing.md,
-                                                      bottom: DSSpacing.xs, trailing: DSSpacing.xs))
+                            .listRowInsets(EdgeInsets(top: DSSpacing.xs, leading: DSSpacing.xl,
+                                                      bottom: DSSpacing.xs, trailing: DSSpacing.xl))
                     }
                 }
             } else {
@@ -1227,11 +1238,9 @@ struct LibraryView: View {
                                 )
                             }
                         },
-                        leadingPadding: DSSpacing.md
+                        leadingPadding: DSSpacing.xl
                     )
-                    // leadingPadding=md(16pt) from DocumentGrid + xs(8pt) from listRowInsets trailing
-                    // + xs(8pt) from DocumentGrid's own trailing = 16pt each side — symmetric HIG margins.
-                    .listRowInsets(EdgeInsets(top: DSSpacing.sm, leading: 0, bottom: 0, trailing: DSSpacing.xs))
+                    .listRowInsets(EdgeInsets(top: DSSpacing.sm, leading: 0, bottom: 0, trailing: DSSpacing.xl))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                 }
@@ -1311,7 +1320,8 @@ struct LibraryView: View {
                     in: RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous)
             .strokeBorder(Color.dsBorderSubtle))
-        .shadow(color: .black.opacity(0.08), radius: 6, y: 3)
+        .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
+        .shadow(color: .black.opacity(0.07), radius: 10, y: 4)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { cardPreviewWidth = $0 }
         .contextMenu(menuItems: {
             contextMenu(for: entry)
@@ -1534,7 +1544,7 @@ struct LibraryView: View {
                 }
                 .padding(.leading, 3 + DSSpacing.xs)
                 .background(alignment: .leading) {
-                    TimelineRailShimmer(color: .indigo)
+                    TimelineRailShimmer(color: Color.dsBrandPrimary)
                 }
             }
 
@@ -2921,7 +2931,7 @@ private struct FolderDetailContent: View {
     ) -> some View {
         List {
             if viewMode == .list {
-                // ── Continue Working (indigo rail — matches Home) ──
+                // ── Continue Working (brand rail — matches Home) ──
                 if !continueItems.isEmpty {
                     Section {
                         cwHeader(count: continueItems.count)
@@ -2929,7 +2939,7 @@ private struct FolderDetailContent: View {
                             .listRowInsets(EdgeInsets(top: 0, leading: 3,
                                                        bottom: 0, trailing: DSSpacing.xs))
                             .listRowBackground(HStack(spacing: 0) {
-                                Color.indigo.frame(width: 3); Color.clear
+                                Color.dsBrandPrimary.frame(width: 3); Color.clear
                             })
                         ForEach(continueItems) { entry in
                             cardRow(for: entry)
@@ -2937,7 +2947,7 @@ private struct FolderDetailContent: View {
                                 .listRowInsets(EdgeInsets(top: DSSpacing.xs, leading: 3 + DSSpacing.xs,
                                                            bottom: DSSpacing.xs, trailing: DSSpacing.xs))
                                 .listRowBackground(HStack(spacing: 0) {
-                                    Color.indigo.frame(width: 3); Color.clear
+                                    Color.dsBrandPrimary.frame(width: 3); Color.clear
                                 })
                         }
                     }
@@ -2976,9 +2986,9 @@ private struct FolderDetailContent: View {
                             .listRowInsets(EdgeInsets(top: 0, leading: 3,
                                                        bottom: DSSpacing.xs, trailing: DSSpacing.xs))
                             .listRowBackground(HStack(spacing: 0) {
-                                Color.indigo.frame(width: 3); Color.clear
+                                Color.dsBrandPrimary.frame(width: 3); Color.clear
                             })
-                        gridSection(entries: continueItems, tintColor: Color.indigo)
+                        gridSection(entries: continueItems, tintColor: Color.dsBrandPrimary)
                     }
                 }
                 ForEach(sections, id: \.status) { group in
@@ -3092,7 +3102,7 @@ private struct FolderDetailContent: View {
         .listRowSeparator(.hidden)
     }
 
-    // Continue Working section header — mirrors Home's continueWorkingTabHeader (indigo pill + dot count).
+    // Continue Working section header — mirrors Home's continueWorkingTabHeader (brand pill + dot count).
     private func cwHeader(count: Int) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: DSSpacing.sm) {
@@ -3102,21 +3112,21 @@ private struct FolderDetailContent: View {
                     Text("Continue Working")
                         .font(.system(size: 15, weight: .semibold))
                 }
-                .foregroundStyle(Color.indigo)
+                .foregroundStyle(Color.dsBrandPrimary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                .background(Color.indigo.opacity(0.10), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .background(Color.dsBrandPrimary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
                 Spacer(minLength: 0)
 
                 HStack(spacing: 4) {
                     Circle()
-                        .fill(Color.indigo)
+                        .fill(Color.dsBrandPrimary)
                         .frame(width: 7, height: 7)
                     Text("\(count)")
                         .font(.system(size: 13, weight: .medium))
                         .monospacedDigit()
-                        .foregroundStyle(Color.indigo.opacity(0.6))
+                        .foregroundStyle(Color.dsBrandPrimary.opacity(0.6))
                 }
             }
             .padding(.bottom, DSSpacing.sm)
@@ -3142,7 +3152,8 @@ private struct FolderDetailContent: View {
                     in: RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous)
             .strokeBorder(Color.dsBorderSubtle))
-        .shadow(color: .black.opacity(0.08), radius: 6, y: 3)
+        .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
+        .shadow(color: .black.opacity(0.07), radius: 10, y: 4)
     }
 
     // Section header — mirrors Home's statusTabHeader (same pill + dot count, 15pt font).
