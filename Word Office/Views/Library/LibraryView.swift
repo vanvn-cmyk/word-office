@@ -54,6 +54,11 @@ struct LibraryView: View {
     /// `LibraryView` unaware of the container.
     let onOpenEditor: (DocumentRef) -> Void
 
+    /// Reports whether a section "View all" page (status buckets / Continue
+    /// Working) is on screen, so `RootView` can hide the mascot there.
+    /// Folder detail pages deliberately don't report — the mascot stays.
+    var onViewAllVisibilityChange: (Bool) -> Void = { _ in }
+
     @AppStorage("libraryViewMode") private var viewMode: LibraryViewMode = .list
     @AppStorage("library.openDocumentTipSeen") private var tipSeen: Bool = false
     @AppStorage("library.foldersTipSeen") private var foldersTipSeen: Bool = false
@@ -191,8 +196,14 @@ struct LibraryView: View {
             // when the user tapped a folder card from the Folders tab.
             .navigationDestination(for: LibrarySectionID.self) { id in
                 switch id {
-                case .status(let s):    statusAllFilesDestination(status: s)
-                case .continueWorking:  continueWorkingAllFilesDestination
+                case .status(let s):
+                    statusAllFilesDestination(status: s)
+                        .onAppear { onViewAllVisibilityChange(true) }
+                        .onDisappear { onViewAllVisibilityChange(false) }
+                case .continueWorking:
+                    continueWorkingAllFilesDestination
+                        .onAppear { onViewAllVisibilityChange(true) }
+                        .onDisappear { onViewAllVisibilityChange(false) }
                 case .folder(let fid):  folderDetailDestination(folderID: fid)
                 }
             }
@@ -1085,6 +1096,7 @@ struct LibraryView: View {
         .scrollContentBackground(.hidden)
         .background(Color.dsBackgroundPrimary)
         .contentMargins(.top, 0, for: .scrollContent)
+        .autoHidesTabBarOnScroll()
         .toolbar(.hidden, for: .navigationBar)
         .onDisappear { allFilesSearchInput = "" }
         .overlay {
@@ -1257,6 +1269,7 @@ struct LibraryView: View {
         .scrollContentBackground(.hidden)
         .background(Color.dsBackgroundPrimary)
         .contentMargins(.top, 0, for: .scrollContent)
+        .autoHidesTabBarOnScroll()
         // Hide system nav bar — back + title live in content above (same
         // rationale as the root LibraryView: iOS 26 Liquid Glass wraps
         // toolbar items in ovoid capsules we can't reshape).
@@ -1320,8 +1333,7 @@ struct LibraryView: View {
                     in: RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous)
             .strokeBorder(Color.dsBorderSubtle))
-        .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
-        .shadow(color: .black.opacity(0.07), radius: 10, y: 4)
+        .dsCardShadow()
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { cardPreviewWidth = $0 }
         .contextMenu(menuItems: {
             contextMenu(for: entry)
@@ -3152,8 +3164,7 @@ private struct FolderDetailContent: View {
                     in: RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: DSRadius.card, style: .continuous)
             .strokeBorder(Color.dsBorderSubtle))
-        .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
-        .shadow(color: .black.opacity(0.07), radius: 10, y: 4)
+        .dsCardShadow()
     }
 
     // Section header — mirrors Home's statusTabHeader (same pill + dot count, 15pt font).

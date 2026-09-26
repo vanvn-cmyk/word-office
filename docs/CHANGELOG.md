@@ -6,6 +6,33 @@ Format tham khảo [Keep a Changelog](https://keepachangelog.com/). Entry mới 
 
 ---
 
+## [Unreleased] — 2026-09-26c (mascot scope + tab bar scroll auto-hide + card shadow token)
+
+### ✨ Mascot only on Home root
+**Files:** `Views/Library/LibraryView.swift`, `Views/Root/RootView.swift`
+
+Section "View all" pages (Draft / Done / Reviewed / Continue Working) report visibility via `onViewAllVisibilityChange` (onAppear/onDisappear on those two destinations only); `RootView` hides the mascot while one is on screen. Folder detail pages deliberately don't report — mascot unchanged there.
+
+---
+
+### 🐛 Tab bar scroll auto-hide never worked on Home / Folders
+**Files:** `Extensions/View+HidesTabBar.swift`, `Views/Library/LibraryView.swift`, `Views/Root/RootView.swift`
+
+`autoHidesTabBarOnScroll()` was already attached to the Home list and `FolderGridView`, but an outer `.hidesTabBarVisually(isSearchExpanded)` used `.preference(...)`, which **overwrites** the subtree value → the scroll "hide" never reached `RootView`. `hidesTabBarVisually` now ORs into the subtree (`transformPreference`), matching the key's `||` intent.
+
+- Added `.autoHidesTabBarOnScroll()` to both "View all" Lists.
+- Folders tab now auto-hides too (user choice).
+- `RootView` restores the pill when a "View all" page pops (`onPreferenceChange` is unreliable on destination unmount — see Session 12 notes).
+
+---
+
+### 🎨 Card shadow → design-system token
+**Files:** `DesignSystem/Foundations/DSShadow.swift` (new), `Views/Library/LibraryView.swift`
+
+New `DSShadow` (`cardContact` 0.05/r1.5/y1 + `cardAmbient` 0.05/r6/y2) and `.dsCardShadow()`. Replaces the old hard-coded 0.06/r4/y2 + 0.07/r10/y4, whose ~14pt reach bled onto the next row across the 8pt gap. Applied to Home/View-all rows (`cardContent`) and folder detail rows.
+
+---
+
 ## [Unreleased] — 2026-09-26b (auto-inserted "1" fix + AdMob launch crash + paywall defaults)
 
 ### 🐛 Word doc auto-fills with "111…" on open (no typing, no tap)

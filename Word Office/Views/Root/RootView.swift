@@ -61,6 +61,9 @@ struct RootView: View {
     /// `.popover` UX. Also lets `.onChange(of: selectedTab)` close the menu
     /// automatically when the user switches tab with menu open.
     @State private var isFABMenuOpen = false
+    /// True while a Library section "View all" page is pushed — the mascot
+    /// only belongs on the Home root (folder pages keep it).
+    @State private var isLibraryViewAllVisible = false
     /// Editor sheet target — driven by `LibraryView`'s kebab-menu "Edit"
     /// callback. Lives at this level (not inside `LibraryView`) because
     /// `EditorPlaceholderView(container:ref:)` needs the app-scope
@@ -182,7 +185,8 @@ struct RootView: View {
                     LibraryView(
                         viewModel: libraryVM,
                         onRequestPermission: { await permissionVM.requestPermission() },
-                        onOpenEditor: { editingRef = $0 }
+                        onOpenEditor: { editingRef = $0 },
+                        onViewAllVisibilityChange: { isLibraryViewAllVisible = $0 }
                     )
                     .opacity(selectedTab == .library ? 1 : 0)
                     .allowsHitTesting(selectedTab == .library)
@@ -219,6 +223,15 @@ struct RootView: View {
                 .onPreferenceChange(TabBarVisualHiddenPreferenceKey.self) { hidden in
                     withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) {
                         isTabBarVisualHidden = hidden
+                    }
+                }
+                // A popped "View all" page can leave its scroll auto-hide value
+                // behind (onPreferenceChange is unreliable on destination unmount),
+                // so restore the pill explicitly when returning to Home.
+                .onChange(of: isLibraryViewAllVisible) { _, isVisible in
+                    guard !isVisible, isTabBarVisualHidden else { return }
+                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) {
+                        isTabBarVisualHidden = false
                     }
                 }
 
@@ -263,7 +276,7 @@ struct RootView: View {
                 // falling through to the Library content beneath it.
                 // Hidden while the FAB menu is open — the mascot overlaps
                 // the bottom-right corner of the menu card.
-                if selectedTab == .library && !isFABMenuOpen {
+                if selectedTab == .library && !isFABMenuOpen && !isLibraryViewAllVisible {
                     VStack {
                         Spacer(minLength: 0)
                         HStack {

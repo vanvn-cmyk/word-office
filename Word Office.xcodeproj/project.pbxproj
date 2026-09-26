@@ -638,6 +638,11 @@
 			package = 84E38DB530412DCD007F4CB1 /* XCRemoteSwiftPackageReference "GRDB" */;
 			productName = GRDB;
 		};
+		AD0B1C2D3E4F506172839402 /* GoogleMobileAds */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8470FBB93066EB61002F44B8 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */;
+			productName = GoogleMobileAds;
+		};
 		DD11AA22BB33CC44DD55EE77 /* Lottie */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 84909D5F3063988A006A9D3F /* XCRemoteSwiftPackageReference "lottie-spm" */;
@@ -647,11 +652,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = FC438DB530412DCD00FC4CB1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseCore;
-		};
-		AD0B1C2D3E4F506172839402 /* GoogleMobileAds */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 8470FBB93066EB61002F44B8 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */;
-			productName = GoogleMobileAds;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

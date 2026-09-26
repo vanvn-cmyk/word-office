@@ -42,8 +42,12 @@ extension View {
     /// Visual hide only — pill hides, safeAreaInset (constant 150pt)
     /// stays reserved. Use for scroll-based auto-hide where the pill
     /// flickers away mid-scroll but content position must NOT change.
+    /// ORs into the subtree's value instead of overwriting it, so an outer
+    /// `hidesTabBarVisually(false)` can't cancel an inner scroll auto-hide.
     func hidesTabBarVisually(_ hidden: Bool = true) -> some View {
-        preference(key: TabBarVisualHiddenPreferenceKey.self, value: hidden)
+        transformPreference(TabBarVisualHiddenPreferenceKey.self) { value in
+            value = value || hidden
+        }
     }
 
     /// Zeroes out this subtree's `TabBarVisualHiddenPreferenceKey` contribution
