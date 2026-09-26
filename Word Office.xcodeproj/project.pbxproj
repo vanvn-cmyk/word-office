@@ -431,6 +431,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Word Office-Info.plist";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Word Office uses your camera to scan physical documents and convert them into editable text.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Word Office accesses your photos so you can import images as document pages for text recognition.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
@@ -483,6 +484,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Word Office-Info.plist";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Word Office uses your camera to scan physical documents and convert them into editable text.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Word Office accesses your photos so you can import images as document pages for text recognition.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;

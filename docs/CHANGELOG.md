@@ -6,6 +6,51 @@ Format tham khảo [Keep a Changelog](https://keepachangelog.com/). Entry mới 
 
 ---
 
+## [Unreleased] — 2026-09-26b (auto-inserted "1" fix + AdMob launch crash + paywall defaults)
+
+### 🐛 Word doc auto-fills with "111…" on open (no typing, no tap)
+**File:** `Views/Editor/OfficeEditorViewController.swift` (injected `reportSlides()` script)
+
+`reportSlides()` runs for EVERY doc type at 3/6/10/20/30s after load. When `tot <= 1` it brute-forced every `Asc.editor` method whose name matched `/count|pages|slides/i`, calling each with no args. In the Word SDK that hit **`asc_AddPageCount`**, which inserts a `NUMPAGES` field at the cursor → a "1" on a 1-page doc, one more per pass. Saved DOCX showed `<w:fldSimple w:instr="NUMPAGES">1</w:fldSimple>` repeated.
+
+Fix: brute-force removed; fallback is now the read-only `ed.getCountPages()` (same getter `editor.html` `_reportSlidePos` already uses for the PPT strip).
+
+**Side finding**: in the Slide SDK the same sweep also matched `asc_moveSlidesNextPos/PrevPos`, `asc_moveSelectedSlidesToEnd/Start`, `SelectAllSlides`, `changeSlideSize` on single-slide decks — also no longer called.
+
+**Diagnosis notes** (don't re-walk): not keyboard proxy, not `ooInjectInput`, no DOM key/input events, not `asc_AddText`/`asc_insertSymbol`, not clipboard, not the Mac hardware keyboard. Found by reading the saved DOCX XML. Never call SDK methods by name pattern.
+
+---
+
+### 🐛 Keyboard auto-opens on Word/Excel ready — disabled
+**File:** `Views/Editor/OfficeEditorViewController.swift` (`case .ready`)
+
+Removed the +0.8s `becomeFirstResponder()`; keyboard now appears only when the user taps the page (`.focusKeyboard`). Also a suspected cause of the first-open blank Word doc (keyboard resize during cold canvas paint) — **not yet confirmed**, re-check on a cold first create.
+
+---
+
+### 🐛 App launched to a white screen (SIGABRT in `GADApplicationVerifyPublisherInitializedCorrectly`)
+**Files:** `Word Office-Info.plist` (new, repo root), `Word Office.xcodeproj/project.pbxproj`
+
+Google Mobile Ads aborts at startup without `GADApplicationIdentifier`. Target uses a generated Info.plist, so added a partial plist merged via `INFOPLIST_FILE` (Debug + Release) with Google's **test** App ID `ca-app-pub-3940256099942544~1458002511`. Kept outside the synchronized `Word Office/` folder to avoid a duplicate Info.plist build error.
+
+⚠️ **Before release**: replace with the real AdMob App ID, and the test ad unit in `AppOpenAdService.swift`.
+
+---
+
+### ✨ Paywall defaults
+**Files:** `Views/Paywall/PaywallView.swift`, `ViewModels/PaywallViewModel.swift`
+
+- Default plan Yearly → **Weekly** (both `selectedPlan` and `selectedOfferID`)
+- Yearly CTA "Get Yearly Access" → **"Subscribe Now"**
+- Prices still placeholders: `Product.products` fetch exists but returns empty (no `.storekit` config, products not live in ASC) — deferred by user.
+
+---
+
+### ⚠️ Tooling note
+`OfficeBundle` is a folder reference: editing `editor.html` alone does NOT get re-copied on incremental builds. `touch OfficeBundle` before building, or the app runs stale JS.
+
+---
+
 ## [Unreleased] — 2026-09-26 (GoogleMobileAds build fix) — commit `950b2b0`
 
 ### 🐛 Build failed: `No such module 'GoogleMobileAds'` / `Unable to resolve module dependency`

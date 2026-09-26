@@ -32,7 +32,7 @@ final class PaywallViewModel {
         Offer(id: kYearlyID,  title: "Yearly",  period: "Billed once a year",    trialLabel: nil),
     ]
 
-    var selectedOfferID: String = kYearlyID
+    var selectedOfferID: String = kWeeklyID
     private(set) var status: Status = .idle
 
     /// Fetched StoreKit products keyed by product ID.
@@ -56,7 +56,7 @@ final class PaywallViewModel {
         case .succeeded:  return "Welcome to Premium 🎉"
         case .failed:     return "Try Again"
         case .idle:
-            return selectedOffer?.trialLabel != nil ? "Start Free Trial" : "Get Yearly Access"
+            return selectedOffer?.trialLabel != nil ? "Start Free Trial" : "Subscribe Now"
         }
     }
 

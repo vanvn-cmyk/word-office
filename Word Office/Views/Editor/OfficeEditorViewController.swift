@@ -740,23 +740,11 @@ final class OfficeEditorViewController: UIViewController {
                                 try { tot = ed[totFns[j]]() || 1; break; } catch(_) {}
                             }
                         }
-                        // Brute-force: try ALL methods containing "count"/"pages"/"slides"
-                        if (tot <= 1) {
-                            try {
-                                var _obj2 = ed;
-                                for (var _qi = 0; _qi < 5 && _obj2 && tot <= 1; _qi++) {
-                                    Object.getOwnPropertyNames(_obj2).forEach(function(m) {
-                                        if (tot > 1) return;
-                                        if (!/count|pages|slides/i.test(m)) return;
-                                        if (typeof _obj2[m] !== 'function') return;
-                                        try {
-                                            var v = ed[m]();
-                                            if (typeof v === 'number' && v > 1) tot = v;
-                                        } catch(_) {}
-                                    });
-                                    _obj2 = Object.getPrototypeOf(_obj2);
-                                }
-                            } catch(_) {}
+                        // Read-only getter only. Never call methods by name pattern: a blind
+                        // /count|pages/ sweep hit Word's asc_AddPageCount (inserted a NUMPAGES
+                        // field "1" on every pass) and PPT's slide-moving methods.
+                        if (tot <= 1 && typeof ed.getCountPages === 'function') {
+                            try { tot = ed.getCountPages() || 1; } catch(_) {}
                         }
                         // Dump available slide/page/panel methods to Xcode console
                         try {
@@ -1295,15 +1283,9 @@ extension OfficeEditorViewController: OfficeBridgeDelegate {
         case .ready:
             editorLoaded = true
             onReady?()
-            // Auto-keyboard for Word/Excel: show keyboard after OO is fully rendered.
-            // Moved from JS onDocumentReady (+400ms) to here (+800ms) so cold-load canvas
-            // finishes painting before the keyboard resize fires — prevents blank content.
-            if currentDocType == "word" || currentDocType == "cell" {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
-                    guard let self, self.isEditorVisible else { return }
-                    _ = self.ooKeyboardProxy?.becomeFirstResponder()
-                }
-            }
+            // Auto-keyboard on ready is temporarily disabled: the keyboard only appears
+            // once the user taps the page (.focusKeyboard). The keyboard resize during a
+            // cold-load canvas paint was a known cause of blank Word/Excel content.
             // Delay filter interception by 3s so OO can restore any saved state
             // (auto-opened filter panels, view settings) without triggering native sheet.
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in

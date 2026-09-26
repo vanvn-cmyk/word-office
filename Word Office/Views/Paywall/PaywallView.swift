@@ -28,7 +28,7 @@ struct PaywallView: View {
 
     @State private var vm = PaywallViewModel()
     // Yearly selected by default — higher value, most apps highlight the annual plan.
-    @State private var selectedPlan: Plan = .yearly
+    @State private var selectedPlan: Plan = .weekly
 
     /// Close X visibility. Starts `false` on every fresh present so the
     /// user reads the hero for a beat before an exit affordance appears
@@ -285,7 +285,7 @@ struct PaywallView: View {
             // CTA copy names the actual next action — Weekly has a
             // trial to start, Monthly doesn't, so "Continue" (generic)
             // only fits the no-trial path.
-            DSPrimaryButton(title: vm.isBusy ? LocalizedStringKey(vm.ctaLabel) : (selectedPlan == .weekly ? "Start Trial Now" : "Get Yearly Access")) {
+            DSPrimaryButton(title: vm.isBusy ? LocalizedStringKey(vm.ctaLabel) : (selectedPlan == .weekly ? "Start Trial Now" : "Subscribe Now")) {
                 vm.selectedOfferID = selectedPlan.productID
                 Task { await vm.purchase() }
             }
