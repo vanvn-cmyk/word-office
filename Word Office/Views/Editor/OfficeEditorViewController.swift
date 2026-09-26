@@ -192,52 +192,14 @@ final class OfficeEditorViewController: UIViewController {
         pc.present(animated: true, completionHandler: nil)
     }
 
-    /// Inserts an image by storing it in OfficeSchemeHandler and choosing the
-    /// correct JS path per document type.
-    ///
-    /// Word/PPT: `window.insertImageByURL` → cache-registers a blob: URL → `AddImageUrl`.
-    /// Excel ("cell"): `insertImageByURL` hangs because `AddImageUrl` triggers OO's WASM
-    /// fetcher on a blob: URL it hasn't pre-cached — "Loading Image" never resolves.
-    /// Fix: fetch office:// in the outer frame, create blob in inner frame, then call
-    /// `asc_addImageDrawingObject([blobURL])` directly — Excel's drawing API, no WASM path.
+    /// Inserts an image by storing it in OfficeSchemeHandler and handing it to
+    /// `window.insertImageViaUpload`, which runs ONLYOFFICE's own "insert image from file"
+    /// flow (`asc_addImage` + upload). That registers the image as document media, so it
+    /// renders in Word/Excel/PPT and is kept when the file is saved.
     func insertImage(data: Data, mimeType: String = "image/jpeg") {
         guard scriptReady else { return }
         let officeURL = schemeHandler.storeImage(data: data, mimeType: mimeType)
-        let urlJS  = jsStringLiteral(officeURL)
-
-        guard currentDocType == "cell" else {
-            webView.evaluateJavaScript("window.insertImageByURL(\(urlJS));")
-            return
-        }
-
-        // Excel-specific path: bypass AddImageUrl → go straight to asc_addImageDrawingObject.
-        let mimeJS = jsStringLiteral(mimeType)
-        let js = """
-        (function(oURL, mime) {
-            var _w = null;
-            try { _w = window.frames['frameEditor']; } catch(_) {}
-            if (!_w) { try { var _f = document.getElementById('frameEditor'); _w = _f && _f.contentWindow; } catch(_) {} }
-            if (!_w) { console.warn('[iOS-xl] insertImage: no inner frame'); return; }
-            fetch(oURL)
-                .then(function(r) { return r.arrayBuffer(); })
-                .then(function(ab) {
-                    var iURL    = _w.URL  || URL;
-                    var blobURL = iURL.createObjectURL(new (_w.Blob || Blob)([new (_w.Uint8Array || Uint8Array)(ab)], { type: mime }));
-                    var ed = _w.Asc && _w.Asc.editor;
-                    if (!ed) { iURL.revokeObjectURL(blobURL); console.warn('[iOS-xl] insertImage: editor not ready'); return; }
-                    var done = false;
-                    ['asc_addImageDrawingObject', 'asc_insertImageFromUrl', 'AddImageUrl'].forEach(function(m) {
-                        if (done || typeof ed[m] !== 'function') return;
-                        try { ed[m]([blobURL]); done = true; console.log('[iOS-xl] insertImage via', m); }
-                        catch(e) { console.warn('[iOS-xl] insertImage', m, e); }
-                    });
-                    if (!done) console.warn('[iOS-xl] insertImage: no API worked');
-                    setTimeout(function() { try { iURL.revokeObjectURL(blobURL); } catch(_) {} }, 6000);
-                })
-                .catch(function(e) { console.warn('[iOS-xl] insertImage fetch:', e); });
-        })(\(urlJS), \(mimeJS));
-        """
-        webView.evaluateJavaScript(js)
+        webView.evaluateJavaScript("window.insertImageViaUpload(\(jsStringLiteral(officeURL)));")
     }
 
     /// Sends the user's filter selection back to the hidden OO filter panel.

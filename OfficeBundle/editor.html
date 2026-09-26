@@ -6082,6 +6082,55 @@
     // Fix: pre-register blobURL in AscCommon.Ew via y3a({key: blobURL}) so srb(blobURL)
     //   returns truthy → ccf skips the WASM fetcher → calls sUa([blobURL]) directly →
     //   yo.Efa preloads from blob: URL → yo.$D resolves → inline image inserted.
+    // Inserts an image through ONLYOFFICE's own "Insert image from file" flow: asc_addImage()
+    // opens its hidden <input id="apiiuFile">, which we fill with the picked image instead of
+    // showing a picker. OO then uploads it to ../upload/<docId>, where EditorServer registers it
+    // as document media — so the image renders in Word/Excel/PPT and is written into the saved
+    // file (the older blob-URL paths skipped that registration and lost images on save).
+    window.insertImageViaUpload = function(officeURL) {
+      var ed = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+      if (!ed || typeof ed.asc_addImage !== 'function' || typeof _innerWin.DataTransfer !== 'function') {
+        window.insertImageByURL(officeURL);
+        return;
+      }
+      fetch(officeURL)
+        .then(function(r) {
+          var mime = (r.headers && r.headers.get('content-type')) || 'image/jpeg';
+          return r.arrayBuffer().then(function(ab) { return { ab: ab, mime: mime }; });
+        })
+        .then(function(d) {
+          var ext  = d.mime.indexOf('png') !== -1 ? 'png' : 'jpg';
+          var file = new _innerWin.File([new _innerWin.Uint8Array(d.ab)], 'image.' + ext, { type: d.mime });
+          var dt   = new _innerWin.DataTransfer();
+          dt.items.add(file);
+
+          var proto     = _innerWin.HTMLInputElement.prototype;
+          var origClick = proto.click;
+          var restored  = false;
+          var restore   = function() { if (!restored) { restored = true; proto.click = origClick; } };
+          proto.click = function() {
+            if (this.type !== 'file') return origClick.apply(this, arguments);
+            restore();
+            try { this.files = dt.files; } catch(e) { console.warn('[iOS] insertImageViaUpload set files:', e); }
+            this.dispatchEvent(new _innerWin.Event('change', { bubbles: true }));
+          };
+          setTimeout(restore, 3000);
+
+          try { _innerWin.focus(); } catch(_) {}
+          try {
+            ed.asc_addImage();
+          } catch(e) {
+            restore();
+            console.warn('[iOS] insertImageViaUpload asc_addImage:', e);
+            try { if (window._showInsertToast) window._showInsertToast('Could not insert image'); } catch(_) {}
+          }
+        })
+        .catch(function(e) {
+          console.warn('[iOS] insertImageViaUpload fetch:', e);
+          try { if (window._showInsertToast) window._showInsertToast('Could not insert image'); } catch(_) {}
+        });
+    };
+
     window.insertImageByURL = function(officeURL) {
       if (!_innerWin) return;
       window._filterInterceptEnabled = false;
