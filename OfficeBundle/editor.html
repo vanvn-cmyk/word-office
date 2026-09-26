@@ -976,6 +976,149 @@
       iDoc.addEventListener('touchcancel', _end, { capture: true, passive: true });
     }
 
+    // Excel formula-range handles. While a formula is typed and a reference is picked by tapping
+    // a cell, OO draws the reference box (in a reference color) on #ws-canvas-overlay with tiny
+    // resize squares on its corners — too small for a finger, and WKWebView never turns a touch
+    // drag into the pointer drag OO needs. We locate the box from the overlay pixels, show two
+    // round handles on its corners, and replay a handle drag as a pointer drag on that corner,
+    // so OO itself extends the reference (e.g. B11 -> B11:B15).
+    function _installFormulaRangeHandles(iDoc, innerWin) {
+      if (_currentDocType !== 'cell' || !iDoc || iDoc.__ooRangeHandles) return;
+      iDoc.__ooRangeHandles = true;
+      var SIZE = 24, SEARCH = 320;
+      var handles = null, box = null, drag = null;
+
+      function formulaText() {
+        var el = iDoc.querySelector('#ce-cell-content');
+        if (!el) return '';
+        return String((typeof el.value === 'string' && el.value) || el.innerText || el.textContent || '');
+      }
+      function isFormulaMode() { return formulaText().trim().charAt(0) === '='; }
+
+      function ensureHandles() {
+        if (handles || !iDoc.body) return handles;
+        handles = ['tl', 'br'].map(function(corner) {
+          var h = iDoc.createElement('div');
+          h.style.cssText = 'position:fixed;z-index:2147483000;width:' + SIZE + 'px;height:' + SIZE + 'px;' +
+            'margin:-' + (SIZE / 2) + 'px 0 0 -' + (SIZE / 2) + 'px;border-radius:50%;background:#48795c;' +
+            'box-shadow:0 0 0 2px #fff,0 1px 4px rgba(0,0,0,.3);display:none;touch-action:none;';
+          h.__corner = corner;
+          ['touchstart', 'touchmove', 'touchend'].forEach(function(t) {
+            h.addEventListener(t, function(e) { e.preventDefault(); e.stopPropagation(); }, { passive: false });
+          });
+          h.addEventListener('pointerdown', onHandleDown);
+          h.addEventListener('pointermove', onHandleMove);
+          h.addEventListener('pointerup', onHandleUp);
+          h.addEventListener('pointercancel', onHandleUp);
+          iDoc.body.appendChild(h);
+          return h;
+        });
+        return handles;
+      }
+      function hide() { if (handles) handles.forEach(function(h) { h.style.display = 'none'; }); }
+      function place(h, x, y) { h.style.left = x + 'px'; h.style.top = y + 'px'; h.style.display = 'block'; }
+      function show() {
+        if (!box || !ensureHandles()) return;
+        place(handles[0], box.l, box.t);
+        place(handles[1], box.r, box.b);
+      }
+
+      // Reference box enclosing (px, py): walk left from the point to the first reference-colored
+      // border pixel, then take the bounding box of that color near the point.
+      function findRefBox(px, py) {
+        var ov = iDoc.getElementById('ws-canvas-overlay');
+        if (!ov) return null;
+        var rc = ov.getBoundingClientRect();
+        if (!rc.width) return null;
+        var k = ov.width / rc.width;
+        var x0 = Math.max(0, Math.floor((px - rc.left - SEARCH) * k)), y0 = Math.max(0, Math.floor((py - rc.top - SEARCH) * k));
+        var x1 = Math.min(ov.width, Math.ceil((px - rc.left + SEARCH) * k)), y1 = Math.min(ov.height, Math.ceil((py - rc.top + SEARCH) * k));
+        if (x1 <= x0 || y1 <= y0) return null;
+        var w = x1 - x0, hgt = y1 - y0, data;
+        try { data = ov.getContext('2d').getImageData(x0, y0, w, hgt).data; } catch(_) { return null; }
+        function px4(x, y) { var i = (y * w + x) * 4; return [data[i], data[i + 1], data[i + 2], data[i + 3]]; }
+        function isRefColor(c) {
+          if (c[3] < 200) return false;
+          var mx = Math.max(c[0], c[1], c[2]), mn = Math.min(c[0], c[1], c[2]);
+          if (mx - mn < 60) return false;                                          // gray/white chrome
+          if (Math.abs(c[0] - 72) < 10 && Math.abs(c[1] - 121) < 10 && Math.abs(c[2] - 92) < 10) return false; // active-cell green
+          return true;
+        }
+        var cx = Math.round((px - rc.left) * k) - x0, cy = Math.round((py - rc.top) * k) - y0;
+        if (cx < 0 || cy < 0 || cx >= w || cy >= hgt) return null;
+        var color = null;
+        for (var x = cx; x >= 0; x--) { var c = px4(x, cy); if (isRefColor(c)) { color = c; break; } }
+        if (!color) return null;
+        var l = 1e9, t = 1e9, r = -1, b = -1;
+        for (var y = 0; y < hgt; y++) {
+          for (var xx = 0; xx < w; xx++) {
+            var i = (y * w + xx) * 4;
+            if (data[i + 3] > 200 && Math.abs(data[i] - color[0]) < 8 && Math.abs(data[i + 1] - color[1]) < 8 && Math.abs(data[i + 2] - color[2]) < 8) {
+              if (xx < l) l = xx; if (y < t) t = y; if (xx > r) r = xx; if (y > b) b = y;
+            }
+          }
+        }
+        if (r < 0) return null;
+        var out = { l: rc.left + (x0 + l) / k, t: rc.top + (y0 + t) / k, r: rc.left + (x0 + r + 1) / k, b: rc.top + (y0 + b + 1) / k };
+        if (px < out.l - 2 || px > out.r + 2 || py < out.t - 2 || py > out.b + 2) return null;
+        return out;
+      }
+
+      function refresh(px, py) {
+        setTimeout(function() {
+          if (drag || !isFormulaMode()) { if (!drag) { box = null; hide(); } return; }
+          box = findRefBox(px, py);
+          if (box) show(); else hide();
+        }, 90);
+      }
+
+      function fire(type, x, y, buttons) {
+        var tgt = drag && drag.target;
+        if (!tgt) return;
+        tgt.dispatchEvent(new innerWin.PointerEvent(type, {
+          bubbles: true, cancelable: true, view: innerWin, clientX: x, clientY: y, screenX: x, screenY: y,
+          button: 0, buttons: buttons, pointerId: 91, pointerType: 'mouse', isPrimary: true
+        }));
+      }
+      function onHandleDown(e) {
+        e.preventDefault(); e.stopPropagation();
+        if (!box) return;
+        try { e.currentTarget.setPointerCapture(e.pointerId); } catch(_) {}
+        var br = e.currentTarget.__corner === 'br';
+        var cx = br ? box.r - 1 : box.l + 1, cy = br ? box.b - 1 : box.t + 1;
+        hide();
+        var target = iDoc.elementFromPoint(cx, cy);
+        drag = { handle: e.currentTarget, br: br, dx: e.clientX - cx, dy: e.clientY - cy, target: target,
+                 anchorX: br ? box.l + 2 : box.r - 2, anchorY: br ? box.t + 2 : box.b - 2 };
+        e.currentTarget.style.display = 'block';
+        fire('pointerdown', cx, cy, 1);
+      }
+      function onHandleMove(e) {
+        if (!drag || e.currentTarget !== drag.handle) return;
+        e.preventDefault(); e.stopPropagation();
+        place(drag.handle, e.clientX - drag.dx, e.clientY - drag.dy);
+        fire('pointermove', e.clientX - drag.dx, e.clientY - drag.dy, 1);
+      }
+      function onHandleUp(e) {
+        if (!drag || e.currentTarget !== drag.handle) return;
+        e.preventDefault(); e.stopPropagation();
+        fire('pointerup', e.clientX - drag.dx, e.clientY - drag.dy, 0);
+        var ax = drag.anchorX, ay = drag.anchorY;
+        drag = null;
+        refresh(ax, ay);
+      }
+
+      // A real tap/drag on the sheet: hide while it happens, then re-read the reference box.
+      iDoc.addEventListener('pointerdown', function(e) {
+        if (!e.isTrusted || (handles && handles.indexOf(e.target) !== -1)) return;
+        hide();
+      }, true);
+      iDoc.addEventListener('pointerup', function(e) {
+        if (!e.isTrusted || (handles && handles.indexOf(e.target) !== -1)) return;
+        refresh(e.clientX, e.clientY);
+      }, true);
+    }
+
     function installTouchEditingBridge(iDoc, innerWin) {
       // Guard on the Document object (not the Window): OO navigates frameEditor to a new
       // URL, but same-origin navigation PRESERVES the contentWindow object, so a window-
@@ -984,6 +1127,7 @@
       if (!innerWin || !iDoc || iDoc.__touchEditingBridgeInstalled) return;
       iDoc.__touchEditingBridgeInstalled = true;
       _ooTrackTouches(iDoc);
+      _installFormulaRangeHandles(iDoc, innerWin);
 
       // 1. Long-press → contextmenu -------------------------------------------
       var HOLD_MS = 500, MOVE_TOLERANCE_PX = 10;
