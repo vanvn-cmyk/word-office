@@ -939,6 +939,43 @@
     // stub frame (onAppReady) and again on the live OO document after
     // _reInjectOO() detects the real editor has loaded — same-origin navigation
     // preserves the contentWindow object, so the guard correctly no-ops the 2nd call.
+    // Excel: keyboard requests are held while a finger is down. Raising the keyboard (or its accessory
+    // bar) mid-touch shrinks the WebView; OO then reads the resize/scroll as a drag with the
+    // button still pressed and extends the selection from the tap point. Posting after touchend
+    // lets OO finish its mouseup first, so a tap just places the caret.
+    var _ooTouchActive = false, _ooKbdPending = false, _ooKbdFlushTimer = null;
+    function _ooPostFocusKeyboard() {
+      try { window.webkit.messageHandlers.editorBridge.postMessage({action:'focusKeyboard'}); } catch(_kf) {}
+    }
+    function _ooRequestKeyboard() {
+      // Excel only — Word/PPT keep raising the keyboard immediately (unchanged behavior).
+      if (_currentDocType !== 'cell' || !_ooTouchActive) { _ooPostFocusKeyboard(); return; }
+      _ooKbdPending = true;
+    }
+    function _ooTrackTouches(iDoc) {
+      if (_currentDocType !== 'cell' || !iDoc || iDoc.__ooTouchTracked) return;
+      iDoc.__ooTouchTracked = true;
+      iDoc.addEventListener('touchstart', function(e) {
+        if (!e.isTrusted) return;
+        _ooTouchActive = true;
+        if (_ooKbdFlushTimer) { clearTimeout(_ooKbdFlushTimer); _ooKbdFlushTimer = null; }
+      }, { capture: true, passive: true });
+      var _end = function(e) {
+        if (!e.isTrusted) return;
+        if (e.touches && e.touches.length > 0) return;
+        _ooTouchActive = false;
+        if (!_ooKbdPending) return;
+        _ooKbdFlushTimer = setTimeout(function() {
+          _ooKbdFlushTimer = null;
+          if (_ooTouchActive || !_ooKbdPending) return;
+          _ooKbdPending = false;
+          _ooPostFocusKeyboard();
+        }, 120);
+      };
+      iDoc.addEventListener('touchend', _end, { capture: true, passive: true });
+      iDoc.addEventListener('touchcancel', _end, { capture: true, passive: true });
+    }
+
     function installTouchEditingBridge(iDoc, innerWin) {
       // Guard on the Document object (not the Window): OO navigates frameEditor to a new
       // URL, but same-origin navigation PRESERVES the contentWindow object, so a window-
@@ -946,6 +983,7 @@
       // Keying on iDoc ensures each new document gets its own listener.
       if (!innerWin || !iDoc || iDoc.__touchEditingBridgeInstalled) return;
       iDoc.__touchEditingBridgeInstalled = true;
+      _ooTrackTouches(iDoc);
 
       // 1. Long-press → contextmenu -------------------------------------------
       var HOLD_MS = 500, MOVE_TOLERANCE_PX = 10;
@@ -1036,7 +1074,7 @@
             var _intercept = _isPPT ? (_id === '_oo_ppt_kbd') : (_id === 'area_id' || _id === '_oo_ppt_kbd');
             if (_intercept) {
               // Tell Swift → UITextField becomes iOS first responder for keyboard input
-              try { window.webkit.messageHandlers.editorBridge.postMessage({action:'focusKeyboard'}); } catch(_kf) {}
+              _ooRequestKeyboard();
               // Word/Excel: MUST call original — OO needs area_id in DOM focus for cursor.
               // PPT: do NOT call original — focusing _oo_ppt_kbd in DOM causes WKWebView to
               //   show its own keyboard for that inner <input>, competing with UITextField.
