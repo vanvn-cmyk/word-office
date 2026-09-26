@@ -154,11 +154,15 @@ final class OfficeSchemeHandler: NSObject, WKURLSchemeHandler {
         let path = rawPath
         let fileURL = bundleURL.appendingPathComponent(path)
         let mime = mimeType(for: fileURL.pathExtension)
+        // Only a subset of ONLYOFFICE's font files ships in OfficeBundle/fonts. A missing face
+        // stops the editor with "Fonts are not loaded", so serve DejaVu Sans (fonts/068, the
+        // widest coverage we bundle) in its place; text still renders with a substitute font.
+        let fallbackFontURL = path.hasPrefix("fonts/") ? bundleURL.appendingPathComponent("fonts/068") : nil
 
         // Read on a background queue — x2t.wasm is 63 MB and would block the
         // main thread long enough to trigger a watchdog warning if read inline.
         ioQueue.async { [weak self] in
-            let data = try? Data(contentsOf: fileURL)
+            let data = (try? Data(contentsOf: fileURL)) ?? fallbackFontURL.flatMap { try? Data(contentsOf: $0) }
             DispatchQueue.main.async {
                 guard let self, self.activeTasks.contains(taskId) else { return }
                 if let data {
