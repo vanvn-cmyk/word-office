@@ -1763,23 +1763,29 @@
               return;
             }
             try {
-              // OO v9 Word: add_Hyperlink(asc_CHyperlink) — confirmed method in sdk-all-min.js
+              // Same objects OO's own hyperlink dialogs build for each editor.
               var _Asc = _innerWin.Asc || {};
-              var _HlCls = _Asc.asc_CHyperlink;
-              if (_HlCls && typeof _ed.add_Hyperlink === 'function') {
-                var _hl = new _HlCls();
-                if (typeof _hl.asc_setHyperlinkUrl === 'function') _hl.asc_setHyperlinkUrl(url);
-                if (typeof _hl.asc_setTooltip      === 'function') _hl.asc_setTooltip(url);
-                _ed.add_Hyperlink(_hl);
-              } else if (_HlCls && typeof _ed.change_Hyperlink === 'function') {
-                var _hl2 = new _HlCls();
-                if (typeof _hl2.asc_setHyperlinkUrl === 'function') _hl2.asc_setHyperlinkUrl(url);
-                _ed.change_Hyperlink(_hl2);
-              } else {
-                // Fallback: click OO's hyperlink toolbar button (opens OO dialog)
-                if (!_clickOOBtn(['hyperlink','insert link','add link','insert hyperlink'])) {
+              url = String(url || '').trim();
+              text = String(text || '').trim();
+              var _href = /^[a-z][a-z0-9+.-]*:/i.test(url) ? url : 'https://' + url;
+              var _label = text || url;
+              if (_currentDocType === 'cell') {
+                if (typeof _Asc.asc_CHyperlink !== 'function' || typeof _ed.asc_insertHyperlink !== 'function') {
                   _showInsertToast('Link insert not available in this editor version');
+                } else {
+                  var _xl = new _Asc.asc_CHyperlink();
+                  _xl.asc_setType(_Asc.c_oAscHyperlinkType.WebLink);
+                  _xl.asc_setHyperlinkUrl(_href);
+                  _xl.asc_setText(_label);
+                  _ed.asc_insertHyperlink(_xl);
                 }
+              } else if (typeof _Asc.CHyperlinkProperty === 'function' && typeof _ed.add_Hyperlink === 'function') {
+                var _hp = new _Asc.CHyperlinkProperty();
+                _hp.put_Value(_href);
+                _hp.put_Text(_label);
+                _ed.add_Hyperlink(_hp);
+              } else {
+                _showInsertToast('Link insert not available in this editor version');
               }
             } catch(e) { _showInsertToast('Link insert failed — please try again'); }
             setTimeout(function() {
