@@ -1873,10 +1873,37 @@
               var _done = false;
               try { localStorage.setItem('_oo_insert_pending', 'chart'); } catch(_) {}
 
+              // ── Excel ('cell'): same flow as OO's own toolbar — chart settings from the current
+              // selection, set the type, validate the data range, then add the chart object.
+              if (_currentDocType === 'cell') {
+                try {
+                  var _cts = Asc && Asc.c_oAscChartTypeSettings;
+                  var _cellKey = { column:'barNormal', bar:'hBarNormal', line:'lineNormal', pie:'pie', area:'areaNormal', scatter:'scatter' }[type] || 'barNormal';
+                  var _props = typeof _ed.asc_getChartSettings === 'function' ? _ed.asc_getChartSettings(true) : null;
+                  if (!_props || !_cts || typeof _ed.asc_addChartDrawingObject !== 'function') {
+                    _showInsertToast('Chart insert not available');
+                  } else {
+                    _props.putType(_cts[_cellKey]);
+                    var _range = _props.getRange();
+                    var _noErr = Asc.c_oAscError.ID.No;
+                    var _rangeErr = !_range ? _noErr : _ed.asc_checkDataRange(Asc.c_oAscSelectionDialogType.Chart, _range, true, _props.getInRows(), _props.getType());
+                    if (_rangeErr === _noErr) {
+                      _ed.asc_addChartDrawingObject(_props);
+                    } else {
+                      _showInsertToast('Select a data range with numbers first');
+                    }
+                  }
+                } catch(e) {
+                  console.warn('[iOS] _insertChart (cell):', e);
+                  _showInsertToast('Could not insert chart');
+                }
+                _done = true;
+              }
+
               // ── Word / Presentation: try CChartSpace first (required by some ONLYOFFICE builds),
               // then fall back to plain params. asc_addChartDrawing is NEVER called here — it is a
               // spreadsheet-only WASM export and causes an uncatchable crash in Word/PPT.
-              if (!_done && _currentDocType !== 'spreadsheet') {
+              if (!_done && _currentDocType !== 'cell') {
                 // Attempt 0: asc_openChartFrame — opens OO's built-in chart wizard (Word/PPT)
                 if (!_done && typeof _ed.asc_openChartFrame === 'function') {
                   try { _ed.asc_openChartFrame(null); _done = true; console.log('[iOS] _insertChart: asc_openChartFrame OK'); } catch(e) { console.warn('[iOS] asc_openChartFrame:', e); }
@@ -1921,30 +1948,6 @@
                     _done = true;
                   } catch(_) {}
                 }
-              }
-
-              // ── Spreadsheet ONLY: asc_addChartDrawing is a spreadsheet-only WASM export.
-              // Calling it in Word/PPT editor causes an uncatchable WASM RuntimeError (process crash).
-              // NEVER call it when docType is not 'spreadsheet', even as a fallback.
-              if (!_done && _currentDocType === 'spreadsheet' && typeof _ed.asc_addChartDrawing === 'function') {
-                try {
-                  var sp = null;
-                  if (typeof Asc.CChartSpace === 'function') {
-                    try {
-                      sp = new Asc.CChartSpace();
-                      sp.type = chartNum;
-                      if (typeof Asc.CChart === 'function') {
-                        var ch = new Asc.CChart(); ch.type = chartNum; ch.subtype = chartNum; sp.chart = ch;
-                      } else if (sp.chart && typeof sp.chart === 'object') { sp.chart.type = chartNum; }
-                    } catch(_) { sp = null; }
-                  }
-                  if (!sp) { sp = { type: chartNum, chart: { type: chartNum, subtype: chartNum, style: 1 } }; }
-                  // true = insert with default size (no blocking wizard/dialog)
-                  _ed.asc_addChartDrawing(sp, true);
-                  _done = true;
-                  try { _innerWin.dispatchEvent(new Event('resize')); } catch(_) {}
-                  console.log('[iOS] _insertChart: asc_addChartDrawing OK');
-                } catch(e) { console.warn('[iOS] asc_addChartDrawing:', e); }
               }
 
               if (!_done) {
