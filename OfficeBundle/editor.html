@@ -6117,6 +6117,9 @@
           proto.click = function() {
             if (this.type !== 'file') return origClick.apply(this, arguments);
             restore();
+            // OO only accepts the 'change' after its own 'click' listener armed the dialog.
+            // A plain Event (not a MouseEvent) runs that listener without opening a picker.
+            this.dispatchEvent(new _innerWin.Event('click'));
             try { this.files = dt.files; } catch(e) { console.warn('[iOS] insertImageViaUpload set files:', e); }
             this.dispatchEvent(new _innerWin.Event('change', { bubbles: true }));
           };
