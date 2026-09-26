@@ -1891,6 +1891,28 @@
         // Called by Swift's onDismiss after the native link sheet closes.
         // Disables filter interception for 1.5s so OO's own confirmation dialog / floating
         // combo-dataview that appears post-insert is NOT intercepted as a filter panel.
+        // Excel Formula tab: same call OO's own quick-function buttons make. Aggregates get
+        // OO's AutoSum range detection (=SUM(B11:B15)); other functions open as =IF() for the
+        // user to fill in.
+        var _EXCEL_AGGREGATES = { SUM:1, AVERAGE:1, COUNT:1, COUNTA:1, MAX:1, MIN:1, MEDIAN:1, STDEV:1, PRODUCT:1 };
+        window._insertExcelFunction = function(fn) {
+          var ed = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
+          var Asc = _innerWin && _innerWin.Asc;
+          if (_currentDocType !== 'cell' || !ed || typeof ed.asc_insertInCell !== 'function' || !Asc.c_oAscPopUpSelectorType) {
+            _showInsertToast('Formula insert not available');
+            return;
+          }
+          var name = fn;
+          try { if (typeof ed.asc_getFormulaLocaleName === 'function') name = ed.asc_getFormulaLocaleName(fn) || fn; } catch(_) {}
+          try {
+            ed.asc_insertInCell(name, Asc.c_oAscPopUpSelectorType.Func, !!_EXCEL_AGGREGATES[fn]);
+          } catch(e) {
+            console.warn('[iOS] _insertExcelFunction:', fn, e);
+            _showInsertToast('Could not insert ' + fn);
+          }
+        };
+        var _insertExcelFunction = window._insertExcelFunction;
+
         window._insertHyperlink = function(url, text) {
           if (!_innerWin) return;
           window._filterInterceptEnabled = false;
@@ -4845,9 +4867,7 @@
 
           // AutoSum: insert SUM formula for current range
           if (cmd === 'auto-sum') {
-            if (_clickOOBtn(['autosum','auto-sum','auto sum','sum','σ','∑'])) return;
-            if (_ed.asc_AutoSum) { _ed.asc_AutoSum(false); return; }
-            _innerWin.AscDesktopEditor && _innerWin.AscDesktopEditor.executeFocusedCommand('autosum');
+            if (window._insertExcelFunction) window._insertExcelFunction('SUM');
             return;
           }
 
@@ -4892,115 +4912,7 @@
 
           // Formula tab: begin entering a named function in the active cell.
           if (cmd.indexOf('formula-insert:') === 0) {
-            var _fn = cmd.slice(15); // 'SUM', 'AVERAGE', 'MAX', 'IF', etc.
-            var _formulaStr = '=' + _fn + '(';
-            window._filterInterceptEnabled = false;
-            try { _innerWin._ooInjectEnabled = false; } catch(_) {}
-
-            setTimeout(function() {
-              try { _innerWin.focus(); } catch(_) {}
-              var _fned = _innerWin && _innerWin.Asc && _innerWin.Asc.editor;
-              var iDoc  = _innerWin && _innerWin.document;
-              var _ade  = _innerWin && _innerWin.AscDesktopEditor;
-
-              var _restore = function() {
-                window._filterInterceptEnabled = true;
-                try { _innerWin._ooInjectEnabled = true; } catch(_) {}
-              };
-
-              if (!iDoc) { _restore(); return; }
-
-              // ── M1: CellInsertSumFunction for SUM (no dialog needed) ────────
-              if (_fn === 'SUM' && _ade) {
-                try {
-                  _ade.executeFocusedCommand('CellInsertSumFunction');
-                  console.log('[iOS] formula SUM via CellInsertSumFunction');
-                  setTimeout(_restore, 300);
-                  return;
-                } catch(_) {}
-              }
-
-              // ── M2: SetFormulaEditMode → formula bar DOM injection ──────────
-              if (_ade) {
-                try { _ade.executeFocusedCommand('SetFormulaEditMode'); } catch(_) {}
-              }
-
-              setTimeout(function() {
-                var _fbarEl = iDoc.querySelector('#ce-cell-content')
-                  || iDoc.querySelector('.cell-editing-box-right')
-                  || iDoc.querySelector('[id*="cell-content"][contenteditable]')
-                  || iDoc.querySelector('[contenteditable="true"]');
-
-                if (_fbarEl) {
-                  var _injected = false;
-                  // M2a: execCommand (WebKit-native, works on iOS contenteditable)
-                  try {
-                    _fbarEl.focus();
-                    iDoc.execCommand('selectAll', false, null);
-                    if (iDoc.execCommand('insertText', false, _formulaStr)) {
-                      _injected = true;
-                      console.log('[iOS] formula via execCommand insertText:', _formulaStr);
-                    }
-                  } catch(_) {}
-                  // M2b: textContent + InputEvent
-                  if (!_injected) {
-                    try {
-                      _fbarEl.focus();
-                      _fbarEl.textContent = _formulaStr;
-                      _fbarEl.dispatchEvent(new InputEvent('input', {
-                        data: _formulaStr, inputType: 'insertText', bubbles: true
-                      }));
-                      _injected = true;
-                      console.log('[iOS] formula via textContent:', _formulaStr);
-                    } catch(_) {}
-                  }
-                  // M2c: TextEvent (deprecated but still works in WebKit)
-                  if (!_injected) {
-                    try {
-                      _fbarEl.focus();
-                      var _te = iDoc.createEvent('TextEvent');
-                      _te.initTextEvent('textInput', true, true, null, _formulaStr, 9, 'en-US');
-                      _fbarEl.dispatchEvent(_te);
-                      _injected = true;
-                      console.log('[iOS] formula via TextEvent:', _formulaStr);
-                    } catch(_) {}
-                  }
-                  if (_injected) {
-                    // Cursor at end
-                    try {
-                      var _r = iDoc.createRange();
-                      _r.selectNodeContents(_fbarEl);
-                      _r.collapse(false);
-                      var _s = _innerWin.getSelection();
-                      if (_s) { _s.removeAllRanges(); _s.addRange(_r); }
-                    } catch(_) {}
-                    setTimeout(_restore, 500);
-                    return;
-                  }
-                }
-
-                // ── M3: asc_setCellValue / plugin API fallback ──────────────
-                var _inserted = false;
-                if (_fned) {
-                  var _setMethods = ['asc_setCellValue','asc_setInputData','asc_putCellData'];
-                  for (var _si = 0; _si < _setMethods.length; _si++) {
-                    if (typeof _fned[_setMethods[_si]] === 'function') {
-                      try {
-                        _fned[_setMethods[_si]](_formulaStr + ')');
-                        console.log('[iOS] formula via', _setMethods[_si]);
-                        _inserted = true; break;
-                      } catch(_) {}
-                    }
-                  }
-                }
-                // M4: WorksheetFunction command
-                if (!_inserted && _ade) {
-                  try { _ade.executeFocusedCommand('WorksheetFunction'); } catch(_) {}
-                }
-
-                setTimeout(_restore, 400);
-              }, 200);
-            }, 80);
+            if (window._insertExcelFunction) window._insertExcelFunction(cmd.slice(15));
             return;
           }
 
